@@ -25,6 +25,9 @@ env/
 data/*
 !data/.gitkeep
 
+# Claude Code — local overrides are machine-specific, never commit
+.claude/settings.local.json
+
 # IDE
 .vscode/
 .idea/
