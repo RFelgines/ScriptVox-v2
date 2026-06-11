@@ -1,0 +1,32 @@
+# ─── ScriptVox — pinned dependencies (major.minor) ───────────────────────────
+# Not installed yet. Run: pip install -r requirements.txt
+#
+# Compatibility note:
+#   SQLModel 0.0.38 requires SQLAlchemy 2.x and supports Pydantic V2 natively
+#   (Pydantic V2 compat introduced in SQLModel 0.0.14).
+#   FastAPI 0.136.x requires Pydantic V2.
+#   google-genai replaces the deprecated google-generativeai package.
+
+# ─── API framework ───────────────────────────────────────────────────────────
+fastapi~=0.136.0
+uvicorn[standard]~=0.34.0
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+sqlmodel~=0.0.38
+sqlalchemy~=2.0.0
+
+# ─── Validation ───────────────────────────────────────────────────────────────
+pydantic~=2.11.0
+
+# ─── Task queue ───────────────────────────────────────────────────────────────
+huey~=2.5.0
+
+# ─── HTTP client ──────────────────────────────────────────────────────────────
+httpx~=0.28.0
+
+# ─── LLM providers ───────────────────────────────────────────────────────────
+ollama~=0.4.0
+google-genai~=2.8.0
+
+# ─── Configuration ────────────────────────────────────────────────────────────
+python-dotenv~=1.0.0
