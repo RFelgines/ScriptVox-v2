@@ -30,3 +30,10 @@ google-genai~=2.8.0
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 python-dotenv~=1.0.0
+
+# ─── EPUB parsing ─────────────────────────────────────────────────────────────
+ebooklib~=0.18
+beautifulsoup4~=4.12
+
+# ─── File upload (required by FastAPI Form/File) ──────────────────────────────
+python-multipart~=0.0.20
