@@ -2,13 +2,17 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
+from app.config import get_settings
 from app.core.db import get_session
-from app.models import Book, Character
+from app.core.enums import BookStatus
+from app.models import Book, Chapter, Character
 from app.schemas.book import BookResponse, CharacterResponse
+from app.services.audio.chapter import synthesise_chapter
+from app.services.tts import factory as tts_factory
 from app.workers.tasks import process_book
 
 DATA_DIR = Path("data")
@@ -67,6 +71,41 @@ def get_book_audio(book_id: int, session: Session = Depends(get_session)) -> Fil
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk.")
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
+
+
+@router.get("/{book_id}/chapters/{position}/audio")
+async def get_chapter_audio(
+    book_id: int,
+    position: int,
+    session: Session = Depends(get_session),
+) -> Response:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if book.status != BookStatus.DONE:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Book {book_id} is not ready (status={book.status.value}).",
+        )
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+
+    tts = tts_factory.get_tts_provider(get_settings())
+    try:
+        wav = await synthesise_chapter(chapter.id, session, tts)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return Response(
+        content=wav,
+        media_type="audio/wav",
+        headers={"Content-Disposition": f'inline; filename="book{book_id}_ch{position}.wav"'},
+    )
 
 
 @router.get("/{book_id}/characters", response_model=list[CharacterResponse])

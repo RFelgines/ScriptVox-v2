@@ -151,7 +151,18 @@ appelé en subprocess.
 
 ## À venir — Phase 6 : Audio par chapitre
 
-### Étape 1 — `GET /books/{id}/chapters/{n}/audio` ⏳
+### Étape 1 — `GET /books/{id}/chapters/{n}/audio` ✅ (2026-06-14)
+
+**Livré.** Endpoint `GET /books/{book_id}/chapters/{position}/audio` (position 1-indexée),
+synthèse à la volée → `audio/wav`. Codes : 404 book / 409 book non `DONE` / 404 chapitre
+inexistant / 404 chapitre sans segment. Fichiers (4) :
+- `app/services/audio/assembler.py` — cœur partagé `_assemble(segments, dest)` + nouveau
+  `assemble_wav_bytes(list[bytes]) -> bytes` (`assemble_wav` inchangé, garde-fou format centralisé).
+- `app/services/audio/chapter.py` (nouveau) — `async synthesise_chapter(chapter_id, session, tts) -> bytes`
+  (`ValueError` si aucun segment). **Déviation assumée** : signature par `chapter_id` (la route
+  résout déjà le chapitre → 404), pas par `(book_id, position)`. `_synthesise_book` non touché.
+- `app/api/routes/books.py` — endpoint `async get_chapter_audio`.
+- `tests/check_phase6.py` (nouveau) — 8 sections vertes ; 5 suites existantes sans régression.
 
 **Pourquoi.** Le pipeline génère un WAV du livre entier (30-90 min pour un roman). Un
 endpoint par chapitre permettrait de tester rapidement, d'écouter au fil de l'analyse,

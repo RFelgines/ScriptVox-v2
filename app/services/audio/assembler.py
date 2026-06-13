@@ -3,18 +3,19 @@ import wave
 from pathlib import Path
 
 
-def assemble_wav(audio_segments: list[bytes], output_path: str | Path) -> Path:
+def _assemble(audio_segments: list[bytes], dest) -> None:
+    """Concatenate WAV segments into ``dest`` (a path string or a binary file-like
+    accepted by ``wave.open``). All segments must share the format of the first;
+    a mismatch raises ValueError rather than silently producing skewed audio."""
     if not audio_segments:
         raise ValueError("audio_segments must not be empty")
-
-    output_path = Path(output_path)
 
     with wave.open(io.BytesIO(audio_segments[0]), "rb") as first:
         n_channels = first.getnchannels()
         sampwidth = first.getsampwidth()
         framerate = first.getframerate()
 
-    with wave.open(str(output_path), "wb") as out:
+    with wave.open(dest, "wb") as out:
         out.setnchannels(n_channels)
         out.setsampwidth(sampwidth)
         out.setframerate(framerate)
@@ -29,4 +30,14 @@ def assemble_wav(audio_segments: list[bytes], output_path: str | Path) -> Path:
                     )
                 out.writeframes(seg.readframes(seg.getnframes()))
 
+
+def assemble_wav(audio_segments: list[bytes], output_path: str | Path) -> Path:
+    output_path = Path(output_path)
+    _assemble(audio_segments, str(output_path))
     return output_path
+
+
+def assemble_wav_bytes(audio_segments: list[bytes]) -> bytes:
+    buf = io.BytesIO()
+    _assemble(audio_segments, buf)
+    return buf.getvalue()
