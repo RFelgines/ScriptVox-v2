@@ -47,7 +47,7 @@ pas que le dossier existe. ARCHITECTURE.md §2.4 : « never start in a silently 
 
 ---
 
-### Étape 2 — README : démarrage, worker, voix, tests ⏳
+### Étape 2 — README : démarrage, worker, voix, tests ✅
 
 **Pourquoi.** Aucun README. Rien ne documente comment lancer l'app, le consumer Huey,
 installer les voix Piper, ni faire correspondre `VOICE_CATALOGUE` aux fichiers `.onnx`.
