@@ -3,7 +3,18 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.core.enums import BookStatus
+from app.core.enums import BookStatus, Gender
+
+
+class CharacterResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    gender: Gender
+    voice_tone: Optional[str] = None
+    voice_id: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class BookResponse(BaseModel):

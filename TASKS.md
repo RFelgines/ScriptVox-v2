@@ -113,7 +113,7 @@ EPUB → LLM → voix → TTS → audio ne sont jamais testées ensemble.
 
 ---
 
-### Étape 5 — Polish (optionnelle, basse priorité) ⏳
+### Étape 5 — Polish (optionnelle, basse priorité) ✅
 
 **Pourquoi.** Confort et exactitude, pas bloquant.
 

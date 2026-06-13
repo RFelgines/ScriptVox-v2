@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from app.core.db import get_session
-from app.models import Book
-from app.schemas.book import BookResponse
+from app.models import Book, Character
+from app.schemas.book import BookResponse, CharacterResponse
 from app.workers.tasks import process_book
 
 DATA_DIR = Path("data")
@@ -67,6 +67,15 @@ def get_book_audio(book_id: int, session: Session = Depends(get_session)) -> Fil
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk.")
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
+
+
+@router.get("/{book_id}/characters", response_model=list[CharacterResponse])
+def get_book_characters(book_id: int, session: Session = Depends(get_session)) -> list[CharacterResponse]:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    characters = session.exec(select(Character).where(Character.book_id == book_id)).all()
+    return [CharacterResponse.model_validate(c) for c in characters]
 
 
 @router.delete("/{book_id}", status_code=204)
