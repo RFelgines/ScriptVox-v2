@@ -25,7 +25,7 @@
 > lançable (mode local Piper) puis durcit les points fragiles. Étapes ordonnées par
 > valeur × faisabilité. **Une étape = un échange. Test-first. Attendre GO avant chaque étape.**
 
-### Étape 1 — Fail-fast : valider l'existence du dossier `voices/` ⏳
+### Étape 1 — Fail-fast : valider l'existence du dossier `voices/` ✅
 
 **Pourquoi.** `config.py` ne vérifie que la présence de la variable `PIPER_VOICES_DIR`,
 pas que le dossier existe. ARCHITECTURE.md §2.4 : « never start in a silently degraded state ».
@@ -72,7 +72,7 @@ installer les voix Piper, ni faire correspondre `VOICE_CATALOGUE` aux fichiers `
 
 ---
 
-### Étape 3 — Garde-fou format WAV dans l'assembleur ⏳
+### Étape 3 — Garde-fou format WAV dans l'assembleur ✅
 
 **Pourquoi.** `assemble_wav` lit (nchannels, sampwidth, framerate) du **1er segment seulement**
 et concatène les suivants sans vérifier. Deux voix à sample-rates différents (Piper natif vs

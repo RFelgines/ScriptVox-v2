@@ -502,4 +502,18 @@ finally:
     get_settings.cache_clear()
 
 
+# ── 26. assemble_wav lève ValueError sur mismatch de format WAV ───────────────
+section("assemble_wav() raises ValueError when WAV segments have mismatched formats")
+_mis1 = _make_wav_bytes(100, framerate=22050)
+_mis2 = _make_wav_bytes(100, framerate=16000)
+
+with tempfile.TemporaryDirectory() as _mis_tmp:
+    try:
+        assemble_wav([_mis1, _mis2], Path(_mis_tmp) / "bad.wav")
+        die("Expected ValueError on framerate mismatch")
+    except ValueError as exc:
+        assert "mismatch" in str(exc).lower(), f"Unexpected error text: {exc}"
+        ok(f"ValueError raised: {exc}")
+
+
 print("\nPHASE 4 (TTS implementations) OK\n")

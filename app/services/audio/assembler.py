@@ -18,8 +18,15 @@ def assemble_wav(audio_segments: list[bytes], output_path: str | Path) -> Path:
         out.setnchannels(n_channels)
         out.setsampwidth(sampwidth)
         out.setframerate(framerate)
-        for segment_bytes in audio_segments:
+        for i, segment_bytes in enumerate(audio_segments):
             with wave.open(io.BytesIO(segment_bytes), "rb") as seg:
+                seg_ch, seg_sw, seg_fr = seg.getnchannels(), seg.getsampwidth(), seg.getframerate()
+                if (seg_ch, seg_sw, seg_fr) != (n_channels, sampwidth, framerate):
+                    raise ValueError(
+                        f"WAV format mismatch at segment {i}: "
+                        f"expected ({n_channels}ch, {sampwidth}B, {framerate}Hz), "
+                        f"got ({seg_ch}ch, {seg_sw}B, {seg_fr}Hz)"
+                    )
                 out.writeframes(seg.readframes(seg.getnframes()))
 
     return output_path
