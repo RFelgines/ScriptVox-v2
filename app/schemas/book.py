@@ -13,6 +13,7 @@ class BookResponse(BaseModel):
     status: BookStatus
     progress: float
     error_message: Optional[str] = None
+    audio_path: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

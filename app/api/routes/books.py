@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from app.core.db import get_session
@@ -53,6 +54,19 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> BookRespo
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
     return BookResponse.model_validate(book)
+
+
+@router.get("/{book_id}/audio")
+def get_book_audio(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if not book.audio_path:
+        raise HTTPException(status_code=404, detail="Audio not ready — book is still processing or failed.")
+    path = Path(book.audio_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found on disk.")
+    return FileResponse(str(path), media_type="audio/wav", filename=path.name)
 
 
 @router.delete("/{book_id}", status_code=204)

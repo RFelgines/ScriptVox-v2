@@ -404,4 +404,71 @@ with tempfile.TemporaryDirectory() as _s21_tmp:
     ok("_synthesise_book: 2 segments x 50 frames -> 100-frame WAV created")
 
 
+# ── 22. audio_path dans BookResponse ─────────────────────────────────────────
+section("BookResponse includes audio_path field")
+from app.schemas.book import BookResponse  # noqa: E402
+_br_fields = BookResponse.model_fields
+assert "audio_path" in _br_fields, "audio_path missing from BookResponse"
+assert _br_fields["audio_path"].default is None, "audio_path default must be None"
+ok("BookResponse.audio_path present, default=None")
+
+
+# ── 23. GET /books/{id}/audio — comportement 404 / 200 ───────────────────────
+section("GET /books/{id}/audio — 404 when missing / 200 with WAV")
+from fastapi.testclient import TestClient  # noqa: E402
+from app.main import app  # noqa: E402
+from app.core.db import get_session  # noqa: E402
+
+from sqlalchemy.pool import StaticPool  # noqa: E402
+_s23_engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+SQLModel.metadata.create_all(_s23_engine)
+
+
+def _s23_override():
+    with Session(_s23_engine) as s:
+        yield s
+
+
+app.dependency_overrides[get_session] = _s23_override
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    # 404 — book inexistant
+    _r = _tc.get("/books/9999/audio")
+    assert _r.status_code == 404, f"Expected 404, got {_r.status_code}"
+    ok("404 when book_id not found")
+
+    # 404 — audio_path non renseigné
+    with Session(_s23_engine) as _s23_s:
+        _s23_book = Book(title="No Audio", source_path="/tmp/x.epub")
+        _s23_s.add(_s23_book)
+        _s23_s.commit()
+        _s23_s.refresh(_s23_book)
+        _s23_bid = _s23_book.id
+    _r = _tc.get(f"/books/{_s23_bid}/audio")
+    assert _r.status_code == 404, f"Expected 404, got {_r.status_code}"
+    ok("404 when audio_path is None")
+
+    # 200 — audio_path pointe vers un vrai fichier WAV
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _wav_f:
+        _wav_f.write(_make_wav_bytes(10))
+        _wav_path = _wav_f.name
+    with Session(_s23_engine) as _s23_s:
+        _s23_book2 = Book(title="Has Audio", source_path="/tmp/y.epub", audio_path=_wav_path)
+        _s23_s.add(_s23_book2)
+        _s23_s.commit()
+        _s23_s.refresh(_s23_book2)
+        _s23_bid2 = _s23_book2.id
+    _r = _tc.get(f"/books/{_s23_bid2}/audio")
+    assert _r.status_code == 200, f"Expected 200, got {_r.status_code}"
+    assert "audio" in _r.headers.get("content-type", ""), \
+        f"Expected audio content-type, got {_r.headers.get('content-type')}"
+    ok(f"200 with content-type={_r.headers['content-type']!r}")
+
+app.dependency_overrides.clear()
+
+
 print("\nPHASE 4 (TTS implementations) OK\n")
