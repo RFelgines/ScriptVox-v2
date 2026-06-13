@@ -95,26 +95,33 @@ finally:
     get_settings.cache_clear()
 
 
-# ── 5. Stubs lèvent NotImplementedError ───────────────────────────────────────
-section("PiperProvider.synthesise raises NotImplementedError")
+# ── 5. PiperProvider lève TTSError (model absent / piper-tts non installé) ───
+section("PiperProvider.synthesise raises TTSError when model unavailable")
 get_settings.cache_clear()
 piper = PiperProvider(get_settings())
 try:
-    asyncio.run(piper.synthesise("hello", "voice_id"))
-    die("Expected NotImplementedError from PiperProvider")
-except NotImplementedError:
-    ok("NotImplementedError raised as expected")
+    asyncio.run(piper.synthesise("hello", "nonexistent_voice"))
+    die("Expected TTSError from PiperProvider")
+except TTSError:
+    ok("TTSError raised (missing model file or piper-tts not installed)")
 
-section("ElevenLabsProvider.synthesise raises NotImplementedError")
+# ── 6. ElevenLabsProvider lève TTSError sur erreur HTTP ──────────────────────
+section("ElevenLabsProvider.synthesise raises TTSError on HTTP error")
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
+import httpx  # noqa: E402
+
 os.environ["TTS_PROVIDER"] = "elevenlabs"
 os.environ["ELEVENLABS_API_KEY"] = "fake-key"
 get_settings.cache_clear()
 el = ElevenLabsProvider(get_settings())
-try:
-    asyncio.run(el.synthesise("hello", "voice_id"))
-    die("Expected NotImplementedError from ElevenLabsProvider")
-except NotImplementedError:
-    ok("NotImplementedError raised as expected")
+
+with patch("httpx.AsyncClient.post", new_callable=AsyncMock,
+           side_effect=httpx.ConnectError("connection refused")):
+    try:
+        asyncio.run(el.synthesise("hello", "voice_id"))
+        die("Expected TTSError from ElevenLabsProvider")
+    except TTSError:
+        ok("TTSError raised on HTTP ConnectError")
 
 os.environ["TTS_PROVIDER"] = "piper"
 del os.environ["ELEVENLABS_API_KEY"]
@@ -263,4 +270,82 @@ finally:
     get_settings.cache_clear()
 
 
-print("\nPHASE 4 (scaffold + voice assignment + config) OK\n")
+
+# ── 16. Import assembler ──────────────────────────────────────────────────────
+section("audio.assembler module imports cleanly")
+from app.services.audio.assembler import assemble_wav  # noqa: E402
+ok("assemble_wav imported")
+
+
+# ── 17. Book.audio_path field exists ─────────────────────────────────────────
+section("Book model has audio_path: Optional[str] = None")
+_bk = Book(title="t", source_path="/p")
+assert _bk.audio_path is None, f"audio_path default must be None, got {_bk.audio_path!r}"
+ok("Book.audio_path present, default=None")
+
+
+# ── 18. assemble_wav raises ValueError on empty input ────────────────────────
+section("assemble_wav() raises ValueError on empty segment list")
+import tempfile  # noqa: E402
+try:
+    assemble_wav([], "/tmp/out.wav")
+    die("Expected ValueError on empty segment list")
+except ValueError as exc:
+    ok(f"ValueError raised: {exc}")
+
+
+# ── 19. assemble_wav concatenates WAV segments correctly ─────────────────────
+section("assemble_wav() produces valid WAV with correct total frame count")
+import io    # noqa: E402
+import wave  # noqa: E402
+
+
+def _make_wav_bytes(n_frames: int, framerate: int = 22050) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as _w:
+        _w.setnchannels(1)
+        _w.setsampwidth(2)
+        _w.setframerate(framerate)
+        _w.writeframes(b"\x00\x00" * n_frames)
+    return buf.getvalue()
+
+
+_seg1, _seg2, _seg3 = _make_wav_bytes(100), _make_wav_bytes(200), _make_wav_bytes(50)
+
+with tempfile.TemporaryDirectory() as _tmpdir:
+    _out = assemble_wav([_seg1, _seg2, _seg3], Path(_tmpdir) / "out.wav")
+    assert _out.exists(), f"Output file not created: {_out}"
+    with wave.open(str(_out), "rb") as _assembled:
+        assert _assembled.getnframes() == 350, \
+            f"Expected 350 frames, got {_assembled.getnframes()}"
+        assert _assembled.getnchannels() == 1
+        assert _assembled.getframerate() == 22050
+    ok("Assembled WAV: 3 segments -> 350 frames, 1ch / 22050 Hz")
+
+
+
+# ── 20. ElevenLabsProvider retourne du WAV valide sur 200 ────────────────────
+section("ElevenLabsProvider wraps PCM in valid WAV bytes on HTTP 200")
+os.environ["TTS_PROVIDER"] = "elevenlabs"
+os.environ["ELEVENLABS_API_KEY"] = "fake-key"
+get_settings.cache_clear()
+_el_ok = ElevenLabsProvider(get_settings())
+
+_fake_pcm = b"\x00\x00" * 100  # 100 frames, 16-bit silence
+_mock_resp = MagicMock()
+_mock_resp.raise_for_status.return_value = None
+_mock_resp.content = _fake_pcm
+
+with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=_mock_resp):
+    _wav = asyncio.run(_el_ok.synthesise("hello world", "test_voice_id"))
+    assert _wav[:4] == b"RIFF", f"Expected WAV RIFF header, got {_wav[:4]!r}"
+    with wave.open(io.BytesIO(_wav), "rb") as _wf:
+        assert _wf.getnframes() == 100, f"Expected 100 frames, got {_wf.getnframes()}"
+    ok(f"ElevenLabsProvider returned {len(_wav)}-byte WAV from 200-byte PCM input")
+
+os.environ["TTS_PROVIDER"] = "piper"
+del os.environ["ELEVENLABS_API_KEY"]
+get_settings.cache_clear()
+
+
+print("\nPHASE 4 (TTS implementations) OK\n")

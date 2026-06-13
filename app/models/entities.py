@@ -17,6 +17,7 @@ class Book(SQLModel, table=True):
     status: BookStatus = Field(default=BookStatus.PENDING, index=True)
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
     error_message: Optional[str] = None
+    audio_path: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

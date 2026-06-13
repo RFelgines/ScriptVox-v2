@@ -54,14 +54,17 @@ Provider selected via env var: `LLM_PROVIDER=ollama | gemini`
 
 ### 2.2 Strategy Pattern — TTS (CRITICAL)
 
-Same principle for speech synthesis. **Phase 1 & 2: interfaces and stubs only.**
+Same principle for speech synthesis.
 
 ```
 app/services/tts/
 ├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id) -> bytes
-├── piper.py          # PiperProvider   — local, fast (stub in Phase 1-2)
-└── elevenlabs.py     # ElevenLabsProvider — cloud, high quality (stub in Phase 1-2)
+├── piper.py          # PiperProvider   — local, fast; voice_id maps to PIPER_VOICES_DIR/<id>.onnx
+└── elevenlabs.py     # ElevenLabsProvider — cloud, high quality; voice_id = ElevenLabs voice UUID
 ```
+
+> **Licence Piper:** `piper-tts` est distribué sous **GPL-3.0** (`OHF-Voice/piper1-gpl`).
+> Toute distribution de ScriptVox incluant Piper doit respecter cette licence.
 
 Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs`
 

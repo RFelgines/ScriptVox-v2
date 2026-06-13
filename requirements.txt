@@ -31,6 +31,10 @@ google-genai~=2.8.0
 # ─── Configuration ────────────────────────────────────────────────────────────
 python-dotenv~=1.0.0
 
+# ─── TTS providers ───────────────────────────────────────────────────────────
+# piper-tts: GPL-3.0 licence (OHF-Voice/piper1-gpl) — local TTS engine
+piper-tts~=1.2.0
+
 # ─── EPUB parsing ─────────────────────────────────────────────────────────────
 ebooklib~=0.18
 beautifulsoup4~=4.12

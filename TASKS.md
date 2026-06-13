@@ -32,17 +32,18 @@
 
 ## À venir
 
-**3b — Schéma + assembleur audio**
-- [ ] app/models/entities.py : Book.audio_path
-- [ ] app/services/audio/assembler.py (nouveau) : concaténation WAV stdlib wave
-- [ ] tests/check_phase4.py : + tests assembleur + Book.audio_path
+**3b — Schéma + assembleur audio** ✅
+- [x] app/models/entities.py : Book.audio_path
+- [x] app/services/audio/__init__.py (nouveau)
+- [x] app/services/audio/assembler.py (nouveau) : concaténation WAV stdlib wave
+- [x] tests/check_phase4.py : sections 16-19 (assembler + Book.audio_path)
 
-**3c — Implémentations TTS réelles** (après 3b)
-- [ ] requirements.txt : + piper-tts (épinglé)
-- [ ] ARCHITECTURE.md : note licence Piper GPL-3.0
-- [ ] app/services/tts/piper.py : implémentation réelle
-- [ ] app/services/tts/elevenlabs.py : implémentation réelle via httpx
-- [ ] tests/check_phase4.py : + tests TTS impl
+**3c — Implémentations TTS réelles** ✅
+- [x] requirements.txt : + piper-tts~=1.2.0 (GPL-3.0)
+- [x] ARCHITECTURE.md : note licence Piper GPL-3.0
+- [x] app/services/tts/piper.py : impl réelle (lazy import, run_in_executor, TTSError)
+- [x] app/services/tts/elevenlabs.py : impl réelle via httpx, PCM->WAV
+- [x] tests/check_phase4.py : sections 5/6 mis à jour + section 20 (mock HTTP 200)
 
 **3d — Câblage worker** (après 3c)
 - [ ] app/workers/tasks.py : appel TTS après LLM analysis, mise à jour statut
