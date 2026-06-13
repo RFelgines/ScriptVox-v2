@@ -1,9 +1,14 @@
 """Phase 2 verification.
 Run: .venv/Scripts/python tests/check_phase2.py
 """
+import io
 import os
+import shutil
 import sys
+import tempfile
+import wave
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -36,6 +41,16 @@ def ok(msg: str) -> None:
 def die(msg: str) -> None:
     print(f"  FAIL  {msg}")
     sys.exit(1)
+
+
+def _make_wav_bytes(n_frames: int, framerate: int = 22050) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(framerate)
+        w.writeframes(b"\x00\x00" * n_frames)
+    return buf.getvalue()
 
 
 # ── 1. Test EPUB fixture ───────────────────────────────────────────────────────
@@ -91,8 +106,53 @@ except EpubParsingError as exc:
     ok(f"EpubParsingError raised: {exc}")
 
 
-# ── 4. _process_book_impl + DB round-trip ─────────────────────────────────────
-section("Full pipeline -- _process_book_impl + DB round-trip")
+# ── Mock builders — isolate the worker pipeline from live LLM/TTS services ─────
+from app.core.enums import Gender, SegmentType  # noqa: E402
+from app.services.llm.base import (  # noqa: E402
+    CharacterData,
+    LLMChapterResult,
+    SegmentData,
+)
+
+
+def _make_mock_llm() -> MagicMock:
+    result = LLMChapterResult(
+        characters=[
+            CharacterData(
+                name="Alice",
+                description="Protagonist",
+                gender=Gender.FEMALE,
+                voice_tone="soft",
+            ),
+        ],
+        segments=[
+            SegmentData(
+                position=1,
+                text="Once upon a time.",
+                segment_type=SegmentType.NARRATION,
+                character_name=None,
+            ),
+            SegmentData(
+                position=2,
+                text="Hello!",
+                segment_type=SegmentType.DIALOGUE,
+                character_name="Alice",
+            ),
+        ],
+    )
+    m = MagicMock()
+    m.analyze = AsyncMock(return_value=result)
+    return m
+
+
+def _make_mock_tts() -> MagicMock:
+    m = MagicMock()
+    m.synthesise = AsyncMock(return_value=_make_wav_bytes(50))
+    return m
+
+
+# ── 4. _process_book_impl + DB round-trip (mocked LLM/TTS) ────────────────────
+section("Full pipeline -- _process_book_impl + DB round-trip (mocked LLM/TTS)")
 import app.core.db as db_module  # noqa: E402
 from sqlmodel import Session, create_engine, select  # noqa: E402
 
@@ -109,33 +169,45 @@ test_engine = create_engine(
 db_module._engine = test_engine
 init_db(test_engine)
 
-with Session(test_engine) as session:
-    book = Book(title="temp", source_path=epub_path)
-    session.add(book)
-    session.commit()
-    session.refresh(book)
-    book_id = book.id
+# Copy the fixture into a tempdir so the generated .wav lands there (auto-cleaned),
+# never inside the tracked tests/fixtures/ directory.
+with tempfile.TemporaryDirectory() as _tmp:
+    _tmp_epub = str(Path(_tmp) / "test.epub")
+    shutil.copy(epub_path, _tmp_epub)
 
-_process_book_impl(book_id)
+    with Session(test_engine) as session:
+        book = Book(title="temp", source_path=_tmp_epub)
+        session.add(book)
+        session.commit()
+        session.refresh(book)
+        book_id = book.id
 
-with Session(test_engine) as session:
-    book = session.get(Book, book_id)
-    chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+    with (
+        patch("app.services.llm.factory.get_llm_provider", return_value=_make_mock_llm()),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_make_mock_tts()),
+    ):
+        _process_book_impl(book_id)
 
-assert book.status == BookStatus.DONE, f"Expected DONE, got {book.status}"
-assert book.title == "Alice in Wonderland", f"title={book.title!r}"
-assert book.author == "Lewis Carroll", f"author={book.author!r}"
-assert len(chapters) >= 2, f"chapters={len(chapters)}"
-ok(f"status={book.status}  title={book.title!r}  chapters={len(chapters)}")
+    with Session(test_engine) as session:
+        book = session.get(Book, book_id)
+        chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+
+    assert book.status == BookStatus.DONE, f"Expected DONE, got {book.status}"
+    assert book.title == "Alice in Wonderland", f"title={book.title!r}"
+    assert book.author == "Lewis Carroll", f"author={book.author!r}"
+    assert len(chapters) >= 2, f"chapters={len(chapters)}"
+    ok(f"status={book.status}  title={book.title!r}  chapters={len(chapters)}")
 
 
 # ── 5. HTTP routes via TestClient ─────────────────────────────────────────────
-section("HTTP routes -- TestClient")
+section("HTTP routes -- TestClient (worker stubbed)")
 
-# Patch process_book in books module to run synchronously (bypasses Huey queue)
+# In production process_book is a Huey task dispatched to a separate worker
+# process, never executed inside the request. Stub it to a no-op so this section
+# validates only the HTTP contract; the worker pipeline is covered by section 4.
 import app.api.routes.books as books_module  # noqa: E402
 
-books_module.process_book = lambda book_id: _process_book_impl(book_id)
+books_module.process_book = lambda book_id: None
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
