@@ -45,6 +45,9 @@ class Settings:
                 os.environ.get("OLLAMA_READ_TIMEOUT", "600")
             )
 
+        if self.tts_provider == "piper":
+            self.piper_voices_dir: str = _require("PIPER_VOICES_DIR")
+
         if self.tts_provider == "elevenlabs":
             self.elevenlabs_api_key: str = _require("ELEVENLABS_API_KEY")
 

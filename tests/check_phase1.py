@@ -36,6 +36,7 @@ _OLLAMA_VARS = {
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox.db",
     "HUEY_DB_PATH": "./huey.db",
+    "PIPER_VOICES_DIR": "./voices",
 }
 
 
