@@ -129,13 +129,31 @@ Pydantic) se propage. Montrer le nouveau schéma et attendre validation AVANT im
 
 ---
 
+### Étape 6 — Pivot Piper pip → binaire + 1er run réel ✅ (2026-06-14, commit 07aff3e)
+
+**Constat.** Au premier lancement bout-en-bout réel, `piper-tts` s'avère impossible à
+installer sous Windows (`piper-phonemize` sans wheel). Pivot vers le binaire `piper.exe`
+appelé en subprocess.
+
+- `app/services/tts/piper.py` — réécrit en subprocess (`--model`, `--output_file`, stdin=texte).
+- `app/config.py` — nouvelle var `PIPER_BINARY_PATH`, validée comme fichier existant.
+- `requirements.txt` — `piper-tts` retiré (plus importé).
+- `.gitignore` — exclut `piper/`, `voices/*` (sauf `.gitkeep`), `*.db-shm/-wal`.
+- `README.md` — download binaire + nommage `.onnx.json`.
+- 5 suites de tests mises à jour (`PIPER_BINARY_PATH`) + 2 sections fail-fast (check_phase4).
+
+**Run réel validé** : EPUB Alice → Ollama `qwen3:8b` → 2 personnages → Piper → WAV 47,9 s.
+`GET /books/{id}/audio` et `GET /books/{id}/characters` OK. **App utilisable en local.**
+
+---
+
 ## Décisions d'architecture figées (Phase TTS)
 
 | Sujet | Décision |
 |-------|----------|
-| Piper intégration | `piper-tts` pip, modèles `.onnx` dans le repo, chemin via `PIPER_VOICES_DIR` |
+| Piper intégration | **Binaire `piper.exe` en subprocess** (PAS le pip `piper-tts` : `piper-phonemize` sans wheel Windows). Chemin via `PIPER_BINARY_PATH` ; modèles `.onnx` via `PIPER_VOICES_DIR` (gitignorés, hors repo) |
 | ElevenLabs intégration | `httpx` direct (0 nouvelle dépendance), sortie WAV demandée à l'API |
 | Assemblage | WAV via stdlib `wave` (0 dépendance) |
 | Contrat | `BaseTTSProvider.synthesise(text, voice_id) -> bytes` WAV |
 | Licence Piper | GPL-3.0 — `OHF-Voice/piper1-gpl` — documentée dans ARCHITECTURE.md |
-| Nommage voix | `VOICE_CATALOGUE` impose les noms de fichiers `.onnx` (voir README étape 2) |
+| Nommage voix | `VOICE_CATALOGUE` impose les noms `.onnx` ; chaque voix exige un `<voice>.onnx.json` à côté (sinon crash silencieux) |
