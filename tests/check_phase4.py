@@ -471,4 +471,35 @@ with TestClient(app, raise_server_exceptions=False) as _tc:
 app.dependency_overrides.clear()
 
 
+# ── 24. Fail-fast: PIPER_VOICES_DIR pointe vers un chemin inexistant ──────────
+section("Settings raises ValueError when PIPER_VOICES_DIR is not an existing directory")
+os.environ["TTS_PROVIDER"] = "piper"
+os.environ["PIPER_VOICES_DIR"] = "./nonexistent_voices_xyz"
+get_settings.cache_clear()
+try:
+    get_settings()
+    die("Expected ValueError when PIPER_VOICES_DIR does not exist")
+except ValueError as exc:
+    assert "PIPER_VOICES_DIR" in str(exc), f"Unexpected error: {exc}"
+    ok(f"ValueError raised: {exc}")
+finally:
+    os.environ["PIPER_VOICES_DIR"] = "./voices"
+    get_settings.cache_clear()
+
+
+# ── 25. Pas d'erreur quand PIPER_VOICES_DIR pointe vers ./voices (existant) ───
+section("Settings accepts PIPER_VOICES_DIR when directory exists")
+os.environ["TTS_PROVIDER"] = "piper"
+os.environ["PIPER_VOICES_DIR"] = "./voices"
+get_settings.cache_clear()
+try:
+    _s25 = get_settings()
+    assert _s25.piper_voices_dir == "./voices"
+    ok(f"No error — piper_voices_dir={_s25.piper_voices_dir!r}")
+except ValueError as exc:
+    die(f"Unexpected ValueError: {exc}")
+finally:
+    get_settings.cache_clear()
+
+
 print("\nPHASE 4 (TTS implementations) OK\n")
