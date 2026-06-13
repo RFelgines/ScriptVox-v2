@@ -12,3 +12,12 @@ class LLMParsingError(Exception):
         logging.getLogger(__name__).error("LLM raw response:\n%s", raw_response)
         self.raw_response = raw_response
         self.cause = cause
+
+
+class TTSError(Exception):
+    def __init__(self, context: str, cause: Exception) -> None:
+        import logging
+        super().__init__(f"TTS synthesis failed [{context}]: {cause}")
+        logging.getLogger(__name__).error("TTS error context: %s", context)
+        self.context = context
+        self.cause = cause

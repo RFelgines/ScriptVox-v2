@@ -45,6 +45,9 @@ class Settings:
                 os.environ.get("OLLAMA_READ_TIMEOUT", "600")
             )
 
+        if self.tts_provider == "elevenlabs":
+            self.elevenlabs_api_key: str = _require("ELEVENLABS_API_KEY")
+
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")
 
