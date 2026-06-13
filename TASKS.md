@@ -147,6 +147,40 @@ appelé en subprocess.
 
 ---
 
+---
+
+## À venir — Phase 6 : Audio par chapitre
+
+### Étape 1 — `GET /books/{id}/chapters/{n}/audio` ⏳
+
+**Pourquoi.** Le pipeline génère un WAV du livre entier (30-90 min pour un roman). Un
+endpoint par chapitre permettrait de tester rapidement, d'écouter au fil de l'analyse,
+et d'ouvrir la voie à une parallélisation future.
+
+**Contexte.** Les `Chapter` et leurs `Segment` sont déjà en BDD après le traitement LLM.
+`_synthesise_book` itère déjà sur les chapitres. Il faut extraire la synthèse d'un seul
+chapitre et l'exposer via un endpoint dédié.
+
+**Approche proposée.**
+
+1. Nouveau service `synthesise_chapter(book_id, chapter_position, session, tts) -> bytes`
+   qui filtre les segments du chapitre, appelle `PiperProvider.synthesise` pour chacun,
+   et assemble avec `assemble_wav`.
+2. Nouveau endpoint `GET /books/{id}/chapters/{n}/audio` (n = position 1-indexed).
+   Retourne 404 si le chapitre n'existe pas, 409 si le book n'est pas encore `DONE`.
+3. Tests dans `tests/check_phase6.py` : happy path, 404 sur chapitre inexistant, 409 sur
+   book non terminé.
+
+**Fichiers (≤5).**
+- `app/services/audio/assembler.py` — éventuellement extraire un helper `synthesise_segments`
+- `app/api/routes/books.py` — ajouter l'endpoint
+- `app/schemas/book.py` — aucun changement de `BookResponse` prévu
+- `tests/check_phase6.py` — nouveau
+
+**Contrat.** Pas de changement de schéma existant — endpoint pur ajout.
+
+---
+
 ## Décisions d'architecture figées (Phase TTS)
 
 | Sujet | Décision |
