@@ -266,12 +266,21 @@ async def _fake_analyze_book(
             session.commit()
 
 
+_original_synthesise_book = tasks_module._synthesise_book
+
+
+async def _fake_synthesise_book(book_id: int, source_path: str, engine) -> str:
+    return ""  # no real audio needed for this test
+
+
 tasks_module._analyze_book = _fake_analyze_book
+tasks_module._synthesise_book = _fake_synthesise_book
 
 try:
     _process_book_impl(book_id)
 finally:
     tasks_module._analyze_book = _original_analyze_book
+    tasks_module._synthesise_book = _original_synthesise_book
 
 from sqlmodel import select  # noqa: E402
 

@@ -45,9 +45,10 @@
 - [x] app/services/tts/elevenlabs.py : impl réelle via httpx, PCM->WAV
 - [x] tests/check_phase4.py : sections 5/6 mis à jour + section 20 (mock HTTP 200)
 
-**3d — Câblage worker** (après 3c)
-- [ ] app/workers/tasks.py : appel TTS après LLM analysis, mise à jour statut
-- [ ] tests/check_phase4.py : + test intégration worker
+**3d — Câblage worker** ✅
+- [x] app/workers/tasks.py : _synthesise_book + assign_voices dans _process_book_impl, Book.audio_path
+- [x] tests/check_phase4.py : section 21 (_synthesise_book avec mock TTS)
+- [x] tests/check_phase3.py : section 7 mise à jour (mock _synthesise_book pour éviter régression)
 
 **Sous-tâche 4 — Exposition API**
 - [ ] api/routes/books.py : GET /books/{id}/audio (FileResponse)

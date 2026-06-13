@@ -348,4 +348,60 @@ del os.environ["ELEVENLABS_API_KEY"]
 get_settings.cache_clear()
 
 
+
+# ── 21. _synthesise_book crée le fichier audio et retourne le chemin ──────────
+section("_synthesise_book() synthesises all segments and assembles WAV")
+from app.workers.tasks import _synthesise_book  # noqa: E402
+from app.models.entities import Chapter, Segment  # noqa: E402
+from app.core.enums import SegmentType  # noqa: E402
+
+_s21_engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+SQLModel.metadata.create_all(_s21_engine)
+
+
+async def _s21_fake_tts(text: str, voice_id: str) -> bytes:
+    return _make_wav_bytes(50)
+
+
+_s21_mock_tts = MagicMock()
+_s21_mock_tts.synthesise = AsyncMock(side_effect=_s21_fake_tts)
+
+with tempfile.TemporaryDirectory() as _s21_tmp:
+    _s21_epub = str(Path(_s21_tmp) / "book.epub")
+    Path(_s21_epub).touch()
+
+    with Session(_s21_engine) as _s21_s:
+        _s21_book = Book(title="TTS Book", source_path=_s21_epub)
+        _s21_s.add(_s21_book)
+        _s21_s.commit()
+        _s21_s.refresh(_s21_book)
+        _s21_book_id = _s21_book.id
+
+        _s21_ch = Chapter(book_id=_s21_book_id, position=1, title="Ch1", raw_text="x")
+        _s21_s.add(_s21_ch)
+        _s21_s.commit()
+        _s21_s.refresh(_s21_ch)
+        _s21_ch_id = _s21_ch.id
+
+        _s21_char = Character(book_id=_s21_book_id, name="Alice", gender=Gender.FEMALE, voice_id="female_0")
+        _s21_s.add(_s21_char)
+        _s21_s.commit()
+        _s21_s.refresh(_s21_char)
+        _s21_char_id = _s21_char.id
+
+        _s21_s.add(Segment(chapter_id=_s21_ch_id, position=1, text="Once.", segment_type=SegmentType.NARRATION))
+        _s21_s.add(Segment(chapter_id=_s21_ch_id, position=2, text="Hello!", segment_type=SegmentType.DIALOGUE, character_id=_s21_char_id))
+        _s21_s.commit()
+
+    with patch("app.services.tts.factory.get_tts_provider", return_value=_s21_mock_tts):
+        _s21_audio = asyncio.run(_synthesise_book(_s21_book_id, _s21_epub, _s21_engine))
+
+    _s21_expected = str(Path(_s21_epub).with_suffix(".wav"))
+    assert _s21_audio == _s21_expected, f"Expected {_s21_expected!r}, got {_s21_audio!r}"
+    assert Path(_s21_audio).exists(), f"Audio file not created: {_s21_audio}"
+    with wave.open(_s21_audio, "rb") as _s21_wf:
+        assert _s21_wf.getnframes() == 100, f"Expected 100 frames (2x50), got {_s21_wf.getnframes()}"
+    ok("_synthesise_book: 2 segments x 50 frames -> 100-frame WAV created")
+
+
 print("\nPHASE 4 (TTS implementations) OK\n")
