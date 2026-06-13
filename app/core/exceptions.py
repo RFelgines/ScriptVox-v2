@@ -6,4 +6,9 @@ class EpubParsingError(Exception):
 
 
 class LLMParsingError(Exception):
-    pass
+    def __init__(self, raw_response: str, cause: Exception) -> None:
+        import logging
+        super().__init__(f"LLM response parsing failed: {cause}")
+        logging.getLogger(__name__).error("LLM raw response:\n%s", raw_response)
+        self.raw_response = raw_response
+        self.cause = cause
