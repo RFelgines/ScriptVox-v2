@@ -89,7 +89,7 @@ ElevenLabs 22050) → audio à vitesse faussée, silencieusement.
 
 ---
 
-### Étape 4 — Test d'intégration bout-en-bout du pipeline worker ⏳
+### Étape 4 — Test d'intégration bout-en-bout du pipeline worker ✅
 
 **Pourquoi.** Aucun test ne valide `_process_book_impl` en entier. `check_phase3` mocke
 `_synthesise_book` ; `check_phase4` teste `_synthesise_book` isolé. Les coutures
