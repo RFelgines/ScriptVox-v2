@@ -20,10 +20,18 @@ env/
 
 # Databases
 *.db
+*.db-shm
+*.db-wal
 
 # Data directory — uploads and audio output (keep the placeholder)
 data/*
 !data/.gitkeep
+
+# Piper local TTS — binary + voice models are large/GPL, downloaded per-machine
+piper/
+piper_*.zip
+voices/*
+!voices/.gitkeep
 
 # Claude Code — local overrides are machine-specific, never commit
 .claude/settings.local.json

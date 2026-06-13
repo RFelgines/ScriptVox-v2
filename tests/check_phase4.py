@@ -18,6 +18,7 @@ os.environ.update({
     "DATABASE_URL": "sqlite:///./scriptvox_test_p4.db",
     "HUEY_DB_PATH": "./huey_test_p4.db",
     "PIPER_VOICES_DIR": "./voices",
+    "PIPER_BINARY_PATH": sys.executable,
 })
 
 _n = 0
@@ -257,7 +258,7 @@ with Session(_engine) as _s:
 # ── 15. Fail-fast: PIPER_VOICES_DIR manquant ─────────────────────────────────
 section("Settings raises ValueError when PIPER_VOICES_DIR absent with TTS_PROVIDER=piper")
 os.environ["TTS_PROVIDER"] = "piper"
-os.environ.pop("PIPER_VOICES_DIR", None)
+os.environ["PIPER_VOICES_DIR"] = ""  # empty string: _require raises ValueError; load_dotenv cannot override an existing key
 get_settings.cache_clear()
 try:
     get_settings()
@@ -514,6 +515,40 @@ with tempfile.TemporaryDirectory() as _mis_tmp:
     except ValueError as exc:
         assert "mismatch" in str(exc).lower(), f"Unexpected error text: {exc}"
         ok(f"ValueError raised: {exc}")
+
+
+# ── 27. Fail-fast: PIPER_BINARY_PATH manquant ────────────────────────────────
+section("Settings raises ValueError when PIPER_BINARY_PATH absent with TTS_PROVIDER=piper")
+os.environ["TTS_PROVIDER"] = "piper"
+os.environ["PIPER_VOICES_DIR"] = "./voices"
+os.environ["PIPER_BINARY_PATH"] = ""  # empty string: _require raises ValueError; load_dotenv cannot override an existing key
+get_settings.cache_clear()
+try:
+    get_settings()
+    die("Expected ValueError when PIPER_BINARY_PATH is missing")
+except ValueError as exc:
+    assert "PIPER_BINARY_PATH" in str(exc), f"Unexpected error: {exc}"
+    ok(f"ValueError raised: {exc}")
+finally:
+    os.environ["PIPER_BINARY_PATH"] = sys.executable
+    get_settings.cache_clear()
+
+
+# ── 28. Fail-fast: PIPER_BINARY_PATH pointe vers un chemin inexistant ─────────
+section("Settings raises ValueError when PIPER_BINARY_PATH is not an existing file")
+os.environ["TTS_PROVIDER"] = "piper"
+os.environ["PIPER_VOICES_DIR"] = "./voices"
+os.environ["PIPER_BINARY_PATH"] = "./nonexistent_piper.exe"
+get_settings.cache_clear()
+try:
+    get_settings()
+    die("Expected ValueError when PIPER_BINARY_PATH does not exist")
+except ValueError as exc:
+    assert "PIPER_BINARY_PATH" in str(exc), f"Unexpected error: {exc}"
+    ok(f"ValueError raised: {exc}")
+finally:
+    os.environ["PIPER_BINARY_PATH"] = sys.executable
+    get_settings.cache_clear()
 
 
 print("\nPHASE 4 (TTS implementations) OK\n")

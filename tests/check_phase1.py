@@ -37,6 +37,7 @@ _OLLAMA_VARS = {
     "DATABASE_URL": "sqlite:///./scriptvox.db",
     "HUEY_DB_PATH": "./huey.db",
     "PIPER_VOICES_DIR": "./voices",
+    "PIPER_BINARY_PATH": sys.executable,  # real file, satisfies is_file() check in tests
 }
 
 

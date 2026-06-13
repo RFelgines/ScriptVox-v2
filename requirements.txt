@@ -32,8 +32,11 @@ google-genai~=2.8.0
 python-dotenv~=1.0.0
 
 # ─── TTS providers ───────────────────────────────────────────────────────────
-# piper-tts: GPL-3.0 licence (OHF-Voice/piper1-gpl) — local TTS engine
-piper-tts~=1.2.0
+# Piper (local TTS) is invoked as a standalone binary via subprocess, NOT as a
+# pip package: piper-tts depends on piper-phonemize, which ships no Windows wheel.
+# Download the binary from github.com/rhasspy/piper/releases and set
+# PIPER_BINARY_PATH in .env. Licence: GPL-3.0 (OHF-Voice/piper1-gpl).
+# ElevenLabs (cloud TTS) uses httpx directly — no extra dependency.
 
 # ─── EPUB parsing ─────────────────────────────────────────────────────────────
 ebooklib~=0.18

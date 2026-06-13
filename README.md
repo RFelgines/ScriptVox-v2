@@ -34,11 +34,12 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
 | `TTS_PROVIDER` | always | `piper` (local) or `elevenlabs` (cloud) |
 | `PIPER_VOICES_DIR` | `TTS_PROVIDER=piper` | Path to the folder containing `.onnx` voice files |
+| `PIPER_BINARY_PATH` | `TTS_PROVIDER=piper` | Path to the `piper` executable (see Piper binary below) |
 | `ELEVENLABS_API_KEY` | `TTS_PROVIDER=elevenlabs` | ElevenLabs API key |
 | `DATABASE_URL` | always | SQLite path, e.g. `sqlite:///./scriptvox.db` |
 | `HUEY_DB_PATH` | always | Huey task queue DB path, e.g. `./huey.db` |
 
-The app **fails at startup** if any required variable for the active provider is missing or if `PIPER_VOICES_DIR` does not point to an existing directory.
+The app **fails at startup** if any required variable for the active provider is missing, if `PIPER_VOICES_DIR` does not point to an existing directory, or if `PIPER_BINARY_PATH` does not point to an existing file.
 
 ---
 
@@ -59,6 +60,26 @@ Interactive docs: `http://localhost:8000/docs`
 
 ---
 
+## Piper binary (local TTS)
+
+ScriptVox invokes Piper as a **standalone executable** via subprocess — *not* the
+`piper-tts` pip package. Reason: `piper-tts` depends on `piper-phonemize`, which
+ships no Windows wheel. The binary approach works on every platform and keeps the
+dependency out of `requirements.txt`.
+
+1. Download the archive for your platform from
+   [github.com/rhasspy/piper/releases](https://github.com/rhasspy/piper/releases)
+   (e.g. `piper_windows_amd64.zip`).
+2. Extract it anywhere in the project (e.g. `./piper/`). Keep the bundled
+   `espeak-ng-data/` folder and the `*.dll` files **next to** `piper.exe` — Piper
+   locates them relative to its own path.
+3. Point `PIPER_BINARY_PATH` at the executable, e.g. `PIPER_BINARY_PATH=./piper/piper/piper.exe`.
+
+> The licence for Piper is **GPL-3.0** (`OHF-Voice/piper1-gpl`). Any distribution of
+> ScriptVox bundling the Piper binary must comply with it.
+
+---
+
 ## Piper voices (local TTS)
 
 `PiperProvider` loads voices from `{PIPER_VOICES_DIR}/{voice_id}.onnx`.  
@@ -76,7 +97,10 @@ The voice assignment service uses a fixed catalogue of IDs — you must supply f
 | `neutral_0.onnx` | Neutral / unknown gender — slot 0 |
 | `neutral_1.onnx` | Neutral / unknown gender — slot 1 |
 
-Each `.onnx` file must be accompanied by its `.onnx.json` config file (Piper requirement).
+> ⚠️ **Each `.onnx` file must sit next to a config named exactly `<voice_id>.onnx.json`**
+> (e.g. `narrator.onnx` + `narrator.onnx.json`). Piper auto-loads `<model>.onnx.json`;
+> if the config is missing or misnamed (e.g. `narrator.json`), Piper **crashes with an
+> empty error** instead of reporting the problem.
 
 **How to get voices:**
 
@@ -95,7 +119,10 @@ Each phase has its own test suite. Run them in order to verify the full stack:
 .venv\Scripts\python tests\check_phase2.py   # EPUB ingestion, Huey wiring
 .venv\Scripts\python tests\check_phase3.py   # LLM pipeline
 .venv\Scripts\python tests\check_phase4.py   # TTS, audio assembly, /audio endpoint
+.venv\Scripts\python tests\check_phase5.py   # End-to-end worker pipeline (mocked LLM + TTS)
 ```
+
+These suites mock the LLM and TTS providers, so they run without Ollama or Piper.
 
 ---
 
@@ -137,6 +164,7 @@ Returns 404 until `status` is `DONE`.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/books` | List all books |
+| `GET` | `/books/{id}/characters` | List extracted characters with their assigned `voice_id` |
 | `DELETE` | `/books/{id}` | Delete a book and its source file |
 
 ---

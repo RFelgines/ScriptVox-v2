@@ -23,6 +23,7 @@ os.environ.update({
     "DATABASE_URL": "sqlite:///./scriptvox_test.db",
     "HUEY_DB_PATH": "./huey_test.db",
     "PIPER_VOICES_DIR": "./voices",
+    "PIPER_BINARY_PATH": sys.executable,
 })
 
 _n = 0

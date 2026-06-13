@@ -52,6 +52,11 @@ class Settings:
                 raise ValueError(
                     f"PIPER_VOICES_DIR does not exist or is not a directory: {self.piper_voices_dir!r}"
                 )
+            self.piper_binary_path: str = _require("PIPER_BINARY_PATH")
+            if not Path(self.piper_binary_path).is_file():
+                raise ValueError(
+                    f"PIPER_BINARY_PATH does not exist or is not a file: {self.piper_binary_path!r}"
+                )
 
         if self.tts_provider == "elevenlabs":
             self.elevenlabs_api_key: str = _require("ELEVENLABS_API_KEY")
