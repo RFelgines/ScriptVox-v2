@@ -265,6 +265,62 @@ def _generate_book_impl(book_id: int) -> None:
                 session.commit()
 
 
+async def _synthesise_chapter_worker(chapter_id: int, engine) -> bytes:
+    from app.services.audio.chapter import synthesise_chapter
+    from app.services.tts import factory as tts_factory
+
+    settings = get_settings()
+    provider = tts_factory.get_tts_provider(settings)
+    with Session(engine) as session:
+        return await synthesise_chapter(chapter_id, session, provider)
+
+
+def _generate_chapter_impl(chapter_id: int) -> None:
+    from pathlib import Path as _Path
+
+    from app.core.db import get_engine
+    from app.core.enums import ChapterStatus
+    from app.models import Chapter
+
+    engine = get_engine()
+
+    with Session(engine) as session:
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None:
+            logger.error("generate_chapter called with unknown chapter_id=%d", chapter_id)
+            return
+        book_id = chapter.book_id
+        position = chapter.position
+        chapter.status = ChapterStatus.GENERATING
+        session.add(chapter)
+        session.commit()
+
+    try:
+        wav_bytes = asyncio.run(_synthesise_chapter_worker(chapter_id, engine))
+
+        out_dir = _Path("data") / str(book_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = str(out_dir / f"ch{position}.wav")
+        _Path(audio_path).write_bytes(wav_bytes)
+
+        with Session(engine) as session:
+            chapter = session.get(Chapter, chapter_id)
+            chapter.audio_path = audio_path
+            chapter.status = ChapterStatus.DONE
+            session.add(chapter)
+            session.commit()
+
+    except Exception as exc:
+        logger.exception("generate_chapter failed for chapter_id=%d", chapter_id)
+        with Session(engine) as session:
+            chapter = session.get(Chapter, chapter_id)
+            if chapter:
+                chapter.status = ChapterStatus.FAILED
+                chapter.error_message = str(exc)
+                session.add(chapter)
+                session.commit()
+
+
 def _process_book_impl(book_id: int) -> None:
     """Chains analyze + generate — preserved for backward compatibility."""
     from app.core.db import get_engine
@@ -290,6 +346,11 @@ def analyze_book(book_id: int) -> None:
 @huey.task()
 def generate_book(book_id: int) -> None:
     _generate_book_impl(book_id)
+
+
+@huey.task()
+def generate_chapter(chapter_id: int) -> None:
+    _generate_chapter_impl(chapter_id)
 
 
 @huey.task()

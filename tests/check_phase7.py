@@ -548,4 +548,145 @@ with Session(_3a_engine) as _s:
     ok("FAILED chapter: status=FAILED, error_message='TTS exploded'")
 
 
-print("\nPHASE 7 (split worker + route + generate trigger + étape 3a schéma) OK\n")
+# ── 17-20. Étape 3b — _generate_chapter_impl + POST /chapters/{n}/generate ───
+from app.workers.tasks import _generate_chapter_impl, generate_chapter as _generate_chapter_task  # noqa: E402
+
+
+def _get_chapter_id(engine, book_id: int) -> int:
+    with Session(engine) as _s:
+        _ch = _s.exec(select(Chapter).where(Chapter.book_id == book_id)).first()
+        return _ch.id
+
+
+# Section 17: _generate_chapter_impl happy path -> DONE + WAV on disk
+section("_generate_chapter_impl: happy path -> chapter DONE, WAV on disk")
+
+_c17_engine = _make_test_engine()
+
+with tempfile.TemporaryDirectory() as _c17_tmp:
+    _c17_epub = Path(_c17_tmp) / "test.epub"
+    shutil.copy(FIXTURE_EPUB, _c17_epub)
+    _c17_book_id = _seed_analyzed_book(_c17_engine, str(_c17_epub))
+    _c17_ch_id = _get_chapter_id(_c17_engine, _c17_book_id)
+
+    with (
+        patch("app.core.db.get_engine", return_value=_c17_engine),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_make_mock_tts()),
+    ):
+        _generate_chapter_impl(_c17_ch_id)
+
+    with Session(_c17_engine) as _s:
+        _c17_ch = _s.get(Chapter, _c17_ch_id)
+        if _c17_ch.status == ChapterStatus.FAILED:
+            die(f"_generate_chapter_impl FAILED: {_c17_ch.error_message!r}")
+        assert _c17_ch.status == ChapterStatus.DONE, f"Expected DONE, got {_c17_ch.status}"
+        assert _c17_ch.audio_path, "audio_path must be set"
+        _c17_audio = Path(_c17_ch.audio_path)
+    ok(f"status=DONE, audio_path={_c17_audio.name!r}")
+
+    assert _c17_audio.exists(), f"WAV not on disk: {_c17_audio}"
+    with wave.open(str(_c17_audio), "rb") as _wf:
+        assert _wf.getnframes() > 0, "WAV file is empty"
+    ok(f"WAV valid on disk: {_c17_audio.stat().st_size} bytes")
+
+
+# Section 18: _generate_chapter_impl failure -> FAILED + error_message
+section("_generate_chapter_impl: TTSError -> chapter FAILED, error_message set")
+
+_c18_engine = _make_test_engine()
+
+with tempfile.TemporaryDirectory() as _c18_tmp:
+    _c18_epub = Path(_c18_tmp) / "test.epub"
+    shutil.copy(FIXTURE_EPUB, _c18_epub)
+    _c18_book_id = _seed_analyzed_book(_c18_engine, str(_c18_epub))
+    _c18_ch_id = _get_chapter_id(_c18_engine, _c18_book_id)
+
+    _c18_fail_tts = MagicMock()
+    _c18_fail_tts.synthesise = AsyncMock(
+        side_effect=TTSError("piper:narrator", RuntimeError("chapter tts failed"))
+    )
+
+    with (
+        patch("app.core.db.get_engine", return_value=_c18_engine),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_c18_fail_tts),
+    ):
+        _generate_chapter_impl(_c18_ch_id)
+
+    with Session(_c18_engine) as _s:
+        _c18_ch = _s.get(Chapter, _c18_ch_id)
+        assert _c18_ch.status == ChapterStatus.FAILED, f"Expected FAILED, got {_c18_ch.status}"
+        assert _c18_ch.error_message, "error_message must be set"
+        ok(f"status=FAILED, error_message={_c18_ch.error_message!r}")
+
+
+# Section 19: POST /books/{id}/chapters/{n}/generate -> 202 + dispatch
+section("POST /books/{id}/chapters/{n}/generate — 202, generate_chapter dispatched")
+
+_c19_engine = _make_test_engine()
+
+
+def _c19_session():
+    with Session(_c19_engine) as _s:
+        yield _s
+
+
+app.dependency_overrides[get_session] = _c19_session
+
+with tempfile.TemporaryDirectory() as _c19_tmp:
+    _c19_epub = Path(_c19_tmp) / "test.epub"
+    shutil.copy(FIXTURE_EPUB, _c19_epub)
+    _c19_book_id = _seed_analyzed_book(_c19_engine, str(_c19_epub))
+    _c19_ch_id = _get_chapter_id(_c19_engine, _c19_book_id)
+
+    _chapter_gen_calls: list = []
+    books_module.generate_chapter = lambda chapter_id: _chapter_gen_calls.append(chapter_id)
+
+    with TestClient(app) as _tc:
+        _r19 = _tc.post(f"/books/{_c19_book_id}/chapters/1/generate")
+        assert _r19.status_code == 202, f"Expected 202, got {_r19.status_code} ({_r19.text})"
+        _r19_data = _r19.json()
+        assert _r19_data["position"] == 1, f"Expected position=1, got {_r19_data['position']}"
+        assert _r19_data["status"] == "PENDING", f"Expected PENDING, got {_r19_data['status']}"
+
+    books_module.generate_chapter = _generate_chapter_task  # restore
+
+    assert _chapter_gen_calls == [_c19_ch_id], (
+        f"Expected generate_chapter([{_c19_ch_id}]), got {_chapter_gen_calls}"
+    )
+    ok(f"202, generate_chapter called with chapter_id={_c19_ch_id}")
+
+# Section 20: route guards (404 book, 404 chapter, 409 non-ANALYZED)
+section("POST /books/{id}/chapters/{n}/generate — 404/409 guards")
+
+with Session(_c19_engine) as _s:
+    _c20_done_book = Book(
+        title="DoneBook", source_path="/tmp/d.epub", status=BookStatus.DONE
+    )
+    _s.add(_c20_done_book)
+    _s.commit()
+    _s.refresh(_c20_done_book)
+    _c20_done_id = _c20_done_book.id
+
+books_module.generate_chapter = lambda chapter_id: None
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    # 404 book not found
+    _r20a = _tc.post("/books/9999/chapters/1/generate")
+    assert _r20a.status_code == 404, f"Expected 404, got {_r20a.status_code}"
+    ok("404 for non-existent book")
+
+    # 409 book status != ANALYZED
+    _r20b = _tc.post(f"/books/{_c20_done_id}/chapters/1/generate")
+    assert _r20b.status_code == 409, f"Expected 409 for DONE book, got {_r20b.status_code}"
+    ok("409 for DONE book")
+
+    # 404 chapter not found
+    _r20c = _tc.post(f"/books/{_c19_book_id}/chapters/999/generate")
+    assert _r20c.status_code == 404, f"Expected 404 for missing chapter, got {_r20c.status_code}"
+    ok("404 for non-existent chapter position")
+
+books_module.generate_chapter = _generate_chapter_task  # restore
+app.dependency_overrides.clear()
+
+
+print("\nPHASE 7 (split worker + route + generate trigger + étapes 3a/3b schéma) OK\n")
