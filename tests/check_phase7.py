@@ -343,29 +343,25 @@ assert _analyze_calls == [_r8_book_id], (
 )
 ok(f"POST /books -> 202, analyze_book called with book_id={_r8_book_id}")
 
-# Section 9: chapter audio returns 200 for ANALYZED book
-section("GET /books/{id}/chapters/1/audio — 200 when status=ANALYZED")
+# Section 9: chapter audio -> 409 when chapter is PENDING (not yet generated)
+section("GET /books/{id}/chapters/1/audio — 409 when chapter is PENDING (not yet generated)")
 
 with tempfile.TemporaryDirectory() as _r9_tmp:
     _r9_epub = Path(_r9_tmp) / "test.epub"
     shutil.copy(FIXTURE_EPUB, _r9_epub)
     _r9_book_id = _seed_analyzed_book(_rb_engine, str(_r9_epub))
 
-    with patch("app.services.tts.factory.get_tts_provider", return_value=_make_mock_tts()):
-        with TestClient(app, raise_server_exceptions=False) as _tc:
-            _r9 = _tc.get(f"/books/{_r9_book_id}/chapters/1/audio")
+    with TestClient(app, raise_server_exceptions=False) as _tc:
+        _r9 = _tc.get(f"/books/{_r9_book_id}/chapters/1/audio")
 
-    assert _r9.status_code == 200, f"Expected 200, got {_r9.status_code} ({_r9.text})"
-    assert _r9.content[:4] == b"RIFF", f"Expected WAV body, got {_r9.content[:4]!r}"
-    ok("200 with valid WAV for ANALYZED book")
+    assert _r9.status_code == 409, f"Expected 409 (chapter PENDING), got {_r9.status_code} ({_r9.text})"
+    ok("409 when chapter.status=PENDING (must call POST /generate first)")
 
-# Section 10: chapter audio still 409 for PROCESSING book
-section("GET /books/{id}/chapters/1/audio — 409 when status=PROCESSING")
+# Section 10: chapter audio -> 404 when chapter not found
+section("GET /books/{id}/chapters/1/audio — 404 when chapter not found")
 
 with Session(_rb_engine) as _s:
-    _r10_book = Book(
-        title="InProgress", source_path="/tmp/x.epub", status=BookStatus.PROCESSING
-    )
+    _r10_book = Book(title="NoChapters", source_path="/tmp/x.epub", status=BookStatus.ANALYZED)
     _s.add(_r10_book)
     _s.commit()
     _s.refresh(_r10_book)
@@ -374,8 +370,8 @@ with Session(_rb_engine) as _s:
 with TestClient(app, raise_server_exceptions=False) as _tc:
     _r10 = _tc.get(f"/books/{_r10_book_id}/chapters/1/audio")
 
-assert _r10.status_code == 409, f"Expected 409, got {_r10.status_code}"
-ok("409 for PROCESSING book (guard still applies)")
+assert _r10.status_code == 404, f"Expected 404, got {_r10.status_code}"
+ok("404 when chapter position does not exist")
 
 app.dependency_overrides.clear()
 
@@ -689,4 +685,111 @@ books_module.generate_chapter = _generate_chapter_task  # restore
 app.dependency_overrides.clear()
 
 
-print("\nPHASE 7 (split worker + route + generate trigger + étapes 3a/3b schéma) OK\n")
+# ── 21-23. Étape 3c — serve persisted + listing + re-dispatch ────────────────
+
+_c3c_engine = _make_test_engine()
+
+
+def _c3c_session():
+    with Session(_c3c_engine) as _s:
+        yield _s
+
+
+app.dependency_overrides[get_session] = _c3c_session
+
+# Section 21: GET /chapters/{n}/audio — 200, serves persisted WAV when DONE
+section("GET /books/{id}/chapters/{n}/audio — 200 serves persisted WAV when chapter DONE")
+
+with tempfile.TemporaryDirectory() as _c21_tmp:
+    # Write a real WAV to disk that the endpoint will serve
+    _c21_wav_path = Path(_c21_tmp) / "ch1.wav"
+    _c21_wav_path.write_bytes(_make_wav_bytes(100))
+
+    with Session(_c3c_engine) as _s:
+        _c21_book = Book(title="DoneChapters", source_path="/tmp/x.epub", status=BookStatus.ANALYZED)
+        _s.add(_c21_book)
+        _s.commit()
+        _s.refresh(_c21_book)
+        _c21_book_id = _c21_book.id
+
+        _c21_ch = Chapter(
+            book_id=_c21_book_id, position=1, title="Ch1", raw_text="x",
+            status=ChapterStatus.DONE, audio_path=str(_c21_wav_path),
+        )
+        _s.add(_c21_ch)
+        _s.commit()
+
+    with TestClient(app, raise_server_exceptions=False) as _tc:
+        _r21 = _tc.get(f"/books/{_c21_book_id}/chapters/1/audio")
+
+    assert _r21.status_code == 200, f"Expected 200, got {_r21.status_code} ({_r21.text})"
+    assert _r21.content[:4] == b"RIFF", f"Expected WAV body, got {_r21.content[:4]!r}"
+    ok(f"200 with valid WAV ({len(_r21.content)} bytes) from persisted file")
+
+# Section 22: GET /books/{id}/chapters — list[ChapterResponse]
+section("GET /books/{id}/chapters — list[ChapterResponse] ordered by position")
+
+with Session(_c3c_engine) as _s:
+    _c22_book = Book(title="MultiChapter", source_path="/tmp/y.epub", status=BookStatus.ANALYZED)
+    _s.add(_c22_book)
+    _s.commit()
+    _s.refresh(_c22_book)
+    _c22_book_id = _c22_book.id
+
+    for _pos in (1, 2, 3):
+        _s.add(Chapter(book_id=_c22_book_id, position=_pos, raw_text=f"text{_pos}"))
+    _s.commit()
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r22 = _tc.get(f"/books/{_c22_book_id}/chapters")
+
+assert _r22.status_code == 200, f"Expected 200, got {_r22.status_code} ({_r22.text})"
+_r22_data = _r22.json()
+assert len(_r22_data) == 3, f"Expected 3 chapters, got {len(_r22_data)}"
+assert [c["position"] for c in _r22_data] == [1, 2, 3], "Chapters not ordered by position"
+assert all(c["status"] == "PENDING" for c in _r22_data), "Default status should be PENDING"
+ok(f"GET /chapters: 3 chapters, positions {[c['position'] for c in _r22_data]}, all PENDING")
+
+# 404 for unknown book
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r22b = _tc.get("/books/9999/chapters")
+assert _r22b.status_code == 404, f"Expected 404, got {_r22b.status_code}"
+ok("404 for non-existent book")
+
+# Section 23: POST /chapters/{n}/generate re-dispatch when chapter already DONE
+section("POST /books/{id}/chapters/{n}/generate — 202 re-dispatch when chapter already DONE")
+
+with Session(_c3c_engine) as _s:
+    _c23_book = Book(title="RegenBook", source_path="/tmp/z.epub", status=BookStatus.ANALYZED)
+    _s.add(_c23_book)
+    _s.commit()
+    _s.refresh(_c23_book)
+    _c23_book_id = _c23_book.id
+
+    _c23_ch = Chapter(
+        book_id=_c23_book_id, position=1, raw_text="x",
+        status=ChapterStatus.DONE, audio_path="/data/1/ch1.wav",
+    )
+    _s.add(_c23_ch)
+    _s.commit()
+    _s.refresh(_c23_ch)
+    _c23_ch_id = _c23_ch.id
+
+_c23_calls: list = []
+books_module.generate_chapter = lambda chapter_id: _c23_calls.append(chapter_id)
+
+with TestClient(app) as _tc:
+    _r23 = _tc.post(f"/books/{_c23_book_id}/chapters/1/generate")
+    assert _r23.status_code == 202, f"Expected 202, got {_r23.status_code} ({_r23.text})"
+
+books_module.generate_chapter = _generate_chapter_task  # restore
+
+assert _c23_calls == [_c23_ch_id], (
+    f"Expected generate_chapter([{_c23_ch_id}]), got {_c23_calls}"
+)
+ok(f"202, re-dispatch accepted for DONE chapter (chapter_id={_c23_ch_id})")
+
+app.dependency_overrides.clear()
+
+
+print("\nPHASE 7 (split worker + route + generate trigger + étapes 3a/3b/3c) OK\n")

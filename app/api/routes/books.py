@@ -2,17 +2,14 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
-from app.config import get_settings
 from app.core.db import get_session
-from app.core.enums import BookStatus
+from app.core.enums import BookStatus, ChapterStatus
 from app.models import Book, Chapter, Character
 from app.schemas.book import BookResponse, ChapterResponse, CharacterResponse
-from app.services.audio.chapter import synthesise_chapter
-from app.services.tts import factory as tts_factory
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
 DATA_DIR = Path("data")
@@ -112,20 +109,26 @@ def trigger_chapter_generate(
     return ChapterResponse.model_validate(chapter)
 
 
-@router.get("/{book_id}/chapters/{position}/audio")
-async def get_chapter_audio(
-    book_id: int,
-    position: int,
-    session: Session = Depends(get_session),
-) -> Response:
+@router.get("/{book_id}/chapters", response_model=list[ChapterResponse])
+def list_chapters(book_id: int, session: Session = Depends(get_session)) -> list[ChapterResponse]:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status not in (BookStatus.ANALYZED, BookStatus.GENERATING, BookStatus.DONE):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Book {book_id} is not ready (status={book.status.value}).",
-        )
+    chapters = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
+    ).all()
+    return [ChapterResponse.model_validate(c) for c in chapters]
+
+
+@router.get("/{book_id}/chapters/{position}/audio")
+def get_chapter_audio(
+    book_id: int,
+    position: int,
+    session: Session = Depends(get_session),
+) -> FileResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
     chapter = session.exec(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
     ).first()
@@ -133,18 +136,18 @@ async def get_chapter_audio(
         raise HTTPException(
             status_code=404, detail=f"Chapter {position} not found for book {book_id}."
         )
-
-    tts = tts_factory.get_tts_provider(get_settings())
-    try:
-        wav = await synthesise_chapter(chapter.id, session, tts)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
-    return Response(
-        content=wav,
-        media_type="audio/wav",
-        headers={"Content-Disposition": f'inline; filename="book{book_id}_ch{position}.wav"'},
-    )
+    if chapter.status != ChapterStatus.DONE:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Chapter {position} audio is not ready (status={chapter.status.value}). "
+                f"Use POST /books/{book_id}/chapters/{position}/generate first."
+            ),
+        )
+    path = Path(chapter.audio_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found on disk.")
+    return FileResponse(str(path), media_type="audio/wav", filename=path.name)
 
 
 @router.get("/{book_id}/characters", response_model=list[CharacterResponse])

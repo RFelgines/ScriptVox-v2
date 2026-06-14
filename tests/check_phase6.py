@@ -61,7 +61,7 @@ from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 from app.services.audio.assembler import assemble_wav, assemble_wav_bytes  # noqa: E402
 from app.services.audio.chapter import synthesise_chapter  # noqa: E402
 from app.models.entities import Book, Chapter, Character, Segment  # noqa: E402
-from app.core.enums import BookStatus, Gender, SegmentType  # noqa: E402
+from app.core.enums import BookStatus, ChapterStatus, Gender, SegmentType  # noqa: E402
 ok("assemble_wav_bytes, synthesise_chapter, models, enums")
 
 
@@ -181,16 +181,6 @@ from app.main import app  # noqa: E402
 from app.core.db import get_session  # noqa: E402
 
 _api_engine = _make_test_engine()
-_api_book_id, _api_chapter_id = _seed_done_book(_api_engine)
-
-# A second book stuck in PROCESSING (for the 409 path)
-with Session(_api_engine) as _s:
-    _proc_book = Book(title="Processing", source_path="/tmp/proc.epub",
-                      status=BookStatus.PROCESSING)
-    _s.add(_proc_book)
-    _s.commit()
-    _s.refresh(_proc_book)
-    _proc_book_id = _proc_book.id
 
 
 def _override_session():
@@ -200,27 +190,56 @@ def _override_session():
 
 app.dependency_overrides[get_session] = _override_session
 
-with patch("app.services.tts.factory.get_tts_provider", return_value=_make_mock_tts()):
+with tempfile.TemporaryDirectory() as _api_tmp:
+    # Write a real WAV to disk for the happy-path test
+    _api_wav = Path(_api_tmp) / "ch1.wav"
+    _api_wav.write_bytes(_make_wav_bytes(100))
+
+    # Book with a DONE chapter pointing to the real WAV file
+    with Session(_api_engine) as _s:
+        _api_book = Book(title="DoneChBook", source_path="/tmp/x.epub", status=BookStatus.DONE)
+        _s.add(_api_book)
+        _s.commit()
+        _s.refresh(_api_book)
+        _api_book_id = _api_book.id
+
+        _api_ch = Chapter(
+            book_id=_api_book_id, position=1, title="Ch1", raw_text="x",
+            status=ChapterStatus.DONE, audio_path=str(_api_wav),
+        )
+        _s.add(_api_ch)
+        _s.commit()
+
+    # Book with a PENDING chapter (for the 409 path)
+    with Session(_api_engine) as _s:
+        _pending_book = Book(title="PendingCh", source_path="/tmp/y.epub",
+                             status=BookStatus.ANALYZED)
+        _s.add(_pending_book)
+        _s.commit()
+        _s.refresh(_pending_book)
+        _pending_book_id = _pending_book.id
+
+        _s.add(Chapter(book_id=_pending_book_id, position=1, raw_text="x"))
+        _s.commit()
+
     with TestClient(app, raise_server_exceptions=False) as _tc:
-        # 200 — happy path
+        # 200 — happy path: serves persisted WAV file
         _r = _tc.get(f"/books/{_api_book_id}/chapters/1/audio")
         assert _r.status_code == 200, f"Expected 200, got {_r.status_code} ({_r.text})"
         assert "audio" in _r.headers.get("content-type", ""), \
             f"Expected audio content-type, got {_r.headers.get('content-type')}"
         assert _r.content[:4] == b"RIFF", f"Expected WAV body, got {_r.content[:4]!r}"
-        with wave.open(io.BytesIO(_r.content), "rb") as _wf:
-            assert _wf.getnframes() == 100, f"Expected 100 frames, got {_wf.getnframes()}"
-        ok("200 with valid WAV (100 frames) on existing DONE chapter")
+        ok("200 with valid WAV from persisted file")
 
         # 404 — book inexistant
         _r = _tc.get("/books/9999/chapters/1/audio")
         assert _r.status_code == 404, f"Expected 404, got {_r.status_code}"
         ok("404 when book_id not found")
 
-        # 409 — book pas encore DONE
-        _r = _tc.get(f"/books/{_proc_book_id}/chapters/1/audio")
+        # 409 — chapter status=PENDING (not yet generated)
+        _r = _tc.get(f"/books/{_pending_book_id}/chapters/1/audio")
         assert _r.status_code == 409, f"Expected 409, got {_r.status_code}"
-        ok("409 when book status != DONE")
+        ok("409 when chapter status != DONE")
 
         # 404 — position de chapitre inexistante
         _r = _tc.get(f"/books/{_api_book_id}/chapters/99/audio")
