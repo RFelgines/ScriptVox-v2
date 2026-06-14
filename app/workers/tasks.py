@@ -141,18 +141,19 @@ async def _synthesise_book(
     return audio_path
 
 
-def _process_book_impl(book_id: int) -> None:
+def _analyze_book_impl(book_id: int) -> None:
     from app.core.db import get_engine
     from app.core.enums import BookStatus
     from app.models import Book, Chapter
     from app.services.epub.parser import EpubParser
+    from app.services.voice_assignment import assign_voices
 
     engine = get_engine()
 
     with Session(engine) as session:
         book = session.get(Book, book_id)
         if book is None:
-            logger.error("process_book called with unknown book_id=%d", book_id)
+            logger.error("analyze_book called with unknown book_id=%d", book_id)
             return
         source_path = book.source_path
         book.status = BookStatus.PROCESSING
@@ -162,7 +163,7 @@ def _process_book_impl(book_id: int) -> None:
         session.commit()
 
     try:
-        # ── Phase 1: EPUB ingestion ────────────────────────────────────────────
+        # ── EPUB ingestion ─────────────────────────────────────────────────────
         parsed = EpubParser().parse(source_path)
 
         with Session(engine) as session:
@@ -181,7 +182,6 @@ def _process_book_impl(book_id: int) -> None:
             book.updated_at = datetime.now(timezone.utc)
             session.add(book)
             session.commit()
-            # Collect chapter IDs while the session is still open
             chapters = session.exec(
                 select(Chapter)
                 .where(Chapter.book_id == book_id)
@@ -189,15 +189,59 @@ def _process_book_impl(book_id: int) -> None:
             ).all()
             chapter_data = [(ch.id, ch.raw_text) for ch in chapters]
 
-        # ── Phase 2: LLM analysis (progress 10% → 60%) ────────────────────────
+        # ── LLM analysis (progress 10% → 60%) ─────────────────────────────────
         asyncio.run(_analyze_book(book_id, chapter_data, engine))
 
-        # ── Phase 3: Voice assignment ──────────────────────────────────────────
-        from app.services.voice_assignment import assign_voices
+        # ── Voice assignment ───────────────────────────────────────────────────
         with Session(engine) as session:
             assign_voices(book_id, session)
 
-        # ── Phase 4: TTS synthesis + audio assembly (progress 60% → 100%) ─────
+        with Session(engine) as session:
+            book = session.get(Book, book_id)
+            book.status = BookStatus.ANALYZED
+            book.progress = 100.0
+            book.updated_at = datetime.now(timezone.utc)
+            session.add(book)
+            session.commit()
+
+    except Exception as exc:
+        logger.exception("analyze_book failed for book_id=%d", book_id)
+        with Session(engine) as session:
+            book = session.get(Book, book_id)
+            if book:
+                book.status = BookStatus.FAILED
+                book.error_message = str(exc)
+                book.updated_at = datetime.now(timezone.utc)
+                session.add(book)
+                session.commit()
+
+
+def _generate_book_impl(book_id: int) -> None:
+    from app.core.db import get_engine
+    from app.core.enums import BookStatus
+    from app.models import Book
+
+    engine = get_engine()
+
+    with Session(engine) as session:
+        book = session.get(Book, book_id)
+        if book is None:
+            logger.error("generate_book called with unknown book_id=%d", book_id)
+            return
+        if book.status not in (BookStatus.ANALYZED, BookStatus.DONE):
+            logger.warning(
+                "generate_book skipped: book_id=%d has status=%s", book_id, book.status
+            )
+            return
+        source_path = book.source_path
+        book.status = BookStatus.GENERATING
+        book.progress = 0.0
+        book.updated_at = datetime.now(timezone.utc)
+        session.add(book)
+        session.commit()
+
+    try:
+        # ── TTS synthesis + audio assembly (progress 60% → 90%) ───────────────
         audio_path = asyncio.run(_synthesise_book(book_id, source_path, engine))
 
         with Session(engine) as session:
@@ -210,7 +254,7 @@ def _process_book_impl(book_id: int) -> None:
             session.commit()
 
     except Exception as exc:
-        logger.exception("process_book failed for book_id=%d", book_id)
+        logger.exception("generate_book failed for book_id=%d", book_id)
         with Session(engine) as session:
             book = session.get(Book, book_id)
             if book:
@@ -219,6 +263,33 @@ def _process_book_impl(book_id: int) -> None:
                 book.updated_at = datetime.now(timezone.utc)
                 session.add(book)
                 session.commit()
+
+
+def _process_book_impl(book_id: int) -> None:
+    """Chains analyze + generate — preserved for backward compatibility."""
+    from app.core.db import get_engine
+    from app.core.enums import BookStatus
+    from app.models import Book
+
+    _analyze_book_impl(book_id)
+
+    engine = get_engine()
+    with Session(engine) as session:
+        book = session.get(Book, book_id)
+        if book is None or book.status != BookStatus.ANALYZED:
+            return
+
+    _generate_book_impl(book_id)
+
+
+@huey.task()
+def analyze_book(book_id: int) -> None:
+    _analyze_book_impl(book_id)
+
+
+@huey.task()
+def generate_book(book_id: int) -> None:
+    _generate_book_impl(book_id)
 
 
 @huey.task()

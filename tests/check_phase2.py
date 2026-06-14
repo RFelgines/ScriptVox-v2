@@ -208,7 +208,7 @@ section("HTTP routes -- TestClient (worker stubbed)")
 # validates only the HTTP contract; the worker pipeline is covered by section 4.
 import app.api.routes.books as books_module  # noqa: E402
 
-books_module.process_book = lambda book_id: None
+books_module.analyze_book = lambda book_id: None
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402

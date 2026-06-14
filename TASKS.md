@@ -178,20 +178,30 @@ et d'ouvrir la voie à une parallélisation future.
 > Plan-First, attendre GO avant chaque étape**. Le détail fichier-par-fichier se fait au moment du
 > plan, PAS ici (cette roadmap fixe le quoi et l'ordre, pas le comment).
 
-### ⚖️ Décisions à trancher AVANT de démarrer (revue humaine)
+### ⚖️ Décisions tranchées (2026-06-14)
 
-- **D1 — Moteur TTS par défaut : EdgeTTS vs Piper.** Impacte Phase 8 (catalogue de voix),
-  `GET /voices` et Phase 10 (EdgeTTS sort du MP3 nativement). *Reco : EdgeTTS = défaut cloud
-  (gratuit, sans GPU, multilingue, sans GPL) ; Piper = option offline.* → à valider.
-- **D2 — Découplage du pipeline.** Aujourd'hui l'upload lance tout automatiquement
-  (parse → analyse → voix → TTS). La V1 séparait : upload → analyse → *(casting humain)* →
-  génération. Meilleure UX mais change `BookStatus` = changement de contrat. → cadre la Phase 7.
+- **D1 ✅ — EdgeTTS devient le moteur TTS par défaut.** Nouveau provider EdgeTTS (gratuit, sans GPU,
+  sans clé, multilingue) dans le pattern Strategy ; Piper = option 100 % offline, ElevenLabs = premium.
+  ⚠️ **Point d'attention** : EdgeTTS sort du **MP3**, alors que l'assembleur actuel ne gère que du **WAV**
+  (`stdlib wave`). Le chantier EdgeTTS devra donc soit convertir MP3→WAV dans le provider (dépendance
+  décodeur à acter), soit rendre la couche audio MP3-native (rejoint Phase 10). À cadrer au plan.
+- **D2 ✅ — Le pipeline sera découplé.** Upload = parse + analyse seulement ; la génération audio
+  devient une étape explicite déclenchée après le casting. Change `BookStatus` (contrat). → Phase 7.
 
 ### Phase 7 — Découplage du pipeline & déclencheurs de génération
 **Pourquoi.** Laisser l'utilisateur ajuster le casting AVANT la synthèse (longue). Meilleure UX,
 économise du calcul. *Dépend de D2.*
-- Étape 1 — Séparer l'upload (analyse seule) de la génération. ⚠️ **Contrat** : nouveaux statuts
-  `BookStatus` (ex. `ANALYZED` / `READY_TO_GENERATE`).
+
+- Étape 1 ✅ (2026-06-14) — Pipeline découplé. Nouveaux statuts `ANALYZED` et `GENERATING` dans
+  `BookStatus`. Worker splitté : `_analyze_book_impl` (EPUB + LLM + voix → `ANALYZED`) +
+  `_generate_book_impl` (TTS → `DONE`). `_process_book_impl` conservé comme chaîne pour
+  rétrocompabilité des tests. Tasks Huey : `analyze_book`, `generate_book`. `POST /books`
+  déclenche désormais `analyze_book` (plus `process_book`). Garde de `GET /books/{id}/chapters/{n}/audio`
+  relâchée à `{ANALYZED, GENERATING, DONE}`. `ARCHITECTURE.md §2.6` mis à jour.
+  `tests/check_phase7.py` — 10 sections OK. Zéro régression sur les 6 suites existantes.
+  Fichiers (6) : `app/core/enums.py`, `app/workers/tasks.py`, `app/api/routes/books.py`,
+  `ARCHITECTURE.md`, `tests/check_phase7.py`, `tests/check_phase2.py`.
+
 - Étape 2 — Déclencheurs : `POST /books/{id}/generate` (tout) + `POST /books/{id}/chapters/{n}/generate`.
 - Étape 3 — Persistance de l'audio chapitre + statut par chapitre (vs synthèse à la volée de la
   Phase 6) ; régénération d'un chapitre.

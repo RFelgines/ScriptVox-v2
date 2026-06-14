@@ -4,6 +4,8 @@ from enum import Enum
 class BookStatus(str, Enum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
+    ANALYZED = "ANALYZED"
+    GENERATING = "GENERATING"
     DONE = "DONE"
     FAILED = "FAILED"
 

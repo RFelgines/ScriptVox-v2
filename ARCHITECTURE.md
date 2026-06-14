@@ -107,12 +107,24 @@ Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs`
 Every long-running task is tracked in the database from creation.
 
 ```
-PENDING → PROCESSING → DONE
-                     ↘ FAILED  (error_message populated)
+PENDING → PROCESSING → ANALYZED → GENERATING → DONE
+               ↘ FAILED              ↘ FAILED
 ```
+
+| Status | Meaning |
+|--------|---------|
+| `PENDING` | Book created, worker not started yet |
+| `PROCESSING` | EPUB parse + LLM analysis in progress |
+| `ANALYZED` | Analysis complete; characters, segments and voice assignments populated; ready for audio generation |
+| `GENERATING` | TTS synthesis + audio assembly in progress |
+| `DONE` | Audio file ready; `audio_path` populated |
+| `FAILED` | Terminal error; `error_message` populated verbatim |
 
 - `error_message` stores the failure reason verbatim.
 - Mandatory from Phase 1 — this is the foundation of observability.
+- Worker entry points: `analyze_book` (Huey task → `_analyze_book_impl`) and
+  `generate_book` (Huey task → `_generate_book_impl`).
+  `process_book` (legacy) chains both and is preserved for backward compatibility.
 
 ---
 

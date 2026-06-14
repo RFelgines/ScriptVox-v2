@@ -13,7 +13,7 @@ from app.models import Book, Chapter, Character
 from app.schemas.book import BookResponse, CharacterResponse
 from app.services.audio.chapter import synthesise_chapter
 from app.services.tts import factory as tts_factory
-from app.workers.tasks import process_book
+from app.workers.tasks import analyze_book
 
 DATA_DIR = Path("data")
 
@@ -42,7 +42,7 @@ async def upload_book(
     session.commit()
     session.refresh(book)
 
-    process_book(book.id)
+    analyze_book(book.id)
 
     return BookResponse.model_validate(book)
 
@@ -82,7 +82,7 @@ async def get_chapter_audio(
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status != BookStatus.DONE:
+    if book.status not in (BookStatus.ANALYZED, BookStatus.GENERATING, BookStatus.DONE):
         raise HTTPException(
             status_code=409,
             detail=f"Book {book_id} is not ready (status={book.status.value}).",
