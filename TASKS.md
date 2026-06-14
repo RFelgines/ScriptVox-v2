@@ -149,7 +149,7 @@ appelé en subprocess.
 
 ---
 
-## À venir — Phase 6 : Audio par chapitre
+## Phase 6 — Audio par chapitre ✅ (terminée)
 
 ### Étape 1 — `GET /books/{id}/chapters/{n}/audio` ✅ (2026-06-14)
 
@@ -165,30 +165,72 @@ inexistant / 404 chapitre sans segment. Fichiers (4) :
 - `tests/check_phase6.py` (nouveau) — 8 sections vertes ; 5 suites existantes sans régression.
 
 **Pourquoi.** Le pipeline génère un WAV du livre entier (30-90 min pour un roman). Un
-endpoint par chapitre permettrait de tester rapidement, d'écouter au fil de l'analyse,
+endpoint par chapitre permet de tester rapidement, d'écouter au fil de l'analyse,
 et d'ouvrir la voie à une parallélisation future.
 
-**Contexte.** Les `Chapter` et leurs `Segment` sont déjà en BDD après le traitement LLM.
-`_synthesise_book` itère déjà sur les chapitres. Il faut extraire la synthèse d'un seul
-chapitre et l'exposer via un endpoint dédié.
+---
 
-**Approche proposée.**
+## Roadmap V2 — parité fonctionnelle avec la V1
 
-1. Nouveau service `synthesise_chapter(book_id, chapter_position, session, tts) -> bytes`
-   qui filtre les segments du chapitre, appelle `PiperProvider.synthesise` pour chacun,
-   et assemble avec `assemble_wav`.
-2. Nouveau endpoint `GET /books/{id}/chapters/{n}/audio` (n = position 1-indexed).
-   Retourne 404 si le chapitre n'existe pas, 409 si le book n'est pas encore `DONE`.
-3. Tests dans `tests/check_phase6.py` : happy path, 404 sur chapitre inexistant, 409 sur
-   book non terminé.
+> **Contexte.** L'ancien repo `RFelgines/ScriptVox` (V1, abandonnée car trop buggée) est un
+> **blueprint de features**, pas du code à reprendre (voir mémoire `old_repo_feature_reference.md`).
+> Cette roadmap porte les **idées** de la V1 dans l'archi propre de la V2. Règles : **test-first,
+> Plan-First, attendre GO avant chaque étape**. Le détail fichier-par-fichier se fait au moment du
+> plan, PAS ici (cette roadmap fixe le quoi et l'ordre, pas le comment).
 
-**Fichiers (≤5).**
-- `app/services/audio/assembler.py` — éventuellement extraire un helper `synthesise_segments`
-- `app/api/routes/books.py` — ajouter l'endpoint
-- `app/schemas/book.py` — aucun changement de `BookResponse` prévu
-- `tests/check_phase6.py` — nouveau
+### ⚖️ Décisions à trancher AVANT de démarrer (revue humaine)
 
-**Contrat.** Pas de changement de schéma existant — endpoint pur ajout.
+- **D1 — Moteur TTS par défaut : EdgeTTS vs Piper.** Impacte Phase 8 (catalogue de voix),
+  `GET /voices` et Phase 10 (EdgeTTS sort du MP3 nativement). *Reco : EdgeTTS = défaut cloud
+  (gratuit, sans GPU, multilingue, sans GPL) ; Piper = option offline.* → à valider.
+- **D2 — Découplage du pipeline.** Aujourd'hui l'upload lance tout automatiquement
+  (parse → analyse → voix → TTS). La V1 séparait : upload → analyse → *(casting humain)* →
+  génération. Meilleure UX mais change `BookStatus` = changement de contrat. → cadre la Phase 7.
+
+### Phase 7 — Découplage du pipeline & déclencheurs de génération
+**Pourquoi.** Laisser l'utilisateur ajuster le casting AVANT la synthèse (longue). Meilleure UX,
+économise du calcul. *Dépend de D2.*
+- Étape 1 — Séparer l'upload (analyse seule) de la génération. ⚠️ **Contrat** : nouveaux statuts
+  `BookStatus` (ex. `ANALYZED` / `READY_TO_GENERATE`).
+- Étape 2 — Déclencheurs : `POST /books/{id}/generate` (tout) + `POST /books/{id}/chapters/{n}/generate`.
+- Étape 3 — Persistance de l'audio chapitre + statut par chapitre (vs synthèse à la volée de la
+  Phase 6) ; régénération d'un chapitre.
+
+### Phase 8 — Casting & attribution intelligente des voix
+**Pourquoi.** Cœur de la promesse « multi-voix » ; donne le contrôle des voix à l'utilisateur.
+*Étape 1 dépend de D1.*
+- Étape 1 — `GET /voices` : lister les voix du provider courant (id, genre, locale).
+- Étape 2 — Traits de personnage enrichis (`age_category`, `tone`, `voice_quality`).
+  ⚠️ **Contrat** : schéma `Character` + `CharacterResponse` + prompt LLM.
+- Étape 3 — VoiceRegistry trait-based **déterministe** (score genre/âge/ton/qualité/locale), testé.
+  Remplace le round-robin genre-only.
+- Étape 4 — `PATCH /characters/{id}` : override manuel de la voix. ⚠️ **Contrat** : nouvelle route + schéma.
+
+### Phase 9 — Couverture & métadonnées
+**Pourquoi.** Identité visuelle des livres (bibliothèque, lecteur).
+- Étape 1 — Extraction de la couverture à l'ingestion. ⚠️ **Contrat** : `Book.cover_path` + `BookResponse`.
+- Étape 2 — `GET /books/{id}/cover` (servir l'image).
+- Étape 3 — `POST /books/{id}/cover` (upload / remplacement manuel).
+
+### Phase 10 — Format de diffusion audio
+**Pourquoi.** Un WAV de livre entier est énorme ; le MP3 convient au streaming web.
+- Étape 1 — Sortie MP3 pour la diffusion (master WAV conservé). ⚠️ **Dépendance** à justifier
+  avant ajout (ex. `ffmpeg` / `lameenc`). *Dépend de D1 (EdgeTTS produit déjà du MP3).*
+
+### Phase 11 — Frontend (Next.js) — piste séparée
+**Pourquoi.** La V1 était surtout une UI. À démarrer une fois le backend à parité (Phases 7-9).
+> Nouvelle stack (Next.js / React / Tailwind) = gros périmètre. Chaque étape = sous-projet à recouper.
+- Étape 1 — Scaffold + intégration API (URL configurable, zéro hardcode).
+- Étape 2 — Upload (drag & drop) + bibliothèque (grille).
+- Étape 3 — Détail livre (chapitres, statuts, progression, polling).
+- Étape 4 — Modale de casting (auto + override, filtre langue).
+- Étape 5 — Lecteur audio persistant (play/pause, seek, vitesse).
+
+### Différé / à NE PAS refaire
+- **Voice Studio** (clonage de voix, contrôle d'émotion) — vaporware V1.
+- **Lyrics / texte synchronisé** — faisable plus tard via timestamps de segments.
+- **Switch de mode qui réécrit le `.env`** au runtime — anti-pattern, éviter (la V2 est fail-fast au démarrage).
+- **Fichiers audio par segment séparés** — le WAV assemblé de la V2 est meilleur.
 
 ---
 
