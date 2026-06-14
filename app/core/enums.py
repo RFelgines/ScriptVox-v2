@@ -15,6 +15,13 @@ class SegmentType(str, Enum):
     DIALOGUE = "DIALOGUE"
 
 
+class ChapterStatus(str, Enum):
+    PENDING    = "PENDING"
+    GENERATING = "GENERATING"
+    DONE       = "DONE"
+    FAILED     = "FAILED"
+
+
 class Gender(str, Enum):
     MALE = "MALE"
     FEMALE = "FEMALE"

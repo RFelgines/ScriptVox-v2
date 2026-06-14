@@ -463,4 +463,89 @@ books_module.generate_book = _generate_book_task  # restore
 app.dependency_overrides.clear()
 
 
-print("\nPHASE 7 (split worker + route + generate trigger) OK\n")
+# ── 14-16. Étape 3a — ChapterStatus enum + Chapter fields + ChapterResponse ───
+from app.core.enums import ChapterStatus  # noqa: E402
+from app.schemas.book import ChapterResponse  # noqa: E402
+
+_3a_engine = _make_test_engine()
+
+# Section 14: ChapterStatus has exactly 4 expected values
+section("ChapterStatus enum — PENDING/GENERATING/DONE/FAILED")
+assert ChapterStatus.PENDING.value    == "PENDING"
+assert ChapterStatus.GENERATING.value == "GENERATING"
+assert ChapterStatus.DONE.value       == "DONE"
+assert ChapterStatus.FAILED.value     == "FAILED"
+assert len(ChapterStatus) == 4, f"Expected 4 values, got {len(ChapterStatus)}"
+ok("ChapterStatus: 4 values OK")
+
+# Section 15: Chapter model round-trip with new fields
+section("Chapter model — audio_path / status / error_message round-trip")
+
+with Session(_3a_engine) as _s:
+    _3a_book = Book(title="Sch3a", source_path="/tmp/x.epub")
+    _s.add(_3a_book)
+    _s.commit()
+    _s.refresh(_3a_book)
+    _3a_book_id = _3a_book.id
+
+    _3a_ch = Chapter(
+        book_id=_3a_book_id,
+        position=1,
+        title="Ch1",
+        raw_text="text",
+        status=ChapterStatus.DONE,
+        audio_path="/data/1/ch1.wav",
+        error_message=None,
+    )
+    _s.add(_3a_ch)
+    _s.commit()
+    _s.refresh(_3a_ch)
+    _3a_ch_id = _3a_ch.id
+
+with Session(_3a_engine) as _s:
+    _3a_loaded = _s.get(Chapter, _3a_ch_id)
+    assert _3a_loaded.status      == ChapterStatus.DONE,       f"status={_3a_loaded.status!r}"
+    assert _3a_loaded.audio_path  == "/data/1/ch1.wav",        f"audio_path={_3a_loaded.audio_path!r}"
+    assert _3a_loaded.error_message is None,                   f"error_message={_3a_loaded.error_message!r}"
+    ok(f"status=DONE, audio_path='/data/1/ch1.wav', error_message=None")
+
+# Check default (PENDING)
+with Session(_3a_engine) as _s:
+    _3a_ch2 = Chapter(book_id=_3a_book_id, position=2, raw_text="y")
+    _s.add(_3a_ch2)
+    _s.commit()
+    _s.refresh(_3a_ch2)
+    assert _3a_ch2.status     == ChapterStatus.PENDING, f"default status={_3a_ch2.status!r}"
+    assert _3a_ch2.audio_path is None,                  f"default audio_path={_3a_ch2.audio_path!r}"
+    ok("default status=PENDING, audio_path=None")
+
+# Section 16: ChapterResponse round-trip from ORM Chapter
+section("ChapterResponse — from_attributes round-trip from Chapter ORM")
+
+with Session(_3a_engine) as _s:
+    _3a_src = _s.get(Chapter, _3a_ch_id)
+    _3a_resp = ChapterResponse.model_validate(_3a_src)
+    assert _3a_resp.id            == _3a_ch_id
+    assert _3a_resp.position      == 1
+    assert _3a_resp.title         == "Ch1"
+    assert _3a_resp.status        == ChapterStatus.DONE
+    assert _3a_resp.error_message is None
+    ok(f"ChapterResponse: id={_3a_resp.id}, position=1, title='Ch1', status=DONE")
+
+# Failure state
+with Session(_3a_engine) as _s:
+    _3a_failed_ch = Chapter(
+        book_id=_3a_book_id, position=3, raw_text="z",
+        status=ChapterStatus.FAILED,
+        error_message="TTS exploded",
+    )
+    _s.add(_3a_failed_ch)
+    _s.commit()
+    _s.refresh(_3a_failed_ch)
+    _3a_resp_f = ChapterResponse.model_validate(_3a_failed_ch)
+    assert _3a_resp_f.status        == ChapterStatus.FAILED
+    assert _3a_resp_f.error_message == "TTS exploded"
+    ok("FAILED chapter: status=FAILED, error_message='TTS exploded'")
+
+
+print("\nPHASE 7 (split worker + route + generate trigger + étape 3a schéma) OK\n")

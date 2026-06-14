@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.core.enums import BookStatus, Gender, SegmentType
+from app.core.enums import BookStatus, ChapterStatus, Gender, SegmentType
 
 
 class Book(SQLModel, table=True):
@@ -40,6 +40,9 @@ class Chapter(SQLModel, table=True):
     position: int
     title: Optional[str] = None
     raw_text: str
+    status: ChapterStatus = Field(default=ChapterStatus.PENDING)
+    audio_path: Optional[str] = None
+    error_message: Optional[str] = None
 
     book: Optional["Book"] = Relationship(back_populates="chapters")
     segments: list["Segment"] = Relationship(

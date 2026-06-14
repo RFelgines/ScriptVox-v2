@@ -3,7 +3,17 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.core.enums import BookStatus, Gender
+from app.core.enums import BookStatus, ChapterStatus, Gender
+
+
+class ChapterResponse(BaseModel):
+    id: int
+    position: int
+    title: Optional[str] = None
+    status: ChapterStatus
+    error_message: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class CharacterResponse(BaseModel):
