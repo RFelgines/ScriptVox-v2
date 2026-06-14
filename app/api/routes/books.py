@@ -13,7 +13,7 @@ from app.models import Book, Chapter, Character
 from app.schemas.book import BookResponse, CharacterResponse
 from app.services.audio.chapter import synthesise_chapter
 from app.services.tts import factory as tts_factory
-from app.workers.tasks import analyze_book
+from app.workers.tasks import analyze_book, generate_book
 
 DATA_DIR = Path("data")
 
@@ -57,6 +57,20 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> BookRespo
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    return BookResponse.model_validate(book)
+
+
+@router.post("/{book_id}/generate", response_model=BookResponse, status_code=202)
+def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if book.status != BookStatus.ANALYZED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Book {book_id} cannot be generated (status={book.status.value}). Expected ANALYZED.",
+        )
+    generate_book(book.id)
     return BookResponse.model_validate(book)
 
 

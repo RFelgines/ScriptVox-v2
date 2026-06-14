@@ -380,4 +380,87 @@ ok("409 for PROCESSING book (guard still applies)")
 app.dependency_overrides.clear()
 
 
-print("\nPHASE 7 (split worker + route) OK\n")
+# ── 11-13. POST /books/{id}/generate ─────────────────────────────────────────
+from app.workers.tasks import generate_book as _generate_book_task  # noqa: E402
+
+_gen_engine = _make_test_engine()
+
+
+def _gen_session():
+    with Session(_gen_engine) as s:
+        yield s
+
+
+app.dependency_overrides[get_session] = _gen_session
+
+# Section 11: 202 + generate_book dispatched for ANALYZED book
+section("POST /books/{id}/generate — 202, generate_book dispatched for ANALYZED book")
+
+with Session(_gen_engine) as _s:
+    _g11_book = Book(
+        title="ReadyToGenerate", source_path="/tmp/r.epub", status=BookStatus.ANALYZED
+    )
+    _s.add(_g11_book)
+    _s.commit()
+    _s.refresh(_g11_book)
+    _g11_book_id = _g11_book.id
+
+_generate_calls: list = []
+books_module.generate_book = lambda book_id: _generate_calls.append(book_id)
+
+with TestClient(app) as _tc:
+    _r11 = _tc.post(f"/books/{_g11_book_id}/generate")
+    assert _r11.status_code == 202, f"Expected 202, got {_r11.status_code} ({_r11.text})"
+    assert _r11.json()["status"] == "ANALYZED", (
+        f"Expected ANALYZED in response, got {_r11.json()['status']}"
+    )
+
+books_module.generate_book = _generate_book_task  # restore
+
+assert _generate_calls == [_g11_book_id], (
+    f"Expected generate_book([{_g11_book_id}]), got {_generate_calls}"
+)
+ok(f"202, generate_book called with book_id={_g11_book_id}")
+
+# Section 12: 404 if book not found
+section("POST /books/{id}/generate — 404 if book not found")
+
+books_module.generate_book = lambda book_id: None
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r12 = _tc.post("/books/9999/generate")
+    assert _r12.status_code == 404, f"Expected 404, got {_r12.status_code}"
+
+books_module.generate_book = _generate_book_task  # restore
+ok("404 for non-existent book")
+
+# Section 13: 409 for status != ANALYZED
+section("POST /books/{id}/generate — 409 for PENDING, DONE, PROCESSING")
+
+_g13_status_cases = [BookStatus.PENDING, BookStatus.DONE, BookStatus.PROCESSING]
+_g13_ids: dict = {}
+
+with Session(_gen_engine) as _s:
+    for _st in _g13_status_cases:
+        _b = Book(title=f"Bad_{_st.value}", source_path="/tmp/x.epub", status=_st)
+        _s.add(_b)
+        _s.commit()
+        _s.refresh(_b)
+        _g13_ids[_st] = _b.id
+
+books_module.generate_book = lambda book_id: None
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    for _st in _g13_status_cases:
+        _r13 = _tc.post(f"/books/{_g13_ids[_st]}/generate")
+        assert _r13.status_code == 409, (
+            f"Expected 409 for status={_st.value}, got {_r13.status_code}"
+        )
+        ok(f"409 for status={_st.value}")
+
+books_module.generate_book = _generate_book_task  # restore
+
+app.dependency_overrides.clear()
+
+
+print("\nPHASE 7 (split worker + route + generate trigger) OK\n")

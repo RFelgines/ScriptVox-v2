@@ -202,7 +202,11 @@ et d'ouvrir la voie à une parallélisation future.
   Fichiers (6) : `app/core/enums.py`, `app/workers/tasks.py`, `app/api/routes/books.py`,
   `ARCHITECTURE.md`, `tests/check_phase7.py`, `tests/check_phase2.py`.
 
-- Étape 2 — Déclencheurs : `POST /books/{id}/generate` (tout) + `POST /books/{id}/chapters/{n}/generate`.
+- Étape 2 ✅ (2026-06-14) — `POST /books/{id}/generate` : dispatch `generate_book` Huey.
+  Garde : 404 livre inexistant · 409 si statut ≠ `ANALYZED`. Retourne 202 + `BookResponse`.
+  `POST /books/{id}/chapters/{n}/generate` différé en Étape 3 (sans `Chapter.audio_path`,
+  le résultat serait inaccessible). `check_phase7.py` — 13 sections OK.
+  Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase7.py`.
 - Étape 3 — Persistance de l'audio chapitre + statut par chapitre (vs synthèse à la volée de la
   Phase 6) ; régénération d'un chapitre.
 
