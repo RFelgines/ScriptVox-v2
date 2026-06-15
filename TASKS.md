@@ -245,8 +245,10 @@ et d'ouvrir la voie à une parallélisation future.
   `voice_tone` conservé (rétrocompat). `SYSTEM_PROMPT` étendu (âge, ton, qualité). `_parse_llm_json` lit les 3 champs avec fallback.
   Worker `tasks.py` propage vers BDD. Fichiers (6) : `app/core/enums.py`, `app/models/entities.py`, `app/schemas/book.py`,
   `app/services/llm/base.py`, `app/workers/tasks.py`, `tests/check_phase9.py` (13 sections). ⚠️ Supprimer `scriptvox.db` avant 1er run.
-- Étape 3 — VoiceRegistry trait-based **déterministe** (score genre/âge/ton/qualité/locale), testé.
-  Remplace le round-robin genre-only.
+- Étape 3 ✅ (2026-06-16) — VoiceRegistry trait-based déterministe. `_VoiceMeta`/`_CATALOGUE_META` (métadonnées
+  statiques par voice_id), `_score_voice` (genre+4 / age+2 / tone+1 / quality+1), `assign_voices` réécrit avec
+  tri (-score, voice_id) + wrap-around intra-tier (le top-tier évite qu'un MALE tombe sur une voix FEMALE).
+  Fichiers (2) : `app/services/voice_assignment.py`, `tests/check_phase9.py` (20 sections). 8 suites sans régression.
 - Étape 4 — `PATCH /characters/{id}` : override manuel de la voix. ⚠️ **Contrat** : nouvelle route + schéma.
 
 ### Phase 9 — Couverture & métadonnées

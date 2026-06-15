@@ -343,6 +343,195 @@ check("voice_quality dans SYSTEM_PROMPT", "voice_quality" in SYSTEM_PROMPT)
 check("CHILD|YOUNG_ADULT dans SYSTEM_PROMPT", "YOUNG_ADULT" in SYSTEM_PROMPT)
 
 
+# ══════════════════════════════════════════════════════
+# Phase 8 — Étape 3 : VoiceRegistry trait-based
+# ══════════════════════════════════════════════════════
+
+from sqlalchemy.pool import StaticPool  # noqa: E402
+from sqlmodel import SQLModel, Session, create_engine, select  # noqa: E402
+
+from app.models.entities import Book  # noqa: E402
+from app.services.voice_assignment import (  # noqa: E402
+    _CATALOGUE_META,
+    _score_voice,
+    assign_voices,
+)
+
+
+def _make_engine():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    return engine
+
+
+def _make_book(session) -> int:
+    book = Book(title="Test", source_path="/tmp/t.epub")
+    session.add(book)
+    session.flush()
+    return book.id
+
+
+def _char(book_id, name, gender, age=AgeCategory.UNKNOWN, tone=None, quality=None):
+    return Character(
+        book_id=book_id, name=name, gender=gender,
+        age_category=age, tone=tone, voice_quality=quality,
+    )
+
+
+# ── Section 14: _score_voice — MALE ADULT warm deep -> male_0 (score max) ────
+
+section("_score_voice: MALE ADULT 'warm' 'deep' -> male_0 meilleur score (8)")
+
+_c14 = _char(1, "X", Gender.MALE, AgeCategory.ADULT, "warm", "deep")
+_scores14 = {vid: _score_voice(_c14, vid) for vid in _CATALOGUE_META}
+
+check("male_0 score == 8", _scores14["male_0"] == 8, f"got {_scores14['male_0']}")
+check("male_0 > tous les autres",
+      all(_scores14["male_0"] >= v for v in _scores14.values()),
+      f"scores={_scores14}")
+check("narrator score < 0", _scores14["narrator"] < 0)
+check("female_* score < male_0 (genre different -> pas de bonus genre)",
+      all(_scores14[vid] < _scores14["male_0"] for vid in ["female_0", "female_1", "female_2"]),
+      f"female scores={[_scores14[v] for v in ['female_0','female_1','female_2']]} male_0={_scores14['male_0']}")
+
+
+# ── Section 15: _score_voice — MALE YOUNG_ADULT gentle smooth -> male_1 ──────
+
+section("_score_voice: MALE YOUNG_ADULT 'gentle' 'smooth' -> male_1 meilleur (8)")
+
+_c15 = _char(1, "X", Gender.MALE, AgeCategory.YOUNG_ADULT, "gentle", "smooth")
+_scores15 = {vid: _score_voice(_c15, vid) for vid in _CATALOGUE_META}
+
+check("male_1 score == 8", _scores15["male_1"] == 8, f"got {_scores15['male_1']}")
+check("male_1 > male_0 et male_2",
+      _scores15["male_1"] > _scores15["male_0"] and _scores15["male_1"] > _scores15["male_2"],
+      f"male_0={_scores15['male_0']} male_1={_scores15['male_1']} male_2={_scores15['male_2']}")
+
+
+# ── Section 16: assign_voices — assignation optimale par traits d'âge ────────
+
+section("assign_voices: 3 personnages MALE avec âges distincts -> voix optimales")
+
+_eng16 = _make_engine()
+with Session(_eng16) as _s16:
+    _bid16 = _make_book(_s16)
+    _s16.add_all([
+        _char(_bid16, "Alice", Gender.MALE, AgeCategory.YOUNG_ADULT),  # -> male_1
+        _char(_bid16, "Bob",   Gender.MALE, AgeCategory.ADULT),         # -> male_0
+        _char(_bid16, "Carl",  Gender.MALE, AgeCategory.ELDER),         # -> male_2
+    ])
+    _s16.commit()
+    assign_voices(_bid16, _s16)
+
+with Session(_eng16) as _s16b:
+    _chars16 = {
+        c.name: c.voice_id
+        for c in _s16b.exec(select(Character).where(Character.book_id == _bid16)).all()
+    }
+check("Alice (YOUNG_ADULT) -> male_1", _chars16.get("Alice") == "male_1",
+      f"got {_chars16.get('Alice')!r}")
+check("Bob   (ADULT)       -> male_0", _chars16.get("Bob") == "male_0",
+      f"got {_chars16.get('Bob')!r}")
+check("Carl  (ELDER)       -> male_2", _chars16.get("Carl") == "male_2",
+      f"got {_chars16.get('Carl')!r}")
+check("voix toutes distinctes", len(set(_chars16.values())) == 3)
+
+
+# ── Section 17: idempotence — 2e appel ne ré-assigne pas ─────────────────────
+
+section("assign_voices: idempotence — 2e appel conserve les voix assignées")
+
+with Session(_eng16) as _s17:
+    assign_voices(_bid16, _s17)
+
+with Session(_eng16) as _s17b:
+    _chars17 = {
+        c.name: c.voice_id
+        for c in _s17b.exec(select(Character).where(Character.book_id == _bid16)).all()
+    }
+check("Alice inchangée après 2e appel", _chars17.get("Alice") == _chars16.get("Alice"))
+check("Bob inchangé",                   _chars17.get("Bob")   == _chars16.get("Bob"))
+check("Carl inchangé",                  _chars17.get("Carl")  == _chars16.get("Carl"))
+
+
+# ── Section 18: wrap-around — plus de persos que de voix MALE ────────────────
+
+section("assign_voices: wrap-around — 4e perso MALE quand les 3 voix sont prises")
+
+_eng18 = _make_engine()
+with Session(_eng18) as _s18:
+    _bid18 = _make_book(_s18)
+    _s18.add_all([
+        _char(_bid18, "A", Gender.MALE, AgeCategory.YOUNG_ADULT),
+        _char(_bid18, "B", Gender.MALE, AgeCategory.ADULT),
+        _char(_bid18, "C", Gender.MALE, AgeCategory.ELDER),
+        _char(_bid18, "D", Gender.MALE),  # 4e — wrap-around
+    ])
+    _s18.commit()
+    assign_voices(_bid18, _s18)
+
+with Session(_eng18) as _s18b:
+    _vids18 = [
+        c.voice_id
+        for c in _s18b.exec(
+            select(Character).where(Character.book_id == _bid18).order_by(Character.name)
+        ).all()
+    ]
+check("4 voix assignées (pas d'erreur)", len(_vids18) == 4 and all(v is not None for v in _vids18),
+      f"got {_vids18}")
+check("voix D non nulle", _vids18[3] is not None)
+check("voix D != narrator", _vids18[3] != NARRATOR_VOICE_ID)
+
+
+# ── Section 19: narrator jamais attribué à un personnage ─────────────────────
+
+section("assign_voices: 'narrator' jamais attribué (même si pool épuisé)")
+
+with Session(_eng18) as _s19:
+    _all_vids19 = [
+        c.voice_id
+        for c in _s19.exec(select(Character).where(Character.book_id == _bid18)).all()
+    ]
+check("aucun perso n'a 'narrator'",
+      NARRATOR_VOICE_ID not in _all_vids19,
+      f"got {_all_vids19}")
+
+
+# ── Section 20: déterminisme — deux books identiques -> même assignation ───────
+
+section("assign_voices: déterminisme — deux books identiques -> même résultat")
+
+_eng20 = _make_engine()
+with Session(_eng20) as _s20:
+    _bid20a = _make_book(_s20)
+    _bid20b = _make_book(_s20)
+    for bid in (_bid20a, _bid20b):
+        _s20.add_all([
+            _char(bid, "Alice", Gender.FEMALE, AgeCategory.YOUNG_ADULT, "gentle", "bright"),
+            _char(bid, "Bob",   Gender.MALE,   AgeCategory.ADULT,       "warm",   "deep"),
+        ])
+    _s20.commit()
+    assign_voices(_bid20a, _s20)
+    assign_voices(_bid20b, _s20)
+
+with Session(_eng20) as _s20b:
+    def _vmap(bid):
+        return {
+            c.name: c.voice_id
+            for c in _s20b.exec(select(Character).where(Character.book_id == bid)).all()
+        }
+    _m20a, _m20b = _vmap(_bid20a), _vmap(_bid20b)
+
+check("Alice même voix dans les deux books", _m20a.get("Alice") == _m20b.get("Alice"),
+      f"{_m20a.get('Alice')!r} vs {_m20b.get('Alice')!r}")
+check("Bob même voix dans les deux books",   _m20a.get("Bob")   == _m20b.get("Bob"),
+      f"{_m20a.get('Bob')!r} vs {_m20b.get('Bob')!r}")
+
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")
@@ -352,4 +541,4 @@ if _errors:
         print(f"  {e}")
     sys.exit(1)
 else:
-    print("OK — Toutes les sections passent (Phase 8 Étape 1 + Étape 2).")
+    print("OK — Toutes les sections passent (Phase 8 Étapes 1 + 2 + 3).")
