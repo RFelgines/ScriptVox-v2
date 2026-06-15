@@ -2,7 +2,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from app.core.enums import Gender, SegmentType
+from app.core.enums import AgeCategory, Gender, SegmentType
 from app.core.exceptions import LLMParsingError
 
 GEMINI_MAX_TOKENS = 500_000
@@ -12,7 +12,12 @@ SYSTEM_PROMPT = (
     "Return ONLY valid JSON matching this exact schema — no markdown, no commentary:\n"
     "{\n"
     '  "characters": [\n'
-    '    {"name": "...", "description": "...", "gender": "MALE|FEMALE|NEUTRAL|UNKNOWN", "voice_tone": "..."}\n'
+    '    {\n'
+    '      "name": "...", "description": "...",\n'
+    '      "gender": "MALE|FEMALE|NEUTRAL|UNKNOWN",\n'
+    '      "age_category": "CHILD|YOUNG_ADULT|ADULT|ELDER|UNKNOWN",\n'
+    '      "tone": "...", "voice_quality": "...", "voice_tone": "..."\n'
+    '    }\n'
     "  ],\n"
     '  "segments": [\n'
     '    {"position": 1, "text": "...", "type": "NARRATION|DIALOGUE", "character_name": null}\n'
@@ -22,8 +27,11 @@ SYSTEM_PROMPT = (
     "- Include EVERY word of the input in segments — no text may be dropped.\n"
     "- DIALOGUE: quoted speech only. NARRATION: everything else (prose, descriptions, actions).\n"
     "- character_name must exactly match a name in the characters array, or be null for NARRATION.\n"
-    "- voice_tone: concise phrase, e.g. \"soft and hesitant\", \"deep and commanding\".\n"
-    "- gender: infer from pronouns/context; use UNKNOWN if ambiguous."
+    "- gender: infer from pronouns/context; use UNKNOWN if ambiguous.\n"
+    "- age_category: infer from apparent age (CHILD <13, YOUNG_ADULT 13-25, ADULT 26-60, ELDER 60+); use UNKNOWN if ambiguous.\n"
+    "- tone: single word for emotional/personality quality, e.g. \"warm\", \"cold\", \"harsh\", \"gentle\".\n"
+    "- voice_quality: single word for acoustic quality, e.g. \"deep\", \"raspy\", \"bright\", \"smooth\".\n"
+    "- voice_tone: concise phrase combining tone and quality, e.g. \"soft and hesitant\", \"deep and commanding\"."
 )
 
 
@@ -32,7 +40,10 @@ class CharacterData:
     name: str
     description: str | None
     gender: Gender
-    voice_tone: str | None
+    age_category: AgeCategory = AgeCategory.UNKNOWN
+    tone: str | None = None
+    voice_quality: str | None = None
+    voice_tone: str | None = None
 
 
 @dataclass
@@ -133,6 +144,9 @@ def _parse_llm_json(raw: str) -> LLMChapterResult:
                 name=c["name"],
                 description=c.get("description"),
                 gender=Gender(c.get("gender", "UNKNOWN")),
+                age_category=AgeCategory(c.get("age_category", "UNKNOWN")),
+                tone=c.get("tone"),
+                voice_quality=c.get("voice_quality"),
                 voice_tone=c.get("voice_tone"),
             )
             for c in data.get("characters", [])

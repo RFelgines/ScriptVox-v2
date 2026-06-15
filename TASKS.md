@@ -240,8 +240,11 @@ et d'ouvrir la voie à une parallélisation future.
   (`list_catalogue_voices()` déterministe/dédupliqué), `app/schemas/voice.py` (`VoiceResponse`),
   `app/api/routes/voices.py` (router monté `/voices` dans `main.py`), `app/main.py`,
   `tests/check_phase9.py` (6 sections OK). 8 suites existantes sans régression.
-- Étape 2 — Traits de personnage enrichis (`age_category`, `tone`, `voice_quality`).
-  ⚠️ **Contrat** : schéma `Character` + `CharacterResponse` + prompt LLM.
+- Étape 2 ✅ (2026-06-16) — Traits de personnage enrichis : `AgeCategory` enum (CHILD/YOUNG_ADULT/ADULT/ELDER/UNKNOWN)
+  + 3 nouveaux champs sur `Character`/`CharacterData`/`CharacterResponse` : `age_category`, `tone` (libre), `voice_quality` (libre).
+  `voice_tone` conservé (rétrocompat). `SYSTEM_PROMPT` étendu (âge, ton, qualité). `_parse_llm_json` lit les 3 champs avec fallback.
+  Worker `tasks.py` propage vers BDD. Fichiers (6) : `app/core/enums.py`, `app/models/entities.py`, `app/schemas/book.py`,
+  `app/services/llm/base.py`, `app/workers/tasks.py`, `tests/check_phase9.py` (13 sections). ⚠️ Supprimer `scriptvox.db` avant 1er run.
 - Étape 3 — VoiceRegistry trait-based **déterministe** (score genre/âge/ton/qualité/locale), testé.
   Remplace le round-robin genre-only.
 - Étape 4 — `PATCH /characters/{id}` : override manuel de la voix. ⚠️ **Contrat** : nouvelle route + schéma.

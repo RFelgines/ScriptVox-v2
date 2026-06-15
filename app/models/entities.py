@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.core.enums import BookStatus, ChapterStatus, Gender, SegmentType
+from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender, SegmentType
 
 
 class Book(SQLModel, table=True):
@@ -60,6 +60,9 @@ class Character(SQLModel, table=True):
     name: str
     description: Optional[str] = None
     gender: Gender = Field(default=Gender.UNKNOWN)
+    age_category: AgeCategory = Field(default=AgeCategory.UNKNOWN)
+    tone: Optional[str] = None
+    voice_quality: Optional[str] = None
     voice_tone: Optional[str] = None
     voice_id: Optional[str] = None  # populated in Phase 3
 

@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.core.enums import BookStatus, ChapterStatus, Gender
+from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender
 
 
 class ChapterResponse(BaseModel):
@@ -21,6 +21,9 @@ class CharacterResponse(BaseModel):
     name: str
     description: Optional[str] = None
     gender: Gender
+    age_category: AgeCategory = AgeCategory.UNKNOWN
+    tone: Optional[str] = None
+    voice_quality: Optional[str] = None
     voice_tone: Optional[str] = None
     voice_id: Optional[str] = None
 

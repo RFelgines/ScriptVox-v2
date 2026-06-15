@@ -27,3 +27,11 @@ class Gender(str, Enum):
     FEMALE = "FEMALE"
     NEUTRAL = "NEUTRAL"
     UNKNOWN = "UNKNOWN"
+
+
+class AgeCategory(str, Enum):
+    CHILD       = "CHILD"
+    YOUNG_ADULT = "YOUNG_ADULT"
+    ADULT       = "ADULT"
+    ELDER       = "ELDER"
+    UNKNOWN     = "UNKNOWN"

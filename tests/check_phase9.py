@@ -186,6 +186,163 @@ check("set(ids) == catalogue complet", set(ids) == catalogue_ids,
       f"diff={catalogue_ids ^ set(ids)}")
 
 
+# ══════════════════════════════════════════════════════
+# Phase 8 — Étape 2 : Traits de personnage enrichis
+# ══════════════════════════════════════════════════════
+
+from app.core.enums import AgeCategory  # noqa: E402
+from app.models.entities import Character  # noqa: E402
+from app.schemas.book import CharacterResponse  # noqa: E402
+from app.services.llm.base import (  # noqa: E402
+    CharacterData,
+    SYSTEM_PROMPT,
+    _parse_llm_json,
+)
+
+# ── Section 7: AgeCategory enum ──────────────────────────────────────────────
+
+section("AgeCategory enum: valeurs attendues")
+
+expected_ages = {"CHILD", "YOUNG_ADULT", "ADULT", "ELDER", "UNKNOWN"}
+check("AgeCategory hérite str+Enum",
+      issubclass(AgeCategory, str))
+check("valeurs == attendues",
+      {a.value for a in AgeCategory} == expected_ages,
+      f"got {[a.value for a in AgeCategory]}")
+check("UNKNOWN existe",
+      hasattr(AgeCategory, "UNKNOWN"))
+
+# ── Section 8: Character model — 3 nouveaux champs ───────────────────────────
+
+section("Character model: age_category / tone / voice_quality présents avec bons défauts")
+
+import inspect  # noqa: E402
+
+char_fields = Character.model_fields
+check("age_category dans Character", "age_category" in char_fields,
+      f"fields={list(char_fields)}")
+check("tone dans Character", "tone" in char_fields)
+check("voice_quality dans Character", "voice_quality" in char_fields)
+check("age_category défaut UNKNOWN",
+      char_fields["age_category"].default == AgeCategory.UNKNOWN,
+      f"got {char_fields['age_category'].default!r}")
+check("tone défaut None",
+      char_fields["tone"].default is None,
+      f"got {char_fields['tone'].default!r}")
+check("voice_quality défaut None",
+      char_fields["voice_quality"].default is None,
+      f"got {char_fields['voice_quality'].default!r}")
+
+# ── Section 9: CharacterResponse — 3 nouveaux champs exposés ─────────────────
+
+section("CharacterResponse: age_category / tone / voice_quality exposés")
+
+resp_fields = CharacterResponse.model_fields
+check("age_category dans CharacterResponse", "age_category" in resp_fields)
+check("tone dans CharacterResponse", "tone" in resp_fields)
+check("voice_quality dans CharacterResponse", "voice_quality" in resp_fields)
+
+# instanciation avec les nouveaux champs
+try:
+    cr = CharacterResponse(
+        id=1, name="Alice", gender=Gender.FEMALE,
+        age_category=AgeCategory.YOUNG_ADULT,
+        tone="warm", voice_quality="bright",
+    )
+    check("CharacterResponse instanciable avec nouveaux champs", True)
+    check("age_category stocké", cr.age_category == AgeCategory.YOUNG_ADULT)
+    check("tone stocké", cr.tone == "warm")
+    check("voice_quality stocké", cr.voice_quality == "bright")
+except Exception as e:
+    check("CharacterResponse instanciable", False, str(e))
+
+# ── Section 10: CharacterData dataclass — 3 nouveaux champs ──────────────────
+
+section("CharacterData: age_category / tone / voice_quality présents avec bons défauts")
+
+import dataclasses  # noqa: E402
+
+cd_fields = {f.name: f for f in dataclasses.fields(CharacterData)}
+check("age_category dans CharacterData", "age_category" in cd_fields)
+check("tone dans CharacterData", "tone" in cd_fields)
+check("voice_quality dans CharacterData", "voice_quality" in cd_fields)
+check("age_category défaut UNKNOWN",
+      cd_fields["age_category"].default == AgeCategory.UNKNOWN,
+      f"got {cd_fields['age_category'].default!r}")
+check("tone défaut None",
+      cd_fields["tone"].default is None,
+      f"got {cd_fields['tone'].default!r}")
+check("voice_quality défaut None",
+      cd_fields["voice_quality"].default is None,
+      f"got {cd_fields['voice_quality'].default!r}")
+
+# ── Section 11: _parse_llm_json — parsing des nouveaux traits ────────────────
+
+section("_parse_llm_json: age_category / tone / voice_quality parsés depuis JSON LLM")
+
+import json as _json  # noqa: E402
+
+_llm_json = _json.dumps({
+    "characters": [
+        {
+            "name": "Alice",
+            "description": "protagonist",
+            "gender": "FEMALE",
+            "age_category": "YOUNG_ADULT",
+            "tone": "warm",
+            "voice_quality": "bright",
+            "voice_tone": "soft and hesitant",
+        }
+    ],
+    "segments": [
+        {"position": 1, "text": "Hello.", "type": "DIALOGUE", "character_name": "Alice"}
+    ],
+})
+
+try:
+    result = _parse_llm_json(_llm_json)
+    cd = result.characters[0]
+    check("age_category == YOUNG_ADULT", cd.age_category == AgeCategory.YOUNG_ADULT,
+          f"got {cd.age_category!r}")
+    check("tone == 'warm'", cd.tone == "warm", f"got {cd.tone!r}")
+    check("voice_quality == 'bright'", cd.voice_quality == "bright", f"got {cd.voice_quality!r}")
+    check("voice_tone conservé", cd.voice_tone == "soft and hesitant", f"got {cd.voice_tone!r}")
+except Exception as e:
+    check("_parse_llm_json sans exception", False, str(e))
+
+# ── Section 12: _parse_llm_json — fallback si champs absents (rétrocompat) ───
+
+section("_parse_llm_json: fallback UNKNOWN/None si champs absents (rétrocompat)")
+
+_llm_json_old = _json.dumps({
+    "characters": [
+        {"name": "Bob", "gender": "MALE", "voice_tone": "deep"}
+    ],
+    "segments": [
+        {"position": 1, "text": "Hey.", "type": "DIALOGUE", "character_name": "Bob"}
+    ],
+})
+
+try:
+    result2 = _parse_llm_json(_llm_json_old)
+    cd2 = result2.characters[0]
+    check("age_category fallback UNKNOWN", cd2.age_category == AgeCategory.UNKNOWN,
+          f"got {cd2.age_category!r}")
+    check("tone fallback None", cd2.tone is None, f"got {cd2.tone!r}")
+    check("voice_quality fallback None", cd2.voice_quality is None, f"got {cd2.voice_quality!r}")
+except Exception as e:
+    check("_parse_llm_json rétrocompat sans exception", False, str(e))
+
+# ── Section 13: SYSTEM_PROMPT mentionne les nouveaux champs ──────────────────
+
+section("SYSTEM_PROMPT: age_category / tone / voice_quality mentionnés")
+
+check("age_category dans SYSTEM_PROMPT", "age_category" in SYSTEM_PROMPT)
+check("tone dans SYSTEM_PROMPT", "tone" in SYSTEM_PROMPT)
+check("voice_quality dans SYSTEM_PROMPT", "voice_quality" in SYSTEM_PROMPT)
+check("CHILD|YOUNG_ADULT dans SYSTEM_PROMPT", "YOUNG_ADULT" in SYSTEM_PROMPT)
+
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")
@@ -195,4 +352,4 @@ if _errors:
         print(f"  {e}")
     sys.exit(1)
 else:
-    print("OK — Toutes les sections passent (Phase 8 Étape 1: GET /voices).")
+    print("OK — Toutes les sections passent (Phase 8 Étape 1 + Étape 2).")

@@ -58,6 +58,9 @@ async def _analyze_book(
                         name=cd.name,
                         description=cd.description,
                         gender=cd.gender,
+                        age_category=cd.age_category,
+                        tone=cd.tone,
+                        voice_quality=cd.voice_quality,
                         voice_tone=cd.voice_tone,
                     )
                     session.add(char)
