@@ -182,9 +182,16 @@ et d'ouvrir la voie à une parallélisation future.
 
 - **D1 ✅ — EdgeTTS devient le moteur TTS par défaut.** Nouveau provider EdgeTTS (gratuit, sans GPU,
   sans clé, multilingue) dans le pattern Strategy ; Piper = option 100 % offline, ElevenLabs = premium.
-  ⚠️ **Point d'attention** : EdgeTTS sort du **MP3**, alors que l'assembleur actuel ne gère que du **WAV**
-  (`stdlib wave`). Le chantier EdgeTTS devra donc soit convertir MP3→WAV dans le provider (dépendance
-  décodeur à acter), soit rendre la couche audio MP3-native (rejoint Phase 10). À cadrer au plan.
+  **Implémenté (2026-06-15)** — stratégie MP3→WAV choisie : `miniaudio` décode le MP3 en PCM dans le
+  provider, `_pcm_to_wav` (stdlib `wave`) produit du WAV 22050 Hz mono 16-bit compatible avec l'assembleur.
+  Zéro changement à la couche audio (Phase 10 toujours différée).
+
+  - **D1a ✅** Scaffold : `edgetts` dans `_VALID_TTS`, `EdgeTTSProvider` (stub), `_VOICE_MAP` en-US/fr-FR,
+    factory câblée, `.env.example` mis à jour. `check_phase8.py` sections 1-7.
+  - **D1b ✅** Implémentation : `edge-tts~=6.1` + `miniaudio~=1.2` dans `requirements.txt`,
+    `synthesise` réelle (stream MP3 → decode → WAV). `check_phase8.py` sections 8-11 (offline, mocks).
+  - **D1c ✅** Doc : README section EdgeTTS, table config mise à jour, API reference Phase 7, tests à jour.
+    `TASKS.md` + mémoire mis à jour. `TTS_PROVIDER=edgetts` est le nouveau défaut dans `.env.example`.
 - **D2 ✅ — Le pipeline sera découplé.** Upload = parse + analyse seulement ; la génération audio
   devient une étape explicite déclenchée après le casting. Change `BookStatus` (contrat). → Phase 7.
 
@@ -207,42 +214,24 @@ et d'ouvrir la voie à une parallélisation future.
   `POST /books/{id}/chapters/{n}/generate` différé en Étape 3 (sans `Chapter.audio_path`,
   le résultat serait inaccessible). `check_phase7.py` — 13 sections OK.
   Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase7.py`.
-- Étape 3 — 📋 **PLAN PROPOSÉ — attente GO** — Persistance de l'audio chapitre + statut par chapitre
-  (vs synthèse à la volée de la Phase 6) ; régénération d'un chapitre.
+- Étape 3 ✅ (2026-06-14) — Persistance audio chapitre + statut par chapitre + régénération.
 
-  **Recut en 3 sous-étapes** (chacune ≤5 fichiers ; test-first ; GO avant chaque).
+  **3a ✅** `ChapterStatus` enum (PENDING/GENERATING/DONE/FAILED) + `Chapter.audio_path/status/error_message`
+  + `ChapterResponse` (id, position, title, status, error_message). check_phase7 sections 14-16. Commit `d1776c5`.
+  ⚠️ Migration : supprimer `scriptvox.db` avant le 1er run (`create_all` n'ALTER pas).
 
-  **3a — Schéma & fondations (⚠️ CONTRAT — revue humaine obligatoire).**
-  - `app/core/enums.py` : nouvel enum `ChapterStatus` = `PENDING / GENERATING / DONE / FAILED`
-    (pas d'état d'analyse : l'analyse est au niveau livre).
-  - `app/models/entities.py` : `Chapter.audio_path: Optional[str] = None`,
-    `Chapter.status: ChapterStatus = PENDING`, `Chapter.error_message: Optional[str] = None`.
-  - `app/schemas/book.py` : nouveau `ChapterResponse` (id, position, title, status, error_message).
-  - Tests : modèle + schéma (round-trip), pas de comportement.
-  - ⚠️ **Migration** : `SQLModel.metadata.create_all` n'ALTER pas les tables existantes →
-    **supprimer la DB de dev** (`scriptvox.db`) avant le 1er run. Alembic = tâche différée distincte.
+  **3b ✅** `_synthesise_chapter_worker` (async) + `_generate_chapter_impl` (GENERATING→WAV sur disque→DONE/FAILED)
+  + task Huey `generate_chapter` + `POST /books/{id}/chapters/{n}/generate` (202 ; 404 book/ch ; 409 si non ANALYZED).
+  check_phase7 sections 17-20. Commit `42b6ec6`.
 
-  **3b — Worker chapitre + déclencheur.**
-  - `app/workers/tasks.py` : `generate_chapter` (Huey) + `_generate_chapter_impl(chapter_id)` —
-    set `GENERATING`, **réutilise `synthesise_chapter`** (Phase 6) → écrit le WAV sur disque
-    (proposition : `data/{book_id}/ch{position}.wav`), set `audio_path` + `DONE` ; erreur → `FAILED` + `error_message`.
-  - `app/api/routes/books.py` : `POST /books/{id}/chapters/{n}/generate` (202 + `ChapterResponse` ;
-    404 book/chapitre · 409 si book non `ANALYZED`).
-  - Tests : happy path → DONE + fichier ; échec → FAILED.
-
-  **3c — Servir le persisté + listing + régénération.**
-  - `app/api/routes/books.py` : `GET /books/{id}/chapters/{n}/audio` sert le **fichier persisté**
-    (409 si chapitre pas `DONE`) au lieu de la synthèse à la volée ; `GET /books/{id}/chapters`
-    → `list[ChapterResponse]` ; régénération (re-dispatch autorisé si chapitre déjà `DONE`).
-  - Tests : sert le cache, 409 si non généré, liste, régénération.
-
-  **Décision ouverte (à trancher au plan 3b)** : `_generate_book_impl` reste **monolithique**
-  (1 WAV → `Book.audio_path`) ; unifier « book = concat des chapitres » est un refactor futur
-  (active la parallélisation, cf. roadmap) — **hors scope Étape 3**.
+  **3c ✅** `GET /books/{id}/chapters/{n}/audio` sert le fichier persisté (FileResponse ; 409 si chapitre pas DONE) —
+  suppression de la synthèse à la volée. `GET /books/{id}/chapters` → `list[ChapterResponse]`. Re-dispatch autorisé si
+  chapitre DONE. Sections 9-10 de check_phase7 mises à jour (stale). check_phase6 section 5 mise à jour.
+  check_phase7 sections 21-23. 23/23 OK. 7 suites sans régression. Commit `284e303`.
 
 ### Phase 8 — Casting & attribution intelligente des voix
 **Pourquoi.** Cœur de la promesse « multi-voix » ; donne le contrôle des voix à l'utilisateur.
-*Étape 1 dépend de D1.*
+*D1 livré — Phase 8 débloquée.*
 - Étape 1 — `GET /voices` : lister les voix du provider courant (id, genre, locale).
 - Étape 2 — Traits de personnage enrichis (`age_category`, `tone`, `voice_quality`).
   ⚠️ **Contrat** : schéma `Character` + `CharacterResponse` + prompt LLM.

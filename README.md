@@ -1,7 +1,7 @@
 # ScriptVox
 
 Convert an EPUB book into a full multi-voice audiobook.  
-Runs **entirely locally** (Ollama + Piper) or in **cloud mode** (Gemini + ElevenLabs) — no code change required, only environment variables.
+Runs with **EdgeTTS** (free, no key, internet required — default), **locally** (Ollama + Piper), or in **cloud mode** (Gemini + ElevenLabs) — no code change required, only environment variables.
 
 ---
 
@@ -32,14 +32,15 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size (default 8192) |
 | `GEMINI_API_KEY` | `LLM_PROVIDER=gemini` | Gemini API key |
 | `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
-| `TTS_PROVIDER` | always | `piper` (local) or `elevenlabs` (cloud) |
+| `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `elevenlabs` (cloud) |
+| `EDGETTS_LOCALE` | `TTS_PROVIDER=edgetts` | BCP-47 locale for voice selection, e.g. `en-US` (default), `fr-FR` |
 | `PIPER_VOICES_DIR` | `TTS_PROVIDER=piper` | Path to the folder containing `.onnx` voice files |
 | `PIPER_BINARY_PATH` | `TTS_PROVIDER=piper` | Path to the `piper` executable (see Piper binary below) |
 | `ELEVENLABS_API_KEY` | `TTS_PROVIDER=elevenlabs` | ElevenLabs API key |
 | `DATABASE_URL` | always | SQLite path, e.g. `sqlite:///./scriptvox.db` |
 | `HUEY_DB_PATH` | always | Huey task queue DB path, e.g. `./huey.db` |
 
-The app **fails at startup** if any required variable for the active provider is missing, if `PIPER_VOICES_DIR` does not point to an existing directory, or if `PIPER_BINARY_PATH` does not point to an existing file.
+The app **fails at startup** if any required variable for the active provider is missing, if `PIPER_VOICES_DIR` does not point to an existing directory, or if `PIPER_BINARY_PATH` does not point to an existing file. EdgeTTS requires no file on disk — only an internet connection at synthesis time.
 
 ---
 
@@ -57,6 +58,23 @@ uvicorn app.main:app --reload
 
 The API is available at `http://localhost:8000`.  
 Interactive docs: `http://localhost:8000/docs`
+
+---
+
+## EdgeTTS (default TTS)
+
+EdgeTTS streams audio from Microsoft's neural TTS service — the same engine behind Edge browser's Read Aloud. It is **free, requires no API key and no local binary**. The only requirement is an internet connection at synthesis time.
+
+Set `TTS_PROVIDER=edgetts` in `.env` (it is the default). Optionally set `EDGETTS_LOCALE` to control the language of the assigned voices:
+
+| Locale | Example voices |
+|---|---|
+| `en-US` (default) | Christopher · Guy · Jenny · Aria · Andrew · Brian |
+| `fr-FR` | Henri · Remy · Denise · Vivienne |
+
+The voice catalogue maps logical IDs (`narrator`, `male_0` … `neutral_1`) to neural voice names automatically — no configuration needed.
+
+> EdgeTTS output is normalised to **22050 Hz mono 16-bit WAV** by the `miniaudio` decoder before assembly, so it is fully compatible with the Piper and ElevenLabs audio formats.
 
 ---
 
@@ -120,9 +138,12 @@ Each phase has its own test suite. Run them in order to verify the full stack:
 .venv\Scripts\python tests\check_phase3.py   # LLM pipeline
 .venv\Scripts\python tests\check_phase4.py   # TTS, audio assembly, /audio endpoint
 .venv\Scripts\python tests\check_phase5.py   # End-to-end worker pipeline (mocked LLM + TTS)
+.venv\Scripts\python tests\check_phase6.py   # Per-chapter audio endpoint
+.venv\Scripts\python tests\check_phase7.py   # Decoupled pipeline (ANALYZED / GENERATING statuses)
+.venv\Scripts\python tests\check_phase8.py   # EdgeTTS provider (config, voice mapping, synthesis)
 ```
 
-These suites mock the LLM and TTS providers, so they run without Ollama or Piper.
+All suites mock external providers (LLM, TTS, network) and run fully offline.
 
 ---
 
@@ -148,7 +169,7 @@ Response (202 Accepted):
 curl http://localhost:8000/books/1
 ```
 
-`status` transitions: `PENDING → PROCESSING → DONE` (or `FAILED`).  
+`status` transitions: `PENDING → PROCESSING → ANALYZED → GENERATING → DONE` (or `FAILED`).  
 `progress` goes from `0.0` to `100.0`.
 
 ### Download the audiobook
@@ -159,12 +180,26 @@ curl http://localhost:8000/books/1/audio --output audiobook.wav
 
 Returns 404 until `status` is `DONE`.
 
+### Trigger audio generation (after analysis)
+
+Once `status` reaches `ANALYZED`, trigger synthesis:
+
+```bash
+# Generate full audiobook
+curl -X POST http://localhost:8000/books/1/generate
+
+# Generate a single chapter (1-indexed position)
+curl -X POST http://localhost:8000/books/1/chapters/1/generate
+```
+
 ### Other endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/books` | List all books |
 | `GET` | `/books/{id}/characters` | List extracted characters with their assigned `voice_id` |
+| `GET` | `/books/{id}/chapters` | List chapters with per-chapter status |
+| `GET` | `/books/{id}/chapters/{n}/audio` | Download a generated chapter (WAV) |
 | `DELETE` | `/books/{id}` | Delete a book and its source file |
 
 ---
