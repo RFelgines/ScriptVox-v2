@@ -232,7 +232,14 @@ et d'ouvrir la voie à une parallélisation future.
 ### Phase 8 — Casting & attribution intelligente des voix
 **Pourquoi.** Cœur de la promesse « multi-voix » ; donne le contrôle des voix à l'utilisateur.
 *D1 livré — Phase 8 débloquée.*
-- Étape 1 — `GET /voices` : lister les voix du provider courant (id, genre, locale).
+- Étape 1 ✅ (2026-06-15) — `GET /voices` : liste les 9 voix logiques du catalogue
+  (`narrator` + `male_0..2` / `female_0..2` / `neutral_0..1`) avec `gender` (`narrator`→null)
+  et `locale` (= `edgetts_locale` si provider `edgetts`, sinon `null`). **KISS** : lit le
+  catalogue + la locale depuis `Settings`, n'instancie PAS le provider TTS (répond même sans
+  binaire Piper / sans réseau). Fichiers (5) : `app/services/voice_assignment.py`
+  (`list_catalogue_voices()` déterministe/dédupliqué), `app/schemas/voice.py` (`VoiceResponse`),
+  `app/api/routes/voices.py` (router monté `/voices` dans `main.py`), `app/main.py`,
+  `tests/check_phase9.py` (6 sections OK). 8 suites existantes sans régression.
 - Étape 2 — Traits de personnage enrichis (`age_category`, `tone`, `voice_quality`).
   ⚠️ **Contrat** : schéma `Character` + `CharacterResponse` + prompt LLM.
 - Étape 3 — VoiceRegistry trait-based **déterministe** (score genre/âge/ton/qualité/locale), testé.

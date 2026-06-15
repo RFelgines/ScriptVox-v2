@@ -13,6 +13,23 @@ VOICE_CATALOGUE: dict[Gender, list[str]] = {
 }
 
 
+def list_catalogue_voices() -> list[tuple[str, Gender | None]]:
+    """Logical voice catalogue, deterministic and de-duplicated.
+
+    Order: narrator first (no gender), then MALE, FEMALE, NEUTRAL pools.
+    NEUTRAL and UNKNOWN share neutral_0/1 in VOICE_CATALOGUE, so neutral voices
+    are listed once (UNKNOWN's duplicates are skipped).
+    """
+    voices: list[tuple[str, Gender | None]] = [(NARRATOR_VOICE_ID, None)]
+    seen: set[str] = {NARRATOR_VOICE_ID}
+    for gender in (Gender.MALE, Gender.FEMALE, Gender.NEUTRAL):
+        for voice_id in VOICE_CATALOGUE[gender]:
+            if voice_id not in seen:
+                voices.append((voice_id, gender))
+                seen.add(voice_id)
+    return voices
+
+
 def assign_voices(book_id: int, session: Session) -> None:
     """Populate Character.voice_id for all characters of a book (idempotent)."""
     characters = session.exec(
