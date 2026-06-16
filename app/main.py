@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes.books import router as books_router
+from app.api.routes.characters import router as characters_router
 from app.api.routes.voices import router as voices_router
 from app.config import get_settings
 from app.core.db import init_db
@@ -17,4 +18,5 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ScriptVox", lifespan=lifespan)
 app.include_router(books_router, prefix="/books", tags=["books"])
+app.include_router(characters_router, prefix="/characters", tags=["characters"])
 app.include_router(voices_router, prefix="/voices", tags=["voices"])

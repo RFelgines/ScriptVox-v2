@@ -16,6 +16,10 @@ class ChapterResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CharacterUpdate(BaseModel):
+    voice_id: str
+
+
 class CharacterResponse(BaseModel):
     id: int
     name: str

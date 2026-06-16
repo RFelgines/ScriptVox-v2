@@ -249,7 +249,10 @@ et d'ouvrir la voie à une parallélisation future.
   statiques par voice_id), `_score_voice` (genre+4 / age+2 / tone+1 / quality+1), `assign_voices` réécrit avec
   tri (-score, voice_id) + wrap-around intra-tier (le top-tier évite qu'un MALE tombe sur une voix FEMALE).
   Fichiers (2) : `app/services/voice_assignment.py`, `tests/check_phase9.py` (20 sections). 8 suites sans régression.
-- Étape 4 — `PATCH /characters/{id}` : override manuel de la voix. ⚠️ **Contrat** : nouvelle route + schéma.
+- Étape 4 ✅ (2026-06-16) — `PATCH /characters/{id}` : override manuel de la voix. `CharacterUpdate {voice_id}`.
+  Validation : voice_id doit être dans `_CATALOGUE_META` sauf `narrator` (422 sinon). 404 si personnage inconnu.
+  Fichiers (4) : `app/schemas/book.py` (+CharacterUpdate), `app/api/routes/characters.py` (nouveau),
+  `app/main.py`, `tests/check_phase9.py` (26 sections). 8 suites sans régression.
 
 ### Phase 9 — Couverture & métadonnées
 **Pourquoi.** Identité visuelle des livres (bibliothèque, lecteur).

@@ -532,6 +532,132 @@ check("Bob même voix dans les deux books",   _m20a.get("Bob")   == _m20b.get("B
       f"{_m20a.get('Bob')!r} vs {_m20b.get('Bob')!r}")
 
 
+# ══════════════════════════════════════════════════════
+# Phase 8 — Étape 4 : PATCH /characters/{id}
+# ══════════════════════════════════════════════════════
+
+from app.core.db import get_session  # noqa: E402
+from app.schemas.book import CharacterUpdate  # noqa: E402
+
+# Shared in-memory DB for Étape 4 sections
+_eng_s4 = _make_engine()
+
+with Session(_eng_s4) as _s4_setup:
+    _book_s4 = Book(title="Casting Test", source_path="/tmp/cast.epub")
+    _s4_setup.add(_book_s4)
+    _s4_setup.flush()
+    _char_s4 = Character(
+        book_id=_book_s4.id, name="Alice",
+        gender=Gender.FEMALE, age_category=AgeCategory.YOUNG_ADULT,
+        voice_id="female_0",
+    )
+    _s4_setup.add(_char_s4)
+    _s4_setup.commit()
+    _char_s4_id = _char_s4.id
+    _book_s4_id = _book_s4.id
+
+
+def _s4_get_session():
+    with Session(_eng_s4) as s:
+        yield s
+
+
+# ── Section 21: PATCH valide -> 200 + voice_id mis à jour ────────────────────
+
+section("PATCH /characters/{id}: voice_id valide -> 200 + CharacterResponse mis à jour")
+
+app.dependency_overrides[get_session] = _s4_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app) as tc:
+    resp = tc.patch(f"/characters/{_char_s4_id}", json={"voice_id": "female_2"})
+    check("status 200", resp.status_code == 200, f"got {resp.status_code}: {resp.text}")
+    data = resp.json()
+    check("voice_id == 'female_2'", data.get("voice_id") == "female_2",
+          f"got {data.get('voice_id')!r}")
+    check("id correct", data.get("id") == _char_s4_id)
+
+app.dependency_overrides.clear()
+
+
+# ── Section 22: autres champs inchangés après PATCH ──────────────────────────
+
+section("PATCH /characters/{id}: champs non patchés restes inchangés")
+
+app.dependency_overrides[get_session] = _s4_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app) as tc:
+    data = tc.patch(f"/characters/{_char_s4_id}", json={"voice_id": "female_1"}).json()
+    check("name inchangé", data.get("name") == "Alice", f"got {data.get('name')!r}")
+    check("gender inchangé", data.get("gender") == Gender.FEMALE.value,
+          f"got {data.get('gender')!r}")
+    check("age_category inchangé", data.get("age_category") == AgeCategory.YOUNG_ADULT.value,
+          f"got {data.get('age_category')!r}")
+
+app.dependency_overrides.clear()
+
+
+# ── Section 23: 404 si character inexistant ───────────────────────────────────
+
+section("PATCH /characters/{id}: 404 si character inexistant")
+
+app.dependency_overrides[get_session] = _s4_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app, raise_server_exceptions=False) as tc:
+    resp = tc.patch("/characters/99999", json={"voice_id": "female_0"})
+    check("status 404", resp.status_code == 404, f"got {resp.status_code}")
+
+app.dependency_overrides.clear()
+
+
+# ── Section 24: 422 si voice_id == 'narrator' (réservé) ──────────────────────
+
+section("PATCH /characters/{id}: 422 si voice_id == 'narrator' (réservé à la narration)")
+
+app.dependency_overrides[get_session] = _s4_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app, raise_server_exceptions=False) as tc:
+    resp = tc.patch(f"/characters/{_char_s4_id}", json={"voice_id": "narrator"})
+    check("status 422", resp.status_code == 422, f"got {resp.status_code}")
+
+app.dependency_overrides.clear()
+
+
+# ── Section 25: 422 si voice_id inconnu du catalogue ─────────────────────────
+
+section("PATCH /characters/{id}: 422 si voice_id inconnu du catalogue")
+
+app.dependency_overrides[get_session] = _s4_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app, raise_server_exceptions=False) as tc:
+    resp = tc.patch(f"/characters/{_char_s4_id}", json={"voice_id": "ghost_voice"})
+    check("status 422", resp.status_code == 422, f"got {resp.status_code}")
+
+app.dependency_overrides.clear()
+
+
+# ── Section 26: idempotence — deux PATCHes successifs ────────────────────────
+
+section("PATCH /characters/{id}: idempotence — deux PATCHes meme valeur -> 200 x2")
+
+app.dependency_overrides[get_session] = _s4_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app) as tc:
+    r1 = tc.patch(f"/characters/{_char_s4_id}", json={"voice_id": "female_0"})
+    r2 = tc.patch(f"/characters/{_char_s4_id}", json={"voice_id": "female_0"})
+    check("1er PATCH -> 200", r1.status_code == 200, f"got {r1.status_code}")
+    check("2e PATCH -> 200", r2.status_code == 200, f"got {r2.status_code}")
+    check("voice_id == 'female_0' apres les deux",
+          r2.json().get("voice_id") == "female_0")
+
+app.dependency_overrides.clear()
+
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")
