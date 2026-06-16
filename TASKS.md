@@ -264,7 +264,10 @@ et d'ouvrir la voie à une parallélisation future.
 - Étape 2 ✅ (2026-06-17) — `GET /books/{id}/cover` (FileResponse ; 404 livre inconnu / 404 sans cover / 404 fichier absent).
   `mimetypes.guess_type` pour le Content-Type. `check_phase10.py` 8/8 OK. Zéro régression 9 suites.
   Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase10.py`.
-- Étape 3 — `POST /books/{id}/cover` (upload / remplacement manuel).
+- Étape 3 ✅ (2026-06-17) — `POST /books/{id}/cover` (upload / remplacement manuel).
+  Valide image/jpeg|png|gif|webp (422 sinon). Écrit `data/{id}/cover.<ext>`. Retourne `BookResponse`.
+  `check_phase10.py` 11/11 OK. Zéro régression 9 suites.
+  Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase10.py`.
 
 ### Phase 10 — Format de diffusion audio
 **Pourquoi.** Un WAV de livre entier est énorme ; le MP3 convient au streaming web.

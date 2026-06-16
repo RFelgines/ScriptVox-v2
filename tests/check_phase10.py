@@ -209,6 +209,41 @@ with _tf.TemporaryDirectory() as _tmpdir:
     check("status 404", resp.status_code == 404, str(resp.status_code))
     check("detail no cover", "cover" in resp.json().get("detail", "").lower())
 
+    # ── 9. POST /books/{id}/cover -- 200, cover_path mis a jour ──────────────
+    section("POST /books/{id}/cover -- 200 OK, cover_path mis a jour")
+    with _Session(_engine) as _s:
+        _book_up = Book(title="Upload Cover", source_path="z.epub")
+        _s.add(_book_up)
+        _s.commit()
+        _s.refresh(_book_up)
+        _book_up_id = _book_up.id
+
+    resp = client.post(
+        f"/books/{_book_up_id}/cover",
+        files={"file": ("cover.jpg", _FAKE_JPEG, "image/jpeg")},
+    )
+    check("status 200", resp.status_code == 200, str(resp.status_code))
+    body = resp.json()
+    check("cover_path non nul dans reponse", body.get("cover_path") is not None)
+    check("cover_path contient cover.jpg", "cover.jpg" in (body.get("cover_path") or ""))
+
+    # ── 10. POST /books/{id}/cover -- 404 si livre inconnu ────────────────────
+    section("POST /books/{id}/cover -- 404 si livre inconnu")
+    resp = client.post(
+        "/books/99999/cover",
+        files={"file": ("cover.jpg", _FAKE_JPEG, "image/jpeg")},
+    )
+    check("status 404", resp.status_code == 404, str(resp.status_code))
+
+    # ── 11. POST /books/{id}/cover -- 422 si type non supporte ───────────────
+    section("POST /books/{id}/cover -- 422 si type non supporte")
+    resp = client.post(
+        f"/books/{_book_up_id}/cover",
+        files={"file": ("doc.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+    check("status 422", resp.status_code == 422, str(resp.status_code))
+    check("detail mentionne type non supporte", "Unsupported" in resp.json().get("detail", ""))
+
     app.dependency_overrides.clear()
 
 

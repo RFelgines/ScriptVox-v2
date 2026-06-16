@@ -15,6 +15,13 @@ from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
 DATA_DIR = Path("data")
 
+_ALLOWED_COVER_TYPES: dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
 router = APIRouter()
 
 
@@ -97,6 +104,36 @@ def get_book_cover(book_id: int, session: Session = Depends(get_session)) -> Fil
         raise HTTPException(status_code=404, detail="Cover file not found on disk.")
     media_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
     return FileResponse(str(path), media_type=media_type, filename=path.name)
+
+
+@router.post("/{book_id}/cover", response_model=BookResponse)
+async def upload_book_cover(
+    book_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+) -> BookResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    content_type = file.content_type or ""
+    ext = _ALLOWED_COVER_TYPES.get(content_type)
+    if ext is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unsupported image type '{content_type}'. "
+                f"Allowed: {', '.join(_ALLOWED_COVER_TYPES)}."
+            ),
+        )
+    cover_dir = DATA_DIR / str(book_id)
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    cover_path = cover_dir / f"cover{ext}"
+    cover_path.write_bytes(await file.read())
+    book.cover_path = str(cover_path)
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    return BookResponse.model_validate(book)
 
 
 @router.post("/{book_id}/chapters/{position}/generate", response_model=ChapterResponse, status_code=202)
