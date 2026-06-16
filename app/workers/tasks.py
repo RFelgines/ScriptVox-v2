@@ -170,6 +170,7 @@ def _analyze_book_impl(book_id: int) -> None:
         parsed = EpubParser().parse(source_path)
 
         with Session(engine) as session:
+            from pathlib import Path as _Path
             book = session.get(Book, book_id)
             book.title = parsed.title
             if parsed.author:
@@ -181,6 +182,19 @@ def _analyze_book_impl(book_id: int) -> None:
                     title=pc.title,
                     raw_text=pc.raw_text,
                 ))
+            if parsed.cover_image:
+                _COVER_EXT = {
+                    "image/jpeg": ".jpg",
+                    "image/png": ".png",
+                    "image/gif": ".gif",
+                    "image/webp": ".webp",
+                }
+                ext = _COVER_EXT.get(parsed.cover_media_type or "", ".jpg")
+                cover_dir = _Path("data") / str(book_id)
+                cover_dir.mkdir(parents=True, exist_ok=True)
+                cover_file = cover_dir / f"cover{ext}"
+                cover_file.write_bytes(parsed.cover_image)
+                book.cover_path = str(cover_file)
             book.progress = 10.0
             book.updated_at = datetime.now(timezone.utc)
             session.add(book)

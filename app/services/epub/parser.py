@@ -18,6 +18,37 @@ class ParsedBook:
     title: str
     author: str | None
     chapters: list[ParsedChapter]
+    cover_image: bytes | None = None
+    cover_media_type: str | None = None
+
+
+def _extract_cover(book) -> tuple[bytes | None, str | None]:
+    # Strategy 1: conventional 'cover-image' uid (ebooklib / most EPUB generators)
+    item = book.get_item_with_id("cover-image")
+    if item is not None:
+        content = item.get_content()
+        if content:
+            return content, item.media_type or None
+
+    # Strategy 2: items of type ITEM_COVER (epub3)
+    try:
+        import ebooklib as _eb
+        for item in book.get_items_of_type(_eb.ITEM_COVER):
+            content = item.get_content()
+            if content:
+                return content, item.media_type or None
+    except Exception:
+        pass
+
+    # Strategy 3: items with 'cover-image' in properties
+    for item in book.get_items():
+        props = getattr(item, "properties", "") or ""
+        if "cover-image" in props:
+            content = item.get_content()
+            if content:
+                return content, item.media_type or None
+
+    return None, None
 
 
 class EpubParser:
@@ -65,4 +96,11 @@ class EpubParser:
                 ParsedChapter(position=position, title=chapter_title, raw_text=raw_text)
             )
 
-        return ParsedBook(title=title, author=author, chapters=chapters)
+        cover_image, cover_media_type = _extract_cover(book)
+        return ParsedBook(
+            title=title,
+            author=author,
+            chapters=chapters,
+            cover_image=cover_image,
+            cover_media_type=cover_media_type,
+        )

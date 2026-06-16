@@ -256,7 +256,11 @@ et d'ouvrir la voie à une parallélisation future.
 
 ### Phase 9 — Couverture & métadonnées
 **Pourquoi.** Identité visuelle des livres (bibliothèque, lecteur).
-- Étape 1 — Extraction de la couverture à l'ingestion. ⚠️ **Contrat** : `Book.cover_path` + `BookResponse`.
+- Étape 1 ✅ (2026-06-17) — Extraction de la couverture à l'ingestion.
+  `ParsedBook.cover_image/cover_media_type` + `_extract_cover()` (3 stratégies : uid / ITEM_COVER / properties).
+  `Book.cover_path` + `BookResponse.cover_path`. Worker écrit `data/{book_id}/cover.<ext>`.
+  ⚠️ Supprimer `scriptvox.db` avant 1er run (nouvelle colonne). `check_phase10.py` 5/5 OK. Zéro régression sur 9 suites.
+  Fichiers (5) : `app/services/epub/parser.py`, `app/models/entities.py`, `app/schemas/book.py`, `app/workers/tasks.py`, `tests/check_phase10.py`.
 - Étape 2 — `GET /books/{id}/cover` (servir l'image).
 - Étape 3 — `POST /books/{id}/cover` (upload / remplacement manuel).
 
