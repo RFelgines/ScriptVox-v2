@@ -261,7 +261,9 @@ et d'ouvrir la voie à une parallélisation future.
   `Book.cover_path` + `BookResponse.cover_path`. Worker écrit `data/{book_id}/cover.<ext>`.
   ⚠️ Supprimer `scriptvox.db` avant 1er run (nouvelle colonne). `check_phase10.py` 5/5 OK. Zéro régression sur 9 suites.
   Fichiers (5) : `app/services/epub/parser.py`, `app/models/entities.py`, `app/schemas/book.py`, `app/workers/tasks.py`, `tests/check_phase10.py`.
-- Étape 2 — `GET /books/{id}/cover` (servir l'image).
+- Étape 2 ✅ (2026-06-17) — `GET /books/{id}/cover` (FileResponse ; 404 livre inconnu / 404 sans cover / 404 fichier absent).
+  `mimetypes.guess_type` pour le Content-Type. `check_phase10.py` 8/8 OK. Zéro régression 9 suites.
+  Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase10.py`.
 - Étape 3 — `POST /books/{id}/cover` (upload / remplacement manuel).
 
 ### Phase 10 — Format de diffusion audio

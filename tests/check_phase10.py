@@ -149,6 +149,69 @@ r2 = BookResponse(
 check("cover_path renseignable", r2.cover_path == "data/2/cover.jpg")
 
 
+# ── 6. GET /books/{id}/cover -- 200 avec fichier cover ────────────────────────
+section("GET /books/{id}/cover -- 200 OK avec cover bytes")
+import tempfile as _tf  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import StaticPool  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlmodel import SQLModel, Session as _Session  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+_engine = create_engine(
+    "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+)
+SQLModel.metadata.create_all(_engine)
+
+
+def _get_test_session():
+    with _Session(_engine) as s:
+        yield s
+
+
+with _tf.TemporaryDirectory() as _tmpdir:
+    _cover_path = Path(_tmpdir) / "cover.jpg"
+    _cover_path.write_bytes(_FAKE_JPEG)
+
+    with _Session(_engine) as _s:
+        _book = Book(title="Couverture Test", source_path="x.epub", cover_path=str(_cover_path))
+        _s.add(_book)
+        _s.commit()
+        _s.refresh(_book)
+        _book_id = _book.id
+
+    from app.main import app  # noqa: E402
+    from app.core.db import get_session as _real_get_session  # noqa: E402
+
+    app.dependency_overrides[_real_get_session] = _get_test_session
+    client = TestClient(app)
+
+    resp = client.get(f"/books/{_book_id}/cover")
+    check("status 200", resp.status_code == 200, str(resp.status_code))
+    check("content-type image/jpeg", "image/jpeg" in resp.headers.get("content-type", ""))
+    check("body = fake JPEG", resp.content == _FAKE_JPEG)
+
+    # ── 7. 404 si livre inconnu ────────────────────────────────────────────────
+    section("GET /books/{id}/cover -- 404 si livre inconnu")
+    resp = client.get("/books/99999/cover")
+    check("status 404", resp.status_code == 404, str(resp.status_code))
+
+    # ── 8. 404 si pas de cover_path ───────────────────────────────────────────
+    section("GET /books/{id}/cover -- 404 si book sans couverture")
+    with _Session(_engine) as _s:
+        _book_nc = Book(title="Sans couverture", source_path="y.epub")
+        _s.add(_book_nc)
+        _s.commit()
+        _s.refresh(_book_nc)
+        _book_nc_id = _book_nc.id
+
+    resp = client.get(f"/books/{_book_nc_id}/cover")
+    check("status 404", resp.status_code == 404, str(resp.status_code))
+    check("detail no cover", "cover" in resp.json().get("detail", "").lower())
+
+    app.dependency_overrides.clear()
+
+
 # ── Résumé ────────────────────────────────────────────────────────────────────
 print(f"\n{'='*50}")
 if _errors:

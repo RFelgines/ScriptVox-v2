@@ -1,3 +1,4 @@
+import mimetypes
 import os
 import uuid
 from pathlib import Path
@@ -82,6 +83,20 @@ def get_book_audio(book_id: int, session: Session = Depends(get_session)) -> Fil
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk.")
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
+
+
+@router.get("/{book_id}/cover")
+def get_book_cover(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if not book.cover_path:
+        raise HTTPException(status_code=404, detail="No cover available for this book.")
+    path = Path(book.cover_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Cover file not found on disk.")
+    media_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+    return FileResponse(str(path), media_type=media_type, filename=path.name)
 
 
 @router.post("/{book_id}/chapters/{position}/generate", response_model=ChapterResponse, status_code=202)
