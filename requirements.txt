@@ -37,7 +37,7 @@ python-dotenv~=1.0.0
 # Download the binary from github.com/rhasspy/piper/releases and set
 # PIPER_BINARY_PATH in .env. Licence: GPL-3.0 (OHF-Voice/piper1-gpl).
 # ElevenLabs (cloud TTS) uses httpx directly — no extra dependency.
-edge-tts~=6.1        # EdgeTTS provider — free, no API key; pulls aiohttp transitively
+edge-tts~=7.2        # EdgeTTS provider — free, no API key; v7 uses up-to-date Edge browser tokens (v6 → 403)
 miniaudio~=1.2       # MP3->PCM decoder for EdgeTTS output; no native lib / no binary required
 
 # ─── Audio encoding ───────────────────────────────────────────────────────────

@@ -329,6 +329,48 @@ et d'ouvrir la voie à une parallélisation future.
   `src/app/books/[id]/page.tsx` : bouton « ▶ Écouter » (status DONE && mp3_path) → `play({title, src: bookMp3Url})`.
   Vérif : `npm run build` + `npm run lint` verts.
 
+### Phase 12 — Run réel EdgeTTS & hardening LLM parser (2026-06-17, en cours)
+
+**Pourquoi.** Première validation bout-en-bout en conditions réelles (EdgeTTS fr-FR, vrai roman français HP). Bugs découverts et corrigés test-first pendant la tentative.
+
+#### Étape 1 ✅ (2026-06-17) — `_coerce_enum` : parser LLM tolérant aux écarts d'enum
+
+**Symptôme.** `qwen3:8b` retourne `"DIALOG, "` au lieu de `"DIALOGUE"` → `LLMParsingError` → book FAILED.
+
+**Fix.** `_coerce_enum(raw, enum_cls, default)` dans `app/services/llm/base.py` : normalise casse + ponctuation (`re.sub`), table d'alias (`DIALOG→DIALOGUE`, `NARRATOR→NARRATION`, `Male→MALE`…). Fallback sur `default` + `logging.WARNING` si valeur inconnue. Zéro crash, observabilité préservée. Fichiers (2) : `app/services/llm/base.py`, `tests/check_phase3.py` (section 5 màj + section 8 nouvelle = 9 sections). 12/12 suites sans régression.
+
+#### Étape 2 ✅ (2026-06-17) — Config EdgeTTS + gitignore Ebook/
+
+- `.env` : `TTS_PROVIDER=edgetts`, `EDGETTS_LOCALE=fr-FR`, `OLLAMA_CONTEXT_TOKENS=32768` (était 8192 — sortie JSON tronquée sur chapitres réels avec 8K).
+- `.gitignore` : `Ebook/` ajouté (épub HP copyrighté, anti-pattern V1).
+
+#### Étape 3 ✅ (2026-06-18) — Montée edge-tts 6.1 → 7.2 + validation EdgeTTS fr-FR
+
+**Symptôme.** `edge-tts~=6.1` retournait 403 de Microsoft (tokens Edge 130 révoqués). Test direct Python confirmé → problème lib, pas réseau.
+
+**Fix.** `requirements.txt` : `edge-tts~=6.1` → `edge-tts~=7.2` (tokens Edge mis à jour). API edge_tts 7.x identique (`Communicate` + `.stream()`). 12/12 suites sans régression.
+
+**Validation réelle EdgeTTS fr-FR.** Petit epub FR "Le Dernier Soir" (1 chapitre, 2 personnages) :
+- LLM (`qwen3:8b`) : détecte Marie (FEMALE/female_0) + homme (MALE/male_0). Analyse instantanée.
+- EdgeTTS fr-FR : `fr-FR-DeniseNeural` (Marie) + `fr-FR-HenriNeural` (homme).
+- Résultat : **WAV 89,9 s — 22 050 Hz mono 16-bit — 3,9 MB — HTTP 200 ✅**
+- Pipeline complet confirmé : EPUB → LLM → personnages → voix fr-FR → WAV assemblé.
+
+**Décision en attente (HP) :**
+
+#### Étape 4 — Validation run HP (bloquée — décision en attente)
+
+**Contrainte découverte.** Le prompt "Include EVERY word" oblige le LLM local à régénérer tout le texte en JSON (sortie ≈ entrée tokens). HP chapitre réel : ~4 000-8 000 tokens de sortie à ~10 tok/s = **7-14 min**. `OLLAMA_READ_TIMEOUT=600` insuffisant sur les gros chapitres.
+
+**Choix (décision à prendre) :**
+- **A)** `OLLAMA_READ_TIMEOUT=3600` dans `.env` + relancer (~2-5 h de run HP)
+- **B)** Refactoring LLM : output métadonnées uniquement (positions/noms de personnages), pas le texte complet → ×5 vitesse locale. Nouveau plan, ampleur moyenne.
+- **C)** Valider EdgeTTS sur petit epub FR maintenant (5-10 min) puis décider de B.
+
+⚠️ **Bug archi §2.3 :** La marge 20% ne couvre que le prompt système. Avec "reproduce all text", budget effectif entrée = `context_window / 3` (pas `× 0.8`). À corriger dans ARCHITECTURE.md lors du prochain plan.
+
+---
+
 ### Différé / à NE PAS refaire
 - **Voice Studio** (clonage de voix, contrôle d'émotion) — vaporware V1.
 - **Lyrics / texte synchronisé** — faisable plus tard via timestamps de segments.

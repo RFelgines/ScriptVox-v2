@@ -1,9 +1,84 @@
 import json
+import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
+from typing import TypeVar
 
 from app.core.enums import AgeCategory, Gender, SegmentType
 from app.core.exceptions import LLMParsingError
+
+_logger = logging.getLogger(__name__)
+_E = TypeVar("_E", bound=Enum)
+
+_ALIASES: dict[type, dict[str, str]] = {
+    SegmentType: {
+        "DIALOG": "DIALOGUE",
+        "NARRATE": "NARRATION",
+        "PROSE": "NARRATION",
+        "NARRATOR": "NARRATION",
+        "DESCRIPTION": "NARRATION",
+        "ACTION": "NARRATION",
+        "MONOLOGUE": "DIALOGUE",
+    },
+    Gender: {
+        "M": "MALE",
+        "F": "FEMALE",
+        "N": "NEUTRAL",
+        "U": "UNKNOWN",
+    },
+    AgeCategory: {
+        "YOUNG": "YOUNG_ADULT",
+        "TEEN": "YOUNG_ADULT",
+        "TEENAGER": "YOUNG_ADULT",
+        "ADOLESCENT": "YOUNG_ADULT",
+        "KID": "CHILD",
+        "BABY": "CHILD",
+        "INFANT": "CHILD",
+        "TODDLER": "CHILD",
+        "OLD": "ELDER",
+        "ELDERLY": "ELDER",
+        "SENIOR": "ELDER",
+        "AGED": "ELDER",
+    },
+}
+
+
+def _coerce_enum(raw: str, enum_cls: type[_E], default: _E) -> _E:
+    """Normalise une valeur brute LLM en membre d'enum ; retombe sur *default* avec WARNING."""
+    # Normaliser : upper, espaces/tirets → underscore, supprimer la ponctuation résiduelle
+    step = re.sub(r"[\s\-]+", "_", raw.strip().upper())
+    normalized = re.sub(r"[^A-Z_]", "", step)
+
+    # 1. Correspondance directe après normalisation
+    try:
+        return enum_cls(normalized)
+    except ValueError:
+        pass
+
+    # 2. Premier token (gère "DIALOG_" issu de "DIALOG, ")
+    first_token = normalized.split("_")[0] if normalized else ""
+    if first_token and first_token != normalized:
+        try:
+            return enum_cls(first_token)
+        except ValueError:
+            pass
+
+    # 3. Table d'alias (normalized puis premier token)
+    aliases = _ALIASES.get(enum_cls, {})
+    for candidate in (normalized, first_token):
+        if candidate in aliases:
+            try:
+                result = enum_cls(aliases[candidate])
+                _logger.warning("_coerce_enum: %r -> %s.%s (alias)", raw, enum_cls.__name__, result.value)
+                return result
+            except ValueError:
+                pass
+
+    # 4. Défaut
+    _logger.warning("_coerce_enum: %r unrecognized for %s, defaulting to %s", raw, enum_cls.__name__, default.value)
+    return default
 
 GEMINI_MAX_TOKENS = 500_000
 
@@ -143,8 +218,8 @@ def _parse_llm_json(raw: str) -> LLMChapterResult:
             CharacterData(
                 name=c["name"],
                 description=c.get("description"),
-                gender=Gender(c.get("gender", "UNKNOWN")),
-                age_category=AgeCategory(c.get("age_category", "UNKNOWN")),
+                gender=_coerce_enum(c.get("gender", "UNKNOWN"), Gender, Gender.UNKNOWN),
+                age_category=_coerce_enum(c.get("age_category", "UNKNOWN"), AgeCategory, AgeCategory.UNKNOWN),
                 tone=c.get("tone"),
                 voice_quality=c.get("voice_quality"),
                 voice_tone=c.get("voice_tone"),
@@ -155,7 +230,7 @@ def _parse_llm_json(raw: str) -> LLMChapterResult:
             SegmentData(
                 position=s["position"],
                 text=s["text"],
-                segment_type=SegmentType(s.get("type", "NARRATION")),
+                segment_type=_coerce_enum(s.get("type", "NARRATION"), SegmentType, SegmentType.NARRATION),
                 character_name=s.get("character_name"),
             )
             for s in data.get("segments", [])

@@ -44,7 +44,7 @@ def die(msg: str) -> None:
 section("All LLM modules import cleanly")
 from app.services.llm.base import (  # noqa: E402
     BaseLLMProvider, CharacterData, LLMChapterResult, SegmentData,
-    _chunk_text, _estimate_tokens, _merge_chunk_results, _parse_llm_json,
+    _chunk_text, _coerce_enum, _estimate_tokens, _merge_chunk_results, _parse_llm_json,
     GEMINI_MAX_TOKENS, SYSTEM_PROMPT,
 )
 from app.services.llm.gemini import GeminiProvider  # noqa: E402
@@ -118,7 +118,7 @@ ok(f"long text ({_estimate_tokens(long_text)} tokens) -> {len(chunks)} chunks at
 # ── 5. _parse_llm_json -- valid + invalid ──────────────────────────────────────
 section("_parse_llm_json parses valid JSON and raises LLMParsingError on failure")
 import json  # noqa: E402
-from app.core.enums import Gender, SegmentType  # noqa: E402
+from app.core.enums import AgeCategory, Gender, SegmentType  # noqa: E402
 
 valid_json = json.dumps({
     "characters": [
@@ -145,11 +145,15 @@ except LLMParsingError as exc:
     assert exc.raw_response == "not json at all {{{"
     ok(f"LLMParsingError raised on invalid JSON: {exc}")
 
-try:
-    _parse_llm_json(json.dumps({"characters": [{"name": "Alice", "gender": "INVALID_GENDER"}], "segments": []}))
-    die("Expected LLMParsingError on unknown Gender value")
-except LLMParsingError as exc:
-    ok(f"LLMParsingError raised on bad enum value: {exc}")
+# With option-A coercion: unrecognized gender -> UNKNOWN, no crash
+coerced = _parse_llm_json(json.dumps({
+    "characters": [{"name": "Alice", "gender": "INVALID_GENDER", "description": "test"}],
+    "segments": [{"position": 1, "text": "x", "type": "NARRATION", "character_name": None}],
+}))
+assert coerced.characters[0].gender == Gender.UNKNOWN, (
+    f"Expected UNKNOWN fallback, got {coerced.characters[0].gender}"
+)
+ok("unknown gender 'INVALID_GENDER' -> Gender.UNKNOWN fallback, no crash")
 
 
 # ── 6. _merge_chunk_results ───────────────────────────────────────────────────
@@ -301,6 +305,46 @@ assert len(chapters) >= 2, f"Expected ≥2 chapters, got {len(chapters)}"
 assert len(chars) >= 1, f"Expected ≥1 character, got {len(chars)}"
 assert len(segs) >= 1, f"Expected ≥1 segment, got {len(segs)}"
 ok(f"status=DONE  chapters={len(chapters)}  characters={len(chars)}  segments={len(segs)}")
+
+
+# ── 9. _coerce_enum — tolérance aux écarts LLM ───────────────────────────────
+section("_coerce_enum normalise casse, ponctuation et alias LLM")
+
+# SegmentType : alias "DIALOG" -> DIALOGUE (quirk réel de qwen3:8b)
+assert _coerce_enum("DIALOG, ", SegmentType, SegmentType.NARRATION) == SegmentType.DIALOGUE
+ok("'DIALOG, ' (quirk qwen3) -> DIALOGUE")
+assert _coerce_enum("dialogue", SegmentType, SegmentType.NARRATION) == SegmentType.DIALOGUE
+ok("'dialogue' (minuscules) -> DIALOGUE")
+assert _coerce_enum("DIALOG", SegmentType, SegmentType.NARRATION) == SegmentType.DIALOGUE
+ok("'DIALOG' (abréviation) -> DIALOGUE")
+assert _coerce_enum("NARRATION", SegmentType, SegmentType.NARRATION) == SegmentType.NARRATION
+ok("'NARRATION' (correspondance directe) -> NARRATION")
+
+# Gender : casse mixte
+assert _coerce_enum("Male", Gender, Gender.UNKNOWN) == Gender.MALE
+ok("'Male' (casse mixte) -> MALE")
+assert _coerce_enum("female", Gender, Gender.UNKNOWN) == Gender.FEMALE
+ok("'female' (minuscules) -> FEMALE")
+
+# Valeur totalement inconnue -> défaut, sans crash
+assert _coerce_enum("COMPLETELY_BIZARRE", SegmentType, SegmentType.NARRATION) == SegmentType.NARRATION
+ok("valeur inconnue -> défaut NARRATION, pas de crash")
+
+# _parse_llm_json end-to-end avec le vrai quirk de qwen3
+bad_json = json.dumps({
+    "characters": [{"name": "Harry", "description": "wizard", "gender": "MALE", "voice_tone": "brave"}],
+    "segments": [
+        {"position": 1, "text": "Harry said something.", "type": "DIALOG, ", "character_name": "Harry"},
+        {"position": 2, "text": "Narrator text.", "type": "NARRATION", "character_name": None},
+    ],
+})
+r = _parse_llm_json(bad_json)
+assert r.segments[0].segment_type == SegmentType.DIALOGUE, (
+    f"Expected DIALOGUE, got {r.segments[0].segment_type}"
+)
+ok("_parse_llm_json: 'DIALOG, ' dans le JSON -> SegmentType.DIALOGUE")
+assert r.segments[1].segment_type == SegmentType.NARRATION
+ok("_parse_llm_json: 'NARRATION' dans le JSON -> SegmentType.NARRATION (pas de régression)")
 
 
 # ── 8. Live LLM (optional, gated by SCRIPTVOX_LIVE_TEST=1) ───────────────────

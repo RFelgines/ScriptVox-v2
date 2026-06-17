@@ -27,6 +27,9 @@ env/
 data/*
 !data/.gitkeep
 
+# Local test ebooks — copyrighted, never commit
+Ebook/
+
 # Piper local TTS — binary + voice models are large/GPL, downloaded per-machine
 piper/
 piper_*.zip
