@@ -29,7 +29,7 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `LLM_PROVIDER` | always | `ollama` (local) or `gemini` (cloud) |
 | `OLLAMA_BASE_URL` | `LLM_PROVIDER=ollama` | Ollama server URL, e.g. `http://localhost:11434` |
 | `OLLAMA_MODEL` | `LLM_PROVIDER=ollama` | Model name, e.g. `llama3` |
-| `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size (default 8192) |
+| `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size — **32768 recommended** (8192 truncates responses on real novel chapters) |
 | `GEMINI_API_KEY` | `LLM_PROVIDER=gemini` | Gemini API key |
 | `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
 | `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `elevenlabs` (cloud) |
