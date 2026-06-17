@@ -321,7 +321,13 @@ et d'ouvrir la voie à une parallélisation future.
   **Filtre langue retiré** : `GET /voices` renvoie la même locale pour toutes les voix (le
   `edgetts_locale` serveur) → rien à filtrer ; locale affichée en info. Vérif : `npm run build` +
   `npm run lint` verts.
-- Étape 5 — Lecteur audio persistant (play/pause, seek, vitesse).
+- Étape 5 ✅ (2026-06-17) — Lecteur audio persistant (play/pause, seek, vitesse).
+  Frontend pur (5 fichiers, 0 backend, 0 nouvelle dépendance). `src/lib/api.ts` : `bookMp3Url(id)`.
+  `src/components/player/PlayerProvider.tsx` (nouveau) : Context + `<audio>` caché via ref, `play/toggle/seek/setRate/close`.
+  `src/components/player/PlayerBar.tsx` (nouveau) : barre fixe `bottom-0` (play/pause SVG, titre, scrub+temps, vitesse 0.5→2×, fermer). Rend `null` si pas de track.
+  `src/app/layout.tsx` : wrap `<PlayerProvider>` + `<PlayerBar/>` + `pb-24`.
+  `src/app/books/[id]/page.tsx` : bouton « ▶ Écouter » (status DONE && mp3_path) → `play({title, src: bookMp3Url})`.
+  Vérif : `npm run build` + `npm run lint` verts.
 
 ### Différé / à NE PAS refaire
 - **Voice Studio** (clonage de voix, contrôle d'émotion) — vaporware V1.

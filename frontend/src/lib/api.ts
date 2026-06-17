@@ -140,3 +140,7 @@ export async function generateBook(bookId: number): Promise<BookSummary> {
 export function coverUrl(id: number): string {
   return `${API_URL}/books/${id}/cover`;
 }
+
+export function bookMp3Url(id: number): string {
+  return `${API_URL}/books/${id}/audio/mp3`;
+}

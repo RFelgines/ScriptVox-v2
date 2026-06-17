@@ -8,8 +8,10 @@ import {
   getBook,
   listChapters,
   coverUrl,
+  bookMp3Url,
 } from "@/lib/api";
 import CastingModal from "@/components/CastingModal";
+import { usePlayer } from "@/components/player/PlayerProvider";
 
 const STATUS_COLOR: Record<string, string> = {
   PENDING: "text-gray-400",
@@ -43,6 +45,7 @@ export default function BookDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [castingOpen, setCastingOpen] = useState(false);
+  const { play } = usePlayer();
   // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -138,6 +141,14 @@ export default function BookDetailPage({
                   className="mt-3 rounded bg-gray-800 px-3 py-1.5 text-sm font-medium hover:bg-gray-700"
                 >
                   Casting
+                </button>
+              )}
+              {book.status === "DONE" && book.mp3_path && (
+                <button
+                  onClick={() => play({ title: book.title, src: bookMp3Url(book.id) })}
+                  className="mt-3 ml-2 rounded bg-green-700 px-3 py-1.5 text-sm font-semibold hover:bg-green-600"
+                >
+                  ▶ Écouter
                 </button>
               )}
             </div>
