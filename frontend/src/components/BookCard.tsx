@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { BookSummary, coverUrl } from "@/lib/api";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -17,7 +18,10 @@ export default function BookCard({ book }: { book: BookSummary }) {
   const showCover = Boolean(book.cover_path) && imgOk;
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-lg border border-gray-800 bg-gray-900">
+    <Link
+      href={`/books/${book.id}`}
+      className="flex flex-col overflow-hidden rounded-lg border border-gray-800 bg-gray-900 transition-colors hover:border-gray-600"
+    >
       <div className="aspect-[2/3] bg-gray-800">
         {showCover ? (
           // <img> natif : la couverture est servie par l'API (host distant),
@@ -57,6 +61,6 @@ export default function BookCard({ book }: { book: BookSummary }) {
           </div>
         )}
       </div>
-    </div>
+    </Link>
   );
 }

@@ -296,7 +296,17 @@ et d'ouvrir la voie à une parallélisation future.
   règle Next 16 `react-hooks/set-state-in-effect` interdit un `setState` synchrone au corps d'un effet).
   Polling du statut **différé en Étape 3** (ici refresh unique). Vérif : `npm run build` + `npm run lint`
   verts (pas de harness de test frontend).
-- Étape 3 — Détail livre (chapitres, statuts, progression, polling).
+- Étape 3 ✅ (2026-06-17) — Détail livre (chapitres, statuts, progression, polling).
+  Frontend pur (3 fichiers, 0 backend, 0 nouvelle dépendance). `src/lib/api.ts` : type `ChapterStatus`
+  + interface `ChapterSummary` ; `BookSummary` élargi (`author`, `error_message`) ; `getBook(id)` +
+  `listChapters(id)`. `src/app/books/[id]/page.tsx` (nouveau, route dynamique) : Client Component,
+  param via `use(params)` (Next 16 : `params` est une `Promise`), en-tête (couverture, titre, auteur,
+  badge statut, barre de progression, `error_message` si FAILED), liste des chapitres (position, titre,
+  badge statut, erreur par chapitre). **Polling** = `setTimeout` récursif (~3 s, pas de chevauchement),
+  s'arrête quand le livre est terminal (DONE/FAILED) ET qu'aucun chapitre n'est PENDING/GENERATING ;
+  `clearTimeout` + garde `active` au démontage. `src/components/BookCard.tsx` : carte enveloppée dans
+  `<Link href="/books/{id}">`. **Bouton « Générer » différé** (vient avec le casting, Étape 4).
+  Vérif : `npm run build` (route `ƒ /books/[id]` enregistrée) + `npm run lint` verts.
 - Étape 4 — Modale de casting (auto + override, filtre langue).
 - Étape 5 — Lecteur audio persistant (play/pause, seek, vitesse).
 
