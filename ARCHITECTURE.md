@@ -45,7 +45,7 @@ concrete adapters handle provider specifics.
 
 ```
 app/services/llm/
-├── base.py        # BaseLLMProvider — abstract async analyze(prompt: str) -> str
+├── base.py        # BaseLLMProvider — abstract async analyze(text: str) -> LLMChapterResult
 ├── gemini.py      # GeminiProvider  — wraps google-genai SDK
 └── ollama.py      # OllamaProvider  — wraps ollama-python SDK
 ```
@@ -74,8 +74,12 @@ Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs`
 - Controlled by `OLLAMA_CONTEXT_TOKENS` (set in `.env`).
 - **Chunking unit:** EPUB chapter (natural boundary).
 - **Overflow strategy:** recursive split by paragraph if a chapter exceeds the budget.
-- **Safety margin:** 20 % of the context window is reserved for the system prompt.
-  Effective content budget = `floor(OLLAMA_CONTEXT_TOKENS × 0.8)`.
+- **Safety margin:** 20 % of the context window is reserved for the system prompt and the
+  model's response. Effective content budget = `floor(OLLAMA_CONTEXT_TOKENS × 0.8)`.
+  This `× 0.8` is only valid because the analysis protocol is **label-based** (§2.7): the
+  model never echoes the input text, so its response stays small — O(dialogue spans), not
+  O(input tokens). The earlier "reproduce every word" prompt violated this: its response was
+  as large as its input, leaving an effective input budget closer to `context_window / 3`.
 
 ### 2.4 KISS & Fail-Fast (IMPORTANT)
 
@@ -125,6 +129,47 @@ PENDING → PROCESSING → ANALYZED → GENERATING → DONE
 - Worker entry points: `analyze_book` (Huey task → `_analyze_book_impl`) and
   `generate_book` (Huey task → `_generate_book_impl`).
   `process_book` (legacy) chains both and is preserved for backward compatibility.
+
+### 2.7 LLM Analysis Protocol — Label-Based (CRITICAL)
+
+The LLM **never reproduces the chapter text**. It only labels structure. This keeps local
+inference fast (response size = O(dialogue spans), not O(input tokens)) and is what makes the
+§2.3 token budget (`× 0.8`) correct.
+
+**Pipeline (inside `app/services/llm/base.py`):**
+
+1. **Pre-segmentation (deterministic, Python).** The chapter is split into ordered spans
+   `(index, text, is_dialogue)` *before* the LLM call. Dialogue is detected from delimiters:
+   - French guillemets `« … »` (non-breaking spaces tolerated),
+   - typographic `" … "` and straight `"…"` quotes,
+   - lines opened by an em-dash `—` / `–` (French dialogue turns).
+
+   Everything else is narration. Undetected dialogue gracefully stays narration (spoken by
+   the narrator) — **never a crash, never a dropped word** (Python owns the text).
+
+2. **LLM call.** The numbered spans are sent, each tagged `[DIALOGUE]` / `[NARRATION]`. The
+   model returns ONLY:
+
+   ```json
+   {
+     "characters": [
+       { "name": "...", "description": "...", "gender": "MALE|FEMALE|NEUTRAL|UNKNOWN",
+         "age_category": "CHILD|YOUNG_ADULT|ADULT|ELDER|UNKNOWN",
+         "tone": "...", "voice_quality": "...", "voice_tone": "..." }
+     ],
+     "attributions": [ { "index": 3, "character_name": "Marie" } ]
+   }
+   ```
+
+   `characters[]` drives casting (schema unchanged). `attributions[]` has one entry per
+   `[DIALOGUE]` span; `character_name` must match a listed character, otherwise the span
+   falls back to the narrator.
+
+3. **Reconstruction (Python).** Each span becomes a
+   `SegmentData(position=index, text, segment_type=DIALOGUE|NARRATION, character_name)`.
+   The resulting `LLMChapterResult` is **identical in shape** to the previous protocol, so the
+   worker, the DB and `_merge_chunk_results` are untouched. The public contract
+   `analyze(text) -> LLMChapterResult` is preserved.
 
 ---
 
