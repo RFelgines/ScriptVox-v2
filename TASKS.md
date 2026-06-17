@@ -282,8 +282,20 @@ et d'ouvrir la voie à une parallélisation future.
 ### Phase 11 — Frontend (Next.js) — piste séparée
 **Pourquoi.** La V1 était surtout une UI. À démarrer une fois le backend à parité (Phases 7-9).
 > Nouvelle stack (Next.js / React / Tailwind) = gros périmètre. Chaque étape = sous-projet à recouper.
-- Étape 1 — Scaffold + intégration API (URL configurable, zéro hardcode).
-- Étape 2 — Upload (drag & drop) + bibliothèque (grille).
+- Étape 1 ✅ (2026-06-17) — Scaffold + intégration API.
+  - **1a** : `CORSMiddleware` + `Settings.frontend_origins` (optionnel, défaut `http://localhost:3000`). `check_phase12.py` 4/4. Commit `a48c7c2`.
+  - **1b** : `frontend/` Next.js 16 App Router TypeScript Tailwind. `src/lib/api.ts` (`listBooks()`), `src/app/page.tsx` (bibliothèque + statuts colorés), `NEXT_PUBLIC_API_URL` via `.env.local`. `npm run build` vert. Commit `92e5a8b`.
+- Étape 2 ✅ (2026-06-17) — Upload (drag & drop) + bibliothèque (grille).
+  Frontend pur (4 fichiers, 0 backend, 0 nouvelle dépendance). `src/lib/api.ts` : `uploadBook(file)`
+  (POST multipart `/books`, lit `detail` sur 422) + `coverUrl(id)`. `UploadDropzone.tsx` (nouveau) :
+  drag & drop HTML5 natif + fallback `<input accept=".epub">`, validation `.epub` client, états
+  upload/erreur. `BookCard.tsx` (nouveau) : carte grille, thumbnail couverture (`<img>` natif +
+  fallback titre si `cover_path` nul ou erreur image), badge statut, barre de progression. `page.tsx` :
+  liste → grille responsive (2→5 col.), montage du dropzone, refresh après upload. **Choix** : `<img>`
+  natif (pas `next/image` → évite `images.remotePatterns`) ; `refresh()` en chaîne de promesses (la
+  règle Next 16 `react-hooks/set-state-in-effect` interdit un `setState` synchrone au corps d'un effet).
+  Polling du statut **différé en Étape 3** (ici refresh unique). Vérif : `npm run build` + `npm run lint`
+  verts (pas de harness de test frontend).
 - Étape 3 — Détail livre (chapitres, statuts, progression, polling).
 - Étape 4 — Modale de casting (auto + override, filtre langue).
 - Étape 5 — Lecteur audio persistant (play/pause, seek, vitesse).
