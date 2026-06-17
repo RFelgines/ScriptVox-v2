@@ -9,6 +9,7 @@ import {
   listChapters,
   coverUrl,
 } from "@/lib/api";
+import CastingModal from "@/components/CastingModal";
 
 const STATUS_COLOR: Record<string, string> = {
   PENDING: "text-gray-400",
@@ -41,6 +42,10 @@ export default function BookDetailPage({
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [castingOpen, setCastingOpen] = useState(false);
+  // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
+  // ANALYZED, qui n'est pas un état « actif »).
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -71,7 +76,7 @@ export default function BookDetailPage({
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [bookId]);
+  }, [bookId, reloadNonce]);
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
@@ -125,6 +130,16 @@ export default function BookDetailPage({
               {book.status === "FAILED" && book.error_message && (
                 <p className="mt-2 text-sm text-red-400">{book.error_message}</p>
               )}
+              {(book.status === "ANALYZED" ||
+                book.status === "GENERATING" ||
+                book.status === "DONE") && (
+                <button
+                  onClick={() => setCastingOpen(true)}
+                  className="mt-3 rounded bg-gray-800 px-3 py-1.5 text-sm font-medium hover:bg-gray-700"
+                >
+                  Casting
+                </button>
+              )}
             </div>
           </header>
 
@@ -160,6 +175,15 @@ export default function BookDetailPage({
               </ul>
             )}
           </section>
+
+          {castingOpen && (
+            <CastingModal
+              bookId={book.id}
+              bookStatus={book.status}
+              onClose={() => setCastingOpen(false)}
+              onGenerated={() => setReloadNonce((n) => n + 1)}
+            />
+          )}
         </>
       )}
     </main>

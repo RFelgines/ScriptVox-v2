@@ -307,7 +307,20 @@ et d'ouvrir la voie à une parallélisation future.
   `clearTimeout` + garde `active` au démontage. `src/components/BookCard.tsx` : carte enveloppée dans
   `<Link href="/books/{id}">`. **Bouton « Générer » différé** (vient avec le casting, Étape 4).
   Vérif : `npm run build` (route `ƒ /books/[id]` enregistrée) + `npm run lint` verts.
-- Étape 4 — Modale de casting (auto + override, filtre langue).
+- Étape 4 ✅ (2026-06-17) — Modale de casting + déclencheur de génération.
+  Frontend pur (3 fichiers, 0 backend, 0 nouvelle dépendance). `src/lib/api.ts` : types `Gender`,
+  `VoiceSummary`, `CharacterSummary` ; `listCharacters(bookId)`, `listVoices()`,
+  `patchCharacterVoice(charId, voiceId)`, `generateBook(bookId)`. `src/components/CastingModal.tsx`
+  (nouveau) : overlay `fixed inset-0` (fermeture ✕ / backdrop / Esc), fetch parallèle personnages +
+  voix, une ligne par personnage (nom + genre/âge + description) avec `<select>` de voix (options =
+  `/voices` sans `narrator`) → `PATCH /characters/{id}` au changement (indicateur `savingId`), pied de
+  modale avec bouton **« Générer l'audio »** actif uniquement si `status === ANALYZED` →
+  `POST /books/{id}/generate`. `src/app/books/[id]/page.tsx` : bouton « Casting » (si statut ∈
+  {ANALYZED, GENERATING, DONE}), montage de la modale, **reprise du polling** après génération via un
+  `reloadNonce` ajouté aux deps de l'effet (le polling s'arrête à ANALYZED).
+  **Filtre langue retiré** : `GET /voices` renvoie la même locale pour toutes les voix (le
+  `edgetts_locale` serveur) → rien à filtrer ; locale affichée en info. Vérif : `npm run build` +
+  `npm run lint` verts.
 - Étape 5 — Lecteur audio persistant (play/pause, seek, vitesse).
 
 ### Différé / à NE PAS refaire
