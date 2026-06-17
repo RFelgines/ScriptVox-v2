@@ -41,3 +41,27 @@ def assemble_wav_bytes(audio_segments: list[bytes]) -> bytes:
     buf = io.BytesIO()
     _assemble(audio_segments, buf)
     return buf.getvalue()
+
+
+def wav_to_mp3(wav_bytes: bytes, bit_rate: int = 128) -> bytes:
+    import lameenc  # lazy: keeps assembler importable before lameenc is installed
+
+    with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+        n_channels = w.getnchannels()
+        sampwidth = w.getsampwidth()
+        framerate = w.getframerate()
+        n_frames = w.getnframes()
+        if n_frames == 0:
+            raise ValueError("WAV has no audio frames")
+        if sampwidth != 2:
+            raise ValueError(
+                f"wav_to_mp3 requires 16-bit PCM (sampwidth=2), got sampwidth={sampwidth}"
+            )
+        pcm = w.readframes(n_frames)
+
+    enc = lameenc.Encoder()
+    enc.set_bit_rate(bit_rate)
+    enc.set_in_sample_rate(framerate)
+    enc.set_channels(n_channels)
+    enc.set_quality(2)
+    return bytes(enc.encode(pcm) + enc.flush())

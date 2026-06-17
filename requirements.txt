@@ -40,6 +40,9 @@ python-dotenv~=1.0.0
 edge-tts~=6.1        # EdgeTTS provider — free, no API key; pulls aiohttp transitively
 miniaudio~=1.2       # MP3->PCM decoder for EdgeTTS output; no native lib / no binary required
 
+# ─── Audio encoding ───────────────────────────────────────────────────────────
+lameenc~=1.8         # WAV->MP3 encoder (pure Python, no native lib / no binary required)
+
 # ─── EPUB parsing ─────────────────────────────────────────────────────────────
 ebooklib~=0.18
 beautifulsoup4~=4.12
