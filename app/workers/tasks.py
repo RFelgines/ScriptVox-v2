@@ -261,9 +261,19 @@ def _generate_book_impl(book_id: int) -> None:
         # ── TTS synthesis + audio assembly (progress 60% → 90%) ───────────────
         audio_path = asyncio.run(_synthesise_book(book_id, source_path, engine))
 
+        mp3_path: str | None = None
+        if audio_path:
+            from pathlib import Path as _Path
+            from app.services.audio.assembler import wav_to_mp3
+            mp3_bytes = wav_to_mp3(_Path(audio_path).read_bytes())
+            mp3_file = _Path(audio_path).with_suffix(".mp3")
+            mp3_file.write_bytes(mp3_bytes)
+            mp3_path = str(mp3_file)
+
         with Session(engine) as session:
             book = session.get(Book, book_id)
             book.audio_path = audio_path if audio_path else None
+            book.mp3_path = mp3_path
             book.status = BookStatus.DONE
             book.progress = 100.0
             book.updated_at = datetime.now(timezone.utc)

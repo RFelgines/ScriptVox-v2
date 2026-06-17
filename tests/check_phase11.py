@@ -143,6 +143,102 @@ r2 = BookResponse(
 check("mp3_path renseignable", r2.mp3_path == "data/2/book.mp3")
 
 
+# ── 7. Worker -- mp3_path ecrit apres generation ─────────────────────────────
+section("Worker _generate_book_impl -- mp3_path persiste en BDD")
+import tempfile as _tf  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
+from sqlalchemy import StaticPool, create_engine  # noqa: E402
+from sqlmodel import SQLModel, Session as _Session  # noqa: E402
+from app.core.enums import BookStatus  # noqa: E402
+from app.models.entities import Book  # noqa: E402
+
+_engine = create_engine(
+    "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+)
+SQLModel.metadata.create_all(_engine)
+
+with _tf.TemporaryDirectory() as _tmpdir:
+    _tmpdir = Path(_tmpdir)
+
+    # Cree un WAV minimal sur disque (simule la sortie de assemble_wav)
+    _wav_path = _tmpdir / "book.wav"
+    _wav_path.write_bytes(_make_wav(n_frames=100))
+
+    # Insere un Book avec source_path et status GENERATING
+    with _Session(_engine) as _s:
+        _book = Book(
+            title="MP3 Test", source_path=str(_tmpdir / "test.epub"),
+            status=BookStatus.ANALYZED,
+        )
+        _s.add(_book)
+        _s.commit()
+        _s.refresh(_book)
+        _bid = _book.id
+
+    # Patch get_engine + _synthesise_book pour retourner le WAV pre-cree
+    with (
+        patch("app.core.db.get_engine", return_value=_engine),
+        patch("app.workers.tasks.asyncio.run", return_value=str(_wav_path)),
+    ):
+        from app.workers.tasks import _generate_book_impl
+        _generate_book_impl(_bid)
+
+    with _Session(_engine) as _s:
+        _b = _s.get(Book, _bid)
+        check("status = DONE", _b.status == BookStatus.DONE, str(_b.status))
+        check("mp3_path non nul", _b.mp3_path is not None)
+        if _b.mp3_path:
+            check("fichier MP3 sur disque", Path(_b.mp3_path).exists())
+            check("mp3_path se termine par .mp3", _b.mp3_path.endswith(".mp3"))
+
+
+# ── 8. GET /books/{id}/audio/mp3 -- 200 OK ───────────────────────────────────
+section("GET /books/{id}/audio/mp3 -- 200 OK avec fichier MP3")
+from fastapi.testclient import TestClient  # noqa: E402
+from app.main import app  # noqa: E402
+from app.core.db import get_session as _real_get_session  # noqa: E402
+
+
+def _get_test_session():
+    with _Session(_engine) as s:
+        yield s
+
+
+app.dependency_overrides[_real_get_session] = _get_test_session
+client = TestClient(app)
+
+with _tf.TemporaryDirectory() as _tmpdir2:
+    _mp3_file = Path(_tmpdir2) / "book.mp3"
+    _mp3_file.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 100)
+
+    with _Session(_engine) as _s:
+        _book2 = Book(title="MP3 Serve", source_path="x.epub", mp3_path=str(_mp3_file))
+        _s.add(_book2)
+        _s.commit()
+        _s.refresh(_book2)
+        _bid2 = _book2.id
+
+    resp = client.get(f"/books/{_bid2}/audio/mp3")
+    check("status 200", resp.status_code == 200, str(resp.status_code))
+    check("content-type audio/mpeg", "audio/mpeg" in resp.headers.get("content-type", ""))
+
+
+# ── 9. GET /books/{id}/audio/mp3 -- 404 si pas de mp3_path ───────────────────
+section("GET /books/{id}/audio/mp3 -- 404 si book sans mp3_path")
+with _Session(_engine) as _s:
+    _book3 = Book(title="No MP3", source_path="y.epub")
+    _s.add(_book3)
+    _s.commit()
+    _s.refresh(_book3)
+    _bid3 = _book3.id
+
+resp = client.get(f"/books/{_bid3}/audio/mp3")
+check("status 404", resp.status_code == 404, str(resp.status_code))
+check("detail mentionne MP3", "MP3" in resp.json().get("detail", ""))
+
+app.dependency_overrides.clear()
+
+
 # ── Resume ────────────────────────────────────────────────────────────────────
 print(f"\n{'='*50}")
 if _errors:

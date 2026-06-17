@@ -92,6 +92,19 @@ def get_book_audio(book_id: int, session: Session = Depends(get_session)) -> Fil
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
 
 
+@router.get("/{book_id}/audio/mp3")
+def get_book_mp3(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if not book.mp3_path:
+        raise HTTPException(status_code=404, detail="MP3 not ready — generate the book first.")
+    path = Path(book.mp3_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="MP3 file not found on disk.")
+    return FileResponse(str(path), media_type="audio/mpeg", filename=path.name)
+
+
 @router.get("/{book_id}/cover")
 def get_book_cover(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
     book = session.get(Book, book_id)

@@ -269,10 +269,15 @@ et d'ouvrir la voie à une parallélisation future.
   `check_phase10.py` 11/11 OK. Zéro régression 9 suites.
   Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase10.py`.
 
-### Phase 10 — Format de diffusion audio
-**Pourquoi.** Un WAV de livre entier est énorme ; le MP3 convient au streaming web.
-- Étape 1 — Sortie MP3 pour la diffusion (master WAV conservé). ⚠️ **Dépendance** à justifier
-  avant ajout (ex. `ffmpeg` / `lameenc`). *Dépend de D1 (EdgeTTS produit déjà du MP3).*
+### Phase 10 — Format de diffusion audio ✅ (terminée, 2026-06-17)
+
+- Étape 1 ✅ — `wav_to_mp3(bytes)->bytes` dans `assembler.py` (lameenc~=1.8, pur Python).
+  `Book.mp3_path` + `BookResponse.mp3_path`. `check_phase11.py` 6/6 OK.
+  Fichiers (5) : `requirements.txt`, `assembler.py`, `entities.py`, `schemas/book.py`, `check_phase11.py`.
+- Étape 2 ✅ — Worker encode WAV→MP3 après `assemble_wav` + `GET /books/{id}/audio/mp3`.
+  WAV master conservé. `check_phase11.py` 9/9 OK. Zéro régression 10 suites.
+  Fichiers (3) : `workers/tasks.py`, `routes/books.py`, `check_phase11.py`.
+  ⚠️ Supprimer `scriptvox.db` avant 1er run (nouvelles colonnes `mp3_path`).
 
 ### Phase 11 — Frontend (Next.js) — piste séparée
 **Pourquoi.** La V1 était surtout une UI. À démarrer une fois le backend à parité (Phases 7-9).
