@@ -69,6 +69,11 @@ class Settings:
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")
 
+        _origins_raw = os.environ.get("FRONTEND_ORIGINS", "http://localhost:3000")
+        self.frontend_origins: list[str] = [
+            o.strip() for o in _origins_raw.split(",") if o.strip()
+        ]
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
