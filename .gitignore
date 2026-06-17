@@ -33,6 +33,11 @@ piper_*.zip
 voices/*
 !voices/.gitkeep
 
+# Frontend — build artefacts and local env are machine-specific
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
 # Claude Code — local overrides are machine-specific, never commit
 .claude/settings.local.json
 

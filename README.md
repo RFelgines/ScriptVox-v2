@@ -46,7 +46,7 @@ The app **fails at startup** if any required variable for the active provider is
 
 ## Launch
 
-Two processes must run in parallel:
+Three processes must run in parallel:
 
 ```bash
 # Terminal 1 — API server
@@ -54,10 +54,24 @@ uvicorn app.main:app --reload
 
 # Terminal 2 — Huey background worker
 .venv\Scripts\python -m huey.bin.huey_consumer app.workers.tasks.huey
+
+# Terminal 3 — Frontend (Next.js)
+cd frontend
+npm run dev
 ```
 
-The API is available at `http://localhost:8000`.  
-Interactive docs: `http://localhost:8000/docs`
+| Process | URL |
+|---|---|
+| API | `http://localhost:8000` — interactive docs at `/docs` |
+| Frontend | `http://localhost:3000` |
+
+**Frontend setup (first time only):**
+
+```bash
+cd frontend
+cp .env.example .env.local   # already contains NEXT_PUBLIC_API_URL=http://localhost:8000
+npm install
+```
 
 ---
 
@@ -141,6 +155,10 @@ Each phase has its own test suite. Run them in order to verify the full stack:
 .venv\Scripts\python tests\check_phase6.py   # Per-chapter audio endpoint
 .venv\Scripts\python tests\check_phase7.py   # Decoupled pipeline (ANALYZED / GENERATING statuses)
 .venv\Scripts\python tests\check_phase8.py   # EdgeTTS provider (config, voice mapping, synthesis)
+.venv\Scripts\python tests\check_phase9.py   # Voice casting & PATCH /characters/{id}
+.venv\Scripts\python tests\check_phase10.py  # Cover image extraction & endpoints
+.venv\Scripts\python tests\check_phase11.py  # MP3 output (wav_to_mp3, GET /audio/mp3)
+.venv\Scripts\python tests\check_phase12.py  # CORS (Settings.frontend_origins, middleware)
 ```
 
 All suites mock external providers (LLM, TTS, network) and run fully offline.
