@@ -140,6 +140,69 @@ class BaseLLMProvider(ABC):
     async def analyze(self, text: str) -> LLMChapterResult: ...
 
 
+# ── Pre-segmentation (label-based protocol, ARCHITECTURE.md §2.7) ────────────────
+
+_DIALOGUE_RE = re.compile(
+    "|".join((
+        r"«[^»]*»",              # guillemets français
+        r"“[^”]*”",              # guillemets typographiques
+        r'"[^"]*"',              # guillemets droits
+        r"^[ \t]*[—–―][^\n]*",   # ligne ouverte par un tiret cadratin (dialogue FR)
+    )),
+    re.MULTILINE,
+)
+
+
+@dataclass
+class _Span:
+    index: int
+    text: str
+    is_dialogue: bool
+
+
+def _pre_segment(text: str) -> list[_Span]:
+    """Découpe *text* en spans ordonnés narration/dialogue, byte-exact (zéro mot perdu).
+
+    Invariant : ``"".join(s.text for s in _pre_segment(t)) == t``.
+    Le type (dialogue vs narration) est déterminé ici via les délimiteurs ; le LLM
+    n'attribue qu'un locuteur aux spans de dialogue (cf. §2.7). Un dialogue non
+    détecté reste narration (lu par le narrateur) — jamais de crash, jamais de perte.
+    """
+    spans: list[_Span] = []
+    idx = 0
+    pos = 0
+    for match in _DIALOGUE_RE.finditer(text):
+        start, end = match.span()
+        if start > pos:
+            idx += 1
+            spans.append(_Span(idx, text[pos:start], False))
+        idx += 1
+        spans.append(_Span(idx, text[start:end], True))
+        pos = end
+    if pos < len(text):
+        idx += 1
+        spans.append(_Span(idx, text[pos:], False))
+    if not spans:
+        spans.append(_Span(1, text, False))
+    return spans
+
+
+def _build_user_prompt(spans: list[_Span]) -> str:
+    """Rend les spans numérotés et tagués pour le LLM : ``[i][DIALOGUE|NARRATION] texte``.
+
+    Le texte est normalisé (espaces/sauts de ligne compactés) ; les spans vides après
+    normalisation sont omis de l'affichage mais conservent leur index d'origine.
+    """
+    lines: list[str] = []
+    for span in spans:
+        display = " ".join(span.text.split())
+        if not display:
+            continue
+        tag = "DIALOGUE" if span.is_dialogue else "NARRATION"
+        lines.append(f"[{span.index}][{tag}] {display}")
+    return "\n".join(lines)
+
+
 # ── Token budgeting ────────────────────────────────────────────────────────────
 
 def _estimate_tokens(text: str) -> int:

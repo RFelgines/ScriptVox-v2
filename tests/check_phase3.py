@@ -347,6 +347,67 @@ assert r.segments[1].segment_type == SegmentType.NARRATION
 ok("_parse_llm_json: 'NARRATION' dans le JSON -> SegmentType.NARRATION (pas de régression)")
 
 
+# ── _pre_segment — découpage déterministe narration/dialogue (§2.7, B-2a) ─────
+section("_pre_segment détecte les délimiteurs FR/EN sans perdre un mot")
+from app.services.llm.base import _Span, _build_user_prompt, _pre_segment  # noqa: E402,F401
+
+# Guillemets droits (EN)
+sample_en = 'Alice sat. "Hello," she said.'
+spans_en = _pre_segment(sample_en)
+dialogue_en = [s for s in spans_en if s.is_dialogue]
+assert len(dialogue_en) == 1, f"Expected 1 dialogue span, got {len(dialogue_en)}"
+assert "Hello" in dialogue_en[0].text
+assert "".join(s.text for s in spans_en) == sample_en, "invariant byte-exact violé (EN)"
+ok('guillemets droits: "Hello," -> 1 dialogue, narration autour, byte-exact')
+
+# Guillemets français « »
+sample_fr = "Il arriva. « Bonjour », dit-il."
+spans_fr = _pre_segment(sample_fr)
+dialogue_fr = [s for s in spans_fr if s.is_dialogue]
+assert len(dialogue_fr) == 1 and "Bonjour" in dialogue_fr[0].text
+assert "".join(s.text for s in spans_fr) == sample_fr, "invariant byte-exact violé (FR «»)"
+ok("guillemets « » -> 1 dialogue, byte-exact")
+
+# Tiret cadratin en début de ligne (dialogue FR)
+sample_dash = "Elle réfléchit.\n— Tu viens ? demanda-t-elle."
+spans_dash = _pre_segment(sample_dash)
+dialogue_dash = [s for s in spans_dash if s.is_dialogue]
+assert len(dialogue_dash) == 1, f"Expected 1 dash-dialogue span, got {len(dialogue_dash)}"
+assert dialogue_dash[0].text.lstrip().startswith("—")
+assert "".join(s.text for s in spans_dash) == sample_dash, "invariant byte-exact violé (tiret)"
+ok("ligne ouverte par — -> 1 dialogue, byte-exact")
+
+# Narration pure : un seul span, jamais dialogue
+sample_narr = "Le soleil se couchait sur la ville endormie."
+spans_narr = _pre_segment(sample_narr)
+assert len(spans_narr) == 1 and spans_narr[0].is_dialogue is False
+assert spans_narr[0].text == sample_narr
+ok("narration pure -> 1 span narration")
+
+# Index 1-based et contigus + zéro mot perdu sur échantillon mixte
+sample_mix = 'Le matin. « Salut ! » Puis le soir. "Bonsoir." Fin.'
+spans_mix = _pre_segment(sample_mix)
+assert [s.index for s in spans_mix] == list(range(1, len(spans_mix) + 1)), "indices non contigus"
+assert "".join(s.text for s in spans_mix) == sample_mix, "invariant byte-exact violé (mixte)"
+assert len([s for s in spans_mix if s.is_dialogue]) == 2
+ok(f"indices contigus 1..{len(spans_mix)}, 2 dialogues, zéro mot perdu")
+
+
+# ── _build_user_prompt — spans numérotés/tagués pour le LLM (§2.7, B-2a) ──────
+section("_build_user_prompt formate les spans numérotés/tagués")
+prompt = _build_user_prompt(spans_mix)
+for s in spans_mix:
+    if not " ".join(s.text.split()):
+        continue
+    tag = "DIALOGUE" if s.is_dialogue else "NARRATION"
+    assert f"[{s.index}][{tag}]" in prompt, f"span {s.index} ({tag}) absent du prompt"
+ok("chaque span affichable présent avec [index][TYPE]")
+assert "[DIALOGUE]" in prompt and "[NARRATION]" in prompt
+ok("tags DIALOGUE et NARRATION présents")
+assert "\n\n" not in prompt, "le prompt ne doit pas contenir de double saut de ligne"
+ok("whitespace normalisé dans le rendu")
+
+
 # ── 8. Live LLM (optional, gated by SCRIPTVOX_LIVE_TEST=1) ───────────────────
 if os.environ.get("SCRIPTVOX_LIVE_TEST") == "1":
     section("Live LLM call (SCRIPTVOX_LIVE_TEST=1)")
