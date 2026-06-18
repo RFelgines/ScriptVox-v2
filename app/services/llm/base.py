@@ -83,7 +83,11 @@ def _coerce_enum(raw: str, enum_cls: type[_E], default: _E) -> _E:
 GEMINI_MAX_TOKENS = 500_000
 
 SYSTEM_PROMPT = (
-    "You are a literary analysis assistant. Analyze the provided chapter excerpt.\n\n"
+    "You are a literary analysis assistant. You receive a chapter split into numbered,\n"
+    "tagged spans, one per line: [<index>][DIALOGUE|NARRATION] <text>.\n\n"
+    "Your job is NOT to rewrite the text. Do TWO things only:\n"
+    "1. Identify the speaking characters.\n"
+    "2. For each [DIALOGUE] span, name the character who speaks it.\n\n"
     "Return ONLY valid JSON matching this exact schema — no markdown, no commentary:\n"
     "{\n"
     '  "characters": [\n'
@@ -94,16 +98,14 @@ SYSTEM_PROMPT = (
     '      "tone": "...", "voice_quality": "...", "voice_tone": "..."\n'
     '    }\n'
     "  ],\n"
-    '  "segments": [\n'
-    '    {"position": 1, "text": "...", "type": "NARRATION|DIALOGUE", "character_name": null}\n'
-    "  ]\n"
+    '  "attributions": [ {"index": 2, "character_name": "..."} ]\n'
     "}\n\n"
     "Rules:\n"
-    "- Include EVERY word of the input in segments — no text may be dropped.\n"
-    "- DIALOGUE: quoted speech only. NARRATION: everything else (prose, descriptions, actions).\n"
-    "- character_name must exactly match a name in the characters array, or be null for NARRATION.\n"
+    "- attributions: ONE entry per [DIALOGUE] span only, keyed by its <index>. Never include NARRATION spans.\n"
+    "- character_name must exactly match a name in the characters array.\n"
+    "- NEVER reproduce or repeat span text — output indices and names only.\n"
     "- gender: infer from pronouns/context; use UNKNOWN if ambiguous.\n"
-    "- age_category: infer from apparent age (CHILD <13, YOUNG_ADULT 13-25, ADULT 26-60, ELDER 60+); use UNKNOWN if ambiguous.\n"
+    "- age_category: CHILD <13, YOUNG_ADULT 13-25, ADULT 26-60, ELDER 60+; use UNKNOWN if ambiguous.\n"
     "- tone: single word for emotional/personality quality, e.g. \"warm\", \"cold\", \"harsh\", \"gentle\".\n"
     "- voice_quality: single word for acoustic quality, e.g. \"deep\", \"raspy\", \"bright\", \"smooth\".\n"
     "- voice_tone: concise phrase combining tone and quality, e.g. \"soft and hesitant\", \"deep and commanding\"."
@@ -270,7 +272,25 @@ def _merge_chunk_results(results: list[LLMChapterResult]) -> LLMChapterResult:
     return LLMChapterResult(characters=list(seen.values()), segments=segments)
 
 
-def _parse_llm_json(raw: str) -> LLMChapterResult:
+def _segment_text(span: "_Span") -> str:
+    """Retourne le texte du span avec les délimiteurs de dialogue retirés (pour le TTS)."""
+    text = span.text.strip()
+    if not span.is_dialogue:
+        return text
+    if text.startswith("«") and text.endswith("»"):
+        text = text[1:-1].strip()
+    elif text.startswith("“") and text.endswith("”"):
+        text = text[1:-1].strip()
+    elif text.startswith('"') and text.endswith('"') and len(text) > 1:
+        text = text[1:-1].strip()
+    else:
+        text = re.sub(r'^[ \t]*[—–―]\s*', '', text)
+    return text.strip()
+
+
+def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
+    """Parse la réponse LLM label-based ``{characters, attributions}`` et reconstruit
+    les ``SegmentData`` depuis les spans pré-segmentés (cf. ARCHITECTURE.md §2.7)."""
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -289,15 +309,34 @@ def _parse_llm_json(raw: str) -> LLMChapterResult:
             )
             for c in data.get("characters", [])
         ]
-        segments = [
-            SegmentData(
-                position=s["position"],
-                text=s["text"],
-                segment_type=_coerce_enum(s.get("type", "NARRATION"), SegmentType, SegmentType.NARRATION),
-                character_name=s.get("character_name"),
-            )
-            for s in data.get("segments", [])
-        ]
+        known_names = {c.name for c in characters}
+        attr_map: dict[int, str] = {}
+        for a in data.get("attributions", []):
+            name = a.get("character_name")
+            if name and name in known_names:
+                attr_map[a["index"]] = name
+            else:
+                _logger.warning(
+                    "_parse_llm_json: attribution index=%s character=%r not in characters list, "
+                    "falling back to narrator",
+                    a.get("index"), name,
+                )
+
+        segments: list[SegmentData] = []
+        pos = 0
+        for span in spans:
+            text = _segment_text(span)
+            if not text:
+                continue
+            pos += 1
+            seg_type = SegmentType.DIALOGUE if span.is_dialogue else SegmentType.NARRATION
+            char_name = attr_map.get(span.index) if span.is_dialogue else None
+            segments.append(SegmentData(
+                position=pos,
+                text=text,
+                segment_type=seg_type,
+                character_name=char_name,
+            ))
     except (KeyError, ValueError) as exc:
         raise LLMParsingError(raw, exc) from exc
 

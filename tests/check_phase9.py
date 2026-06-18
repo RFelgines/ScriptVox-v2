@@ -197,6 +197,7 @@ from app.services.llm.base import (  # noqa: E402
     CharacterData,
     SYSTEM_PROMPT,
     _parse_llm_json,
+    _Span,
 )
 
 # ── Section 7: AgeCategory enum ──────────────────────────────────────────────
@@ -282,6 +283,7 @@ section("_parse_llm_json: age_category / tone / voice_quality parsés depuis JSO
 
 import json as _json  # noqa: E402
 
+_spans_11 = [_Span(1, '"Hello."', True)]
 _llm_json = _json.dumps({
     "characters": [
         {
@@ -294,13 +296,11 @@ _llm_json = _json.dumps({
             "voice_tone": "soft and hesitant",
         }
     ],
-    "segments": [
-        {"position": 1, "text": "Hello.", "type": "DIALOGUE", "character_name": "Alice"}
-    ],
+    "attributions": [{"index": 1, "character_name": "Alice"}],
 })
 
 try:
-    result = _parse_llm_json(_llm_json)
+    result = _parse_llm_json(_llm_json, _spans_11)
     cd = result.characters[0]
     check("age_category == YOUNG_ADULT", cd.age_category == AgeCategory.YOUNG_ADULT,
           f"got {cd.age_category!r}")
@@ -314,17 +314,16 @@ except Exception as e:
 
 section("_parse_llm_json: fallback UNKNOWN/None si champs absents (rétrocompat)")
 
+_spans_12 = [_Span(1, '"Hey."', True)]
 _llm_json_old = _json.dumps({
     "characters": [
         {"name": "Bob", "gender": "MALE", "voice_tone": "deep"}
     ],
-    "segments": [
-        {"position": 1, "text": "Hey.", "type": "DIALOGUE", "character_name": "Bob"}
-    ],
+    "attributions": [{"index": 1, "character_name": "Bob"}],
 })
 
 try:
-    result2 = _parse_llm_json(_llm_json_old)
+    result2 = _parse_llm_json(_llm_json_old, _spans_12)
     cd2 = result2.characters[0]
     check("age_category fallback UNKNOWN", cd2.age_category == AgeCategory.UNKNOWN,
           f"got {cd2.age_category!r}")

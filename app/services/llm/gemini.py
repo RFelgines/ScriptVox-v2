@@ -9,7 +9,9 @@ from app.services.llm.base import (
     BaseLLMProvider,
     LLMChapterResult,
     SYSTEM_PROMPT,
+    _build_user_prompt,
     _parse_llm_json,
+    _pre_segment,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,18 +23,19 @@ class GeminiProvider(BaseLLMProvider):
         self._model = settings.gemini_model
 
     async def analyze(self, text: str) -> LLMChapterResult:
+        spans = _pre_segment(text)
         raw = ""
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
-                contents=text,
+                contents=_build_user_prompt(spans),
                 config=genai_types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     response_mime_type="application/json",
                 ),
             )
             raw = response.text
-            return _parse_llm_json(raw)
+            return _parse_llm_json(raw, spans)
         except LLMParsingError:
             raise
         except Exception as exc:

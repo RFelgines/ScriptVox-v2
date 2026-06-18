@@ -45,6 +45,7 @@ section("All LLM modules import cleanly")
 from app.services.llm.base import (  # noqa: E402
     BaseLLMProvider, CharacterData, LLMChapterResult, SegmentData,
     _chunk_text, _coerce_enum, _estimate_tokens, _merge_chunk_results, _parse_llm_json,
+    _segment_text, _Span,
     GEMINI_MAX_TOKENS, SYSTEM_PROMPT,
 )
 from app.services.llm.gemini import GeminiProvider  # noqa: E402
@@ -115,45 +116,59 @@ for para in [para_a.strip(), para_b.strip(), para_c.strip()]:
 ok(f"long text ({_estimate_tokens(long_text)} tokens) -> {len(chunks)} chunks at budget={budget}")
 
 
-# ── 5. _parse_llm_json -- valid + invalid ──────────────────────────────────────
-section("_parse_llm_json parses valid JSON and raises LLMParsingError on failure")
+# ── 5. _parse_llm_json -- format {characters, attributions} + reconstruction ──
+section("_parse_llm_json parse {characters, attributions} et reconstruit les segments")
 import json  # noqa: E402
 from app.core.enums import AgeCategory, Gender, SegmentType  # noqa: E402
 
+_test_spans = [
+    _Span(1, "Alice walked.", False),
+    _Span(2, '"Hello!"', True),
+]
 valid_json = json.dumps({
     "characters": [
         {"name": "Alice", "description": "curious girl", "gender": "FEMALE", "voice_tone": "soft"},
     ],
-    "segments": [
-        {"position": 1, "text": "Alice walked.", "type": "NARRATION", "character_name": None},
-        {"position": 2, "text": "Hello!", "type": "DIALOGUE", "character_name": "Alice"},
-    ],
+    "attributions": [{"index": 2, "character_name": "Alice"}],
 })
-result = _parse_llm_json(valid_json)
+result = _parse_llm_json(valid_json, _test_spans)
 assert len(result.characters) == 1
 assert result.characters[0].name == "Alice"
 assert result.characters[0].gender == Gender.FEMALE
 assert len(result.segments) == 2
+assert result.segments[0].segment_type == SegmentType.NARRATION
+assert result.segments[0].character_name is None
 assert result.segments[1].segment_type == SegmentType.DIALOGUE
 assert result.segments[1].character_name == "Alice"
-ok("valid JSON parsed correctly")
+assert result.segments[1].text == "Hello!", f"délimiteurs non retirés: {result.segments[1].text!r}"
+ok("JSON valide parsé, segments reconstruits, délimiteurs retirés")
 
 try:
-    _parse_llm_json("not json at all {{{")
+    _parse_llm_json("not json at all {{{", [])
     die("Expected LLMParsingError on invalid JSON")
 except LLMParsingError as exc:
     assert exc.raw_response == "not json at all {{{"
-    ok(f"LLMParsingError raised on invalid JSON: {exc}")
+    ok(f"LLMParsingError sur JSON invalide : {exc}")
 
-# With option-A coercion: unrecognized gender -> UNKNOWN, no crash
+# Gender inconnu -> UNKNOWN, pas de crash
 coerced = _parse_llm_json(json.dumps({
     "characters": [{"name": "Alice", "gender": "INVALID_GENDER", "description": "test"}],
-    "segments": [{"position": 1, "text": "x", "type": "NARRATION", "character_name": None}],
-}))
+    "attributions": [],
+}), [_Span(1, "x", False)])
 assert coerced.characters[0].gender == Gender.UNKNOWN, (
     f"Expected UNKNOWN fallback, got {coerced.characters[0].gender}"
 )
-ok("unknown gender 'INVALID_GENDER' -> Gender.UNKNOWN fallback, no crash")
+ok("gender inconnu 'INVALID_GENDER' -> Gender.UNKNOWN, pas de crash")
+
+# Attribution vers personnage inconnu -> character_name=None (fallback gracieux)
+fallback = _parse_llm_json(json.dumps({
+    "characters": [{"name": "Alice", "gender": "FEMALE", "description": "test"}],
+    "attributions": [{"index": 2, "character_name": "PERSONNAGE_INCONNU"}],
+}), _test_spans)
+assert fallback.segments[1].character_name is None, (
+    f"Expected None fallback, got {fallback.segments[1].character_name!r}"
+)
+ok("attribution personnage inconnu -> character_name=None, pas de crash")
 
 
 # ── 6. _merge_chunk_results ───────────────────────────────────────────────────
@@ -329,22 +344,6 @@ ok("'female' (minuscules) -> FEMALE")
 # Valeur totalement inconnue -> défaut, sans crash
 assert _coerce_enum("COMPLETELY_BIZARRE", SegmentType, SegmentType.NARRATION) == SegmentType.NARRATION
 ok("valeur inconnue -> défaut NARRATION, pas de crash")
-
-# _parse_llm_json end-to-end avec le vrai quirk de qwen3
-bad_json = json.dumps({
-    "characters": [{"name": "Harry", "description": "wizard", "gender": "MALE", "voice_tone": "brave"}],
-    "segments": [
-        {"position": 1, "text": "Harry said something.", "type": "DIALOG, ", "character_name": "Harry"},
-        {"position": 2, "text": "Narrator text.", "type": "NARRATION", "character_name": None},
-    ],
-})
-r = _parse_llm_json(bad_json)
-assert r.segments[0].segment_type == SegmentType.DIALOGUE, (
-    f"Expected DIALOGUE, got {r.segments[0].segment_type}"
-)
-ok("_parse_llm_json: 'DIALOG, ' dans le JSON -> SegmentType.DIALOGUE")
-assert r.segments[1].segment_type == SegmentType.NARRATION
-ok("_parse_llm_json: 'NARRATION' dans le JSON -> SegmentType.NARRATION (pas de régression)")
 
 
 # ── _pre_segment — découpage déterministe narration/dialogue (§2.7, B-2a) ─────
