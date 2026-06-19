@@ -59,14 +59,18 @@ Same principle for speech synthesis.
 ```
 app/services/tts/
 ├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id) -> bytes
-├── piper.py          # PiperProvider   — local, fast; voice_id maps to PIPER_VOICES_DIR/<id>.onnx
-└── elevenlabs.py     # ElevenLabsProvider — cloud, high quality; voice_id = ElevenLabs voice UUID
+├── piper.py          # PiperProvider    — local, offline; subprocess piper.exe; voice_id → PIPER_VOICES_DIR/<id>.onnx
+├── elevenlabs.py     # ElevenLabsProvider — cloud, high quality; voice_id = ElevenLabs voice UUID
+└── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 22050 Hz
 ```
 
 > **Licence Piper:** `piper-tts` est distribué sous **GPL-3.0** (`OHF-Voice/piper1-gpl`).
 > Toute distribution de ScriptVox incluant Piper doit respecter cette licence.
 
-Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs`
+Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts`
+
+> `edgetts` is the default (`TTS_PROVIDER=edgetts` in `.env.example`). It requires internet
+> access at synthesis time and no API key. Optional: `EDGETTS_LOCALE` (default `en-US`).
 
 ### 2.3 Token Budgeting (IMPORTANT)
 
