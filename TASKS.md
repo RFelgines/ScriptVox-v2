@@ -329,7 +329,7 @@ et d'ouvrir la voie à une parallélisation future.
   `src/app/books/[id]/page.tsx` : bouton « ▶ Écouter » (status DONE && mp3_path) → `play({title, src: bookMp3Url})`.
   Vérif : `npm run build` + `npm run lint` verts.
 
-### Phase 12 — Run réel EdgeTTS & hardening LLM parser (2026-06-17, en cours)
+### Phase 12 — Run réel EdgeTTS & hardening LLM parser (2026-06-17 → 2026-06-19) ✅ terminée
 
 **Pourquoi.** Première validation bout-en-bout en conditions réelles (EdgeTTS fr-FR, vrai roman français HP). Bugs découverts et corrigés test-first pendant la tentative.
 
@@ -356,18 +356,75 @@ et d'ouvrir la voie à une parallélisation future.
 - Résultat : **WAV 89,9 s — 22 050 Hz mono 16-bit — 3,9 MB — HTTP 200 ✅**
 - Pipeline complet confirmé : EPUB → LLM → personnages → voix fr-FR → WAV assemblé.
 
-**Décision en attente (HP) :**
+#### Étape 4 ✅ (2026-06-18/19) — Protocole LLM label-based (option B retenue)
 
-#### Étape 4 — Validation run HP (bloquée — décision en attente)
+**Décision.** Option B choisie : refactoring LLM pour ne retourner que des métadonnées
+(`{characters, attributions}`) ; le texte n'est jamais reproduit. Sortie O(dialogues) au lieu de
+O(tokens entrée) → chapitres HP en secondes au lieu de 7-14 min.
 
-**Contrainte découverte.** Le prompt "Include EVERY word" oblige le LLM local à régénérer tout le texte en JSON (sortie ≈ entrée tokens). HP chapitre réel : ~4 000-8 000 tokens de sortie à ~10 tok/s = **7-14 min**. `OLLAMA_READ_TIMEOUT=600` insuffisant sur les gros chapitres.
+**B-1 ✅ — Doc ARCHITECTURE.md** (commit `e2dbfd8`)
+- §2.1 : signature `analyze(text: str) -> LLMChapterResult` (était stale `prompt: str`).
+- §2.3 : clarification que `× 0.8` est valide uniquement avec label-based (ancien prompt laissait
+  budget effectif à `context_window / 3`). **Bug §2.3 résolu.**
+- §2.7 (nouveau) : spec complète du protocole — délimiteurs de pré-segmentation, schema JSON
+  `{characters, attributions}`, règle de reconstruction, contrats publics préservés.
 
-**Choix (décision à prendre) :**
-- **A)** `OLLAMA_READ_TIMEOUT=3600` dans `.env` + relancer (~2-5 h de run HP)
-- **B)** Refactoring LLM : output métadonnées uniquement (positions/noms de personnages), pas le texte complet → ×5 vitesse locale. Nouveau plan, ampleur moyenne.
-- **C)** Valider EdgeTTS sur petit epub FR maintenant (5-10 min) puis décider de B.
+**B-2a ✅ — Pré-segmentation déterministe** (commit `b4cefde`)
+- `_Span(index, text, is_dialogue)` + `_pre_segment(text) -> list[_Span]` (invariant byte-exact).
+- `_build_user_prompt(spans) -> str` : formate `[i][DIALOGUE|NARRATION] texte` pour le LLM.
+- `tests/check_phase3.py` : sections §9 (`_pre_segment`) et §10 (`_build_user_prompt`) ajoutées.
 
-⚠️ **Bug archi §2.3 :** La marge 20% ne couvre que le prompt système. Avec "reproduce all text", budget effectif entrée = `context_window / 3` (pas `× 0.8`). À corriger dans ARCHITECTURE.md lors du prochain plan.
+**B-2b ✅ — Bascule protocole label-based** (commit `aa07b50`)
+- `SYSTEM_PROMPT` réécrit : LLM reçoit les spans numérotés, retourne `{characters, attributions}`,
+  ne reproduit jamais le texte. Champs `age_category`/`tone`/`voice_quality` préservés (check_phase9 §13).
+- `_segment_text(span) -> str` : retire les délimiteurs de dialogue pour le TTS (`«»`, `""`, `"…"`,
+  tiret cadratin initial).
+- `_parse_llm_json(raw, spans)` : reconstruit `SegmentData` depuis les spans + `attr_map` ;
+  attributions inconnues → `None` + WARNING (jamais de crash).
+- `ollama.py` + `gemini.py` câblés sur le nouveau protocole.
+- `tests/check_phase3.py` §5 + `tests/check_phase9.py` §11/§12 migrés au format `{attributions}`.
+- **12/12 suites vertes.**
+
+#### Étape 5 ✅ (2026-06-19) — Run réel HP + cartographie num_ctx
+
+**Méthode.** Nouveau script `tests/bench_hp_label_based.py` (benchmark live, **HORS** suite de
+régression : nécessite Ollama + epub dans `Ebook/`, aucun assert — produit des mesures). Parse
+l'epub HP réel, mesure l'analyse LLM des 3 premiers chapitres de contenu (Ch.3 « Le survivant »
+82 dialogues, Ch.4, Ch.5) avec qwen3:8b + protocole label-based. Warm-up hors mesure. Cartographie
+sur 3 valeurs de `OLLAMA_CONTEXT_TOKENS` + `ollama ps` après chaque run.
+
+**Vitesse (moyenne/chapitre) & VRAM :**
+
+| num_ctx | Ch.3 | Ch.4 | Ch.5 | moyenne | `ollama ps` |
+|---------|------|------|------|---------|-------------|
+| 8192    | 34,9 s | 20,9 s | 15,3 s | **23,7 s** | 100% GPU (6,6 GB) |
+| 16384   | 102,3 s | 100,7 s | 107,5 s | **103,5 s** | 100% GPU (7,8 GB) |
+| 32768   | 480,4 s | 263,7 s | 318,6 s | **354,2 s** | **18% CPU** / 82% GPU (10 GB) |
+
+**Qualité d'attribution (dialogues attribués / total) :**
+
+| num_ctx | Ch.3 (82) | Ch.4 (53) | Ch.5 (60) |
+|---------|-----------|-----------|-----------|
+| 8192    | 20 (+2 chunks) | 11 | **2** |
+| 16384   | **0** (JSON `index:null`) | 53 | 59 |
+| 32768   | **81** | 52 | 56 |
+
+**Conclusion.** La vitesse est gouvernée par `num_ctx`, PAS par le protocole : à 32768 le cache KV
+déborde la VRAM (18% CPU) → ~6 min/ch ; le plus grand contexte 100% GPU testé est 16384. **Trilemme
+vitesse ↔ qualité ↔ VRAM sur qwen3:8b/ce GPU** : seul 32768 attribue correctement le plus gros
+chapitre (81/82) ; 16384 est instable (Ch.3 → 82 attributions vides) ; 8192 est rapide mais
+l'attribution s'effondre — et cette vitesse est en partie un artefact (peu de sortie générée car peu
+d'attributions). → Le `num_ctx=32768` de l'Étape 2 est justifié par la qualité au pire cas, au prix
+de la vitesse.
+
+**Le protocole label-based est validé** (sortie O(dialogues), budget §2.3 correct, fallback narrateur
+propre, zéro crash). Mais l'objectif « secondes/chapitre » (§2.3/§2.7) n'est PAS atteint sur ce
+modèle/GPU — le goulot est matériel/`num_ctx`. Pistes à arbitrer : modèle plus petit/rapide ou GPU
+plus gros ; chunking plus fin pour fiabiliser l'attribution à bas `num_ctx` ; retry/réparation des
+attributions malformées ; ou accepter 32768 (~6 min/ch) pour la qualité. Détail : mémoire
+`llm_perf_qwen3_context_tradeoff`.
+
+**Prérequis (réunis).** Ollama lancé avec `qwen3:8b` + epub HP dans `Ebook/` (gitignored).
 
 ---
 
