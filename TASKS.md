@@ -350,6 +350,27 @@ et d'ouvrir la voie à une parallélisation future.
 
   Vérif : `npm run build` + `npm run lint` verts.
 
+- Étape 7 ✅ (2026-06-20) — Suppression d'un livre depuis la bibliothèque.
+
+  **Pourquoi.** `DELETE /books/{id}` existe côté backend depuis Phase 6 mais n'avait aucune UI ;
+  les livres de test s'accumulaient sans moyen de nettoyer la bibliothèque.
+
+  Frontend pur (3 fichiers, 0 backend, 0 nouvelle dépendance). `src/lib/api.ts` :
+  `deleteBook(id)` (DELETE, 204 sans body → pas de `.json()`). `src/components/BookCard.tsx` :
+  restructuré — la carte (`<Link>`) et le bouton ✕ sont désormais frères dans un `<div
+  className="relative">` (un `<button>` ne peut pas être enfant d'un `<a>`) ; ✕ en
+  `absolute top-2 right-2`, `window.confirm` natif (KISS, pas de modale) →
+  `deleteBook` → `onDeleted()` (nouvelle prop). `src/app/page.tsx` : `onDeleted={refresh}`.
+
+  **Déviations assumées** : suppression accessible uniquement depuis la bibliothèque (pas de
+  bouton sur la page détail) ; confirmation via `window.confirm` natif plutôt qu'une modale.
+
+  **⚠️ Limite backend connue (hors périmètre, non corrigée)** : `delete_book` ([app/api/routes/books.py](app/api/routes/books.py))
+  ne supprime que `source_path` — l'audio déjà généré dans `data/{id}/` (wav/mp3) reste orphelin
+  sur disque. À traiter en tâche séparée si ça devient gênant.
+
+  Vérif : `npm run build` + `npm run lint` verts.
+
 ### Phase 12 — Run réel EdgeTTS & hardening LLM parser (2026-06-17 → 2026-06-19) ✅ terminée
 
 **Pourquoi.** Première validation bout-en-bout en conditions réelles (EdgeTTS fr-FR, vrai roman français HP). Bugs découverts et corrigés test-first pendant la tentative.
