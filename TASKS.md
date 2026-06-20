@@ -328,6 +328,27 @@ et d'ouvrir la voie à une parallélisation future.
   `src/app/layout.tsx` : wrap `<PlayerProvider>` + `<PlayerBar/>` + `pb-24`.
   `src/app/books/[id]/page.tsx` : bouton « ▶ Écouter » (status DONE && mp3_path) → `play({title, src: bookMp3Url})`.
   Vérif : `npm run build` + `npm run lint` verts.
+- Étape 6 ✅ (2026-06-20) — Génération et lecture audio par chapitre. Commit `731c109`.
+
+  **Pourquoi.** Audit de couverture API (2026-06-20) : le backend persiste un statut +
+  `audio_path` par chapitre depuis Phase 7 (`POST .../chapters/{n}/generate`,
+  `GET .../chapters/{n}/audio`), mais aucune UI ne les exposait — seule la génération/lecture
+  du livre entier était câblée. Plus gros trou identifié dans la couverture frontend (10/14
+  endpoints avant cette étape).
+
+  Frontend pur (2 fichiers, 0 backend, 0 nouvelle dépendance). `src/lib/api.ts` :
+  `chapterAudioUrl(bookId, position)` (helper URL, calqué sur `bookMp3Url`) +
+  `generateChapter(bookId, position)` (POST, gestion erreur `detail` calquée sur `generateBook`).
+  `src/app/books/[id]/page.tsx` : bouton « Générer » par chapitre (visible si
+  `book.status === ANALYZED` et `ch.status !== DONE` ; désactivé pendant l'appel ou si déjà
+  PENDING/GENERATING) → `generateChapter` puis bump `reloadNonce` (le polling existant capte
+  ensuite GENERATING→DONE) ; bouton « ▶ Écouter » (visible si `ch.status === DONE`) → réutilise
+  le `PlayerProvider`/`PlayerBar` existants (Étape 5), aucun nouveau composant.
+
+  **Déviation assumée** : pas de bouton « régénérer » sur un chapitre déjà `DONE` (le backend
+  l'autoriserait, mais hors périmètre de cette micro-tâche — différé).
+
+  Vérif : `npm run build` + `npm run lint` verts.
 
 ### Phase 12 — Run réel EdgeTTS & hardening LLM parser (2026-06-17 → 2026-06-19) ✅ terminée
 
