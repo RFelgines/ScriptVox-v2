@@ -254,6 +254,26 @@ et d'ouvrir la voie à une parallélisation future.
   Fichiers (4) : `app/schemas/book.py` (+CharacterUpdate), `app/api/routes/characters.py` (nouveau),
   `app/main.py`, `tests/check_phase9.py` (26 sections). 8 suites sans régression.
 
+- Étape 5 ✅ (2026-06-20) — Fix collision de voix dans `assign_voices` (trouvé sur le run réel HP, §B-3/Étape 6).
+
+  **Symptôme.** 3 personnages MALE différents (Dursley, Dudley, Hagrid, run HP) recevaient tous `male_0`
+  alors que `male_1`/`male_2` restaient libres. Cause : le wrap-around (Étape 3) ne regardait que le
+  *tier du meilleur score absolu* — si toutes ses voix étaient prises, il réutilisait `top_tier[0]` au
+  lieu de descendre vers la 2ᵉ meilleure voix **libre** du même genre.
+
+  **Fix.** `assign_voices` restreint désormais les candidats au pool de genre du personnage
+  (`VOICE_CATALOGUE[effective_gender]`), les classe par score puis ne réutilise qu'en dernier recours
+  (`ranked[0]`) une fois tout le pool de genre épuisé — au lieu de retomber sur le seul meilleur score.
+  Le wrap-around reste strictement intra-genre (inchangé).
+
+  **Test-first.** `check_phase9.py` Section 27 (nouvelle) : 3 personnages MALE à traits **identiques**
+  (donc même meilleur score pour les trois) → confirmé en échec sur l'ancien code
+  (`['male_0','male_0','male_0']`), vert après le fix (`male_0`/`male_2`/`male_1`, tous distincts).
+  Sections 16/17/18/19/20 (existantes) vérifiées inchangées à la main avant le fix. 12/12 suites vertes.
+
+  Fichiers (2) : `app/services/voice_assignment.py`, `tests/check_phase9.py` (+ Section 27).
+  Pas de changement de contrat (`assign_voices(book_id, session)` inchangée).
+
 ### Phase 9 — Couverture & métadonnées
 **Pourquoi.** Identité visuelle des livres (bibliothèque, lecteur).
 - Étape 1 ✅ (2026-06-17) — Extraction de la couverture à l'ingestion.
