@@ -253,7 +253,6 @@ et d'ouvrir la voie à une parallélisation future.
   Validation : voice_id doit être dans `_CATALOGUE_META` sauf `narrator` (422 sinon). 404 si personnage inconnu.
   Fichiers (4) : `app/schemas/book.py` (+CharacterUpdate), `app/api/routes/characters.py` (nouveau),
   `app/main.py`, `tests/check_phase9.py` (26 sections). 8 suites sans régression.
-
 - Étape 5 ✅ (2026-06-20) — Fix collision de voix dans `assign_voices` (trouvé sur le run réel HP, §B-3/Étape 6).
 
   **Symptôme.** 3 personnages MALE différents (Dursley, Dudley, Hagrid, run HP) recevaient tous `male_0`
@@ -487,6 +486,45 @@ attributions malformées ; ou accepter 32768 (~6 min/ch) pour la qualité. Déta
 `llm_perf_qwen3_context_tradeoff`.
 
 **Prérequis (réunis).** Ollama lancé avec `qwen3:8b` + epub HP dans `Ebook/` (gitignored).
+
+#### Étape 6 ✅ (2026-06-20) — Run réel pipeline complet sur Ch.3 HP (LLM + TTS)
+
+**Pourquoi.** L'Étape 5 (B-3) ne mesurait que l'analyse LLM via le script de benchmark, qui appelle
+`provider.analyze()` directement — pas le pipeline réel (`POST /books` → worker → `_generate_chapter_impl`
+→ TTS). La couche TTS n'avait **jamais** été exercée à l'échelle d'un vrai chapitre HP (164 segments,
+6 personnages) : seul un epub FR minuscule (1 chapitre, 2 personnages) avait validé EdgeTTS jusqu'ici.
+
+**Méthode.** Nouveau script `tests/make_hp_chapter3_fixture.py` (hors suite de régression, aucun assert) :
+isole le chapitre 3 réel (« 1LE SURVIVANT », même sélection que `bench_hp_label_based.py` —
+`MIN_CONTENT_CHARS=1500`, `content[0]`) dans un epub mono-chapitre reconstruit via `ebooklib`, écrit dans
+`Ebook/hp_chapter3_only.epub` (gitignored — contenu HP copyrighté). Round-trip texte vérifié byte-exact
+contre l'original. **Piège rencontré** : `EpubNav` ne doit pas être ajouté au `spine` (seulement au
+manifeste) sous peine d'apparaître comme un faux chapitre supplémentaire — `EpubParser` ne lit que les
+items référencés par le spine. **2e piège** : `ch.raw_text` contient déjà le titre en 1res lignes (le
+`<h1>` source était `"1<br/>LE SURVIVANT"`) ; ajouter un `<h1>` séparé le dupliquait.
+
+Le fichier généré a été uploadé via `POST /books` sur l'app réellement lancée (backend + worker + frontend
+démarrés pour cette session), puis suivi jusqu'à `ANALYZED`, puis `POST /books/{id}/chapters/1/generate`
+jusqu'à `DONE`.
+
+**Résultats :**
+- **Analyse LLM** : `ANALYZED` en ~9,5 min (vs ~480 s mesurés en benchmark pur pour ce même chapitre —
+  écart attendu : parsing EPUB + assignation de voix + aucun warm-up préalable, contrairement au script
+  de benchmark).
+- **6 personnages détectés**, cohérent avec B-3 (Dursley, Mrs Dursley, Dudley, Dumbledore, McGonagall,
+  Hagrid). Casting plausible par genre/âge/ton. **Point relevé (non bloquant)** : 3 personnages
+  masculins différents (Dursley, Dudley, Hagrid) ont tous reçu `voice_id=male_0` au lieu de se répartir
+  sur `male_0/1/2` — comportement du scorer `voice_assignment.py` à creuser séparément si ça gêne à l'oreille.
+- **Génération TTS (jamais testée à ce volume) : `DONE` en ~2 min 48 s, zéro erreur**, pour 164 segments
+  (82 dialogues + 82 narrations) → 164 appels séquentiels EdgeTTS. Sortie `data/{id}/ch1.wav` :
+  39 min 11 s, 22 050 Hz mono 16-bit (format conforme au contrat).
+- Vérification UI : chapitre affiché `DONE`, bouton « ▶ Écouter » fonctionnel (Étape 6 frontend),
+  lecture confirmée sans erreur console.
+
+**Conclusion.** Le pipeline réel est validé bout-en-bout sur du contenu costaud et réel, pas seulement
+sur des fixtures jouets. La couche TTS — la vraie inconnue de cette étape — fonctionne correctement et
+rapidement même à 164 segments/chapitre ; ce n'est pas elle qui pose problème dans le trilemme de
+l'Étape 5 (qui reste un goulot **LLM**/`num_ctx`/VRAM, pas TTS).
 
 ---
 
