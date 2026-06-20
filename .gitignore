@@ -43,6 +43,7 @@ frontend/.env.local
 
 # Claude Code — local overrides are machine-specific, never commit
 .claude/settings.local.json
+.claude/launch.json
 
 # IDE
 .vscode/
