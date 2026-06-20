@@ -97,16 +97,16 @@ def assign_voices(book_id: int, session: Session) -> None:
         if char.voice_id is not None:
             continue
 
-        # Score all candidates; sort DESC by score, ASC by voice_id (tie-break → determinism)
-        scored = sorted(
-            ((vid, _score_voice(char, vid)) for vid in candidate_ids),
-            key=lambda x: (-x[1], x[0]),
-        )
-        top_score = scored[0][1]
-        # Restrict wrap-around to the top-score tier so a MALE char never falls
-        # back to a FEMALE/NEUTRAL voice when all MALE slots are taken.
-        top_tier = [vid for vid, sc in scored if sc == top_score]
-        chosen = next((vid for vid in top_tier if vid not in used), top_tier[0])
+        # Restrict candidates to the character's gender pool so a MALE char
+        # never falls back to a FEMALE/NEUTRAL voice. Rank by fit (DESC score,
+        # ASC voice_id tie-break) and take the best UNUSED one — falling
+        # through to the next-best free voice of the same gender instead of
+        # collapsing onto the single top pick when it's already taken. Only
+        # reuse (ranked[0]) once the whole gender pool is exhausted.
+        effective_gender = char.gender if char.gender != Gender.UNKNOWN else Gender.NEUTRAL
+        pool = VOICE_CATALOGUE.get(effective_gender) or candidate_ids
+        ranked = sorted(pool, key=lambda vid: (-_score_voice(char, vid), vid))
+        chosen = next((vid for vid in ranked if vid not in used), ranked[0])
         char.voice_id = chosen
         used.add(chosen)
         session.add(char)

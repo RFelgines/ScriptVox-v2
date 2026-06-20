@@ -657,6 +657,36 @@ with TestClient(app) as tc:
 app.dependency_overrides.clear()
 
 
+# ── Section 27: assign_voices — pas de collision quand traits identiques ────
+
+section("assign_voices: 3 MALE traits identiques -> 3 voix distinctes (pas de collision)")
+
+_eng27 = _make_engine()
+with Session(_eng27) as _s27:
+    _bid27 = _make_book(_s27)
+    _s27.add_all([
+        _char(_bid27, "Alpha", Gender.MALE, AgeCategory.ADULT, "warm", "deep"),
+        _char(_bid27, "Beta",  Gender.MALE, AgeCategory.ADULT, "warm", "deep"),
+        _char(_bid27, "Gamma", Gender.MALE, AgeCategory.ADULT, "warm", "deep"),
+    ])
+    _s27.commit()
+    assign_voices(_bid27, _s27)
+
+with Session(_eng27) as _s27b:
+    _vids27 = [
+        c.voice_id
+        for c in _s27b.exec(
+            select(Character).where(Character.book_id == _bid27).order_by(Character.name)
+        ).all()
+    ]
+check("3 voix assignées", len(_vids27) == 3 and all(v is not None for v in _vids27),
+      f"got {_vids27}")
+check("3 voix TOUTES distinctes (pas de collision sur male_0)",
+      len(set(_vids27)) == 3, f"got {_vids27}")
+check("toutes des voix MALE (male_0/1/2)",
+      all(v in ("male_0", "male_1", "male_2") for v in _vids27), f"got {_vids27}")
+
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")
