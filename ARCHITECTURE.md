@@ -148,8 +148,17 @@ inference fast (response size = O(dialogue spans), not O(input tokens)) and is w
    - typographic `" … "` and straight `"…"` quotes,
    - lines opened by an em-dash `—` / `–` (French dialogue turns).
 
+   **Incise extraction.** Em-dash dialogue lines often embed an attribution clause with no
+   delimiter of its own (`— Je ne te crois pas, dit-elle froidement.`). `_split_incise` peels
+   that incise off into its own **narration** span (read by the narrator, not the character),
+   detected via verb-subject inversion (`dit-elle`, `demanda-t-elle`, `dit Harry`). It is only
+   extracted when terminal and clean (no comma after the verb): a *resumed* dialogue
+   (`…, répondit-il, mais je viendrai`) stays one dialogue span — bounded degradation. Guillemets
+   dialogue is untouched (its incise already falls outside `« … »`).
+
    Everything else is narration. Undetected dialogue gracefully stays narration (spoken by
-   the narrator) — **never a crash, never a dropped word** (Python owns the text).
+   the narrator) — **never a crash, never a dropped word** (Python owns the text). Invariant:
+   `"".join(s.text for s in spans) == text` with contiguous 1-based indices.
 
 2. **LLM call.** The numbered spans are sent, each tagged `[DIALOGUE]` / `[NARRATION]`. The
    model returns ONLY:

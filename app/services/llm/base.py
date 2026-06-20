@@ -154,6 +154,32 @@ _DIALOGUE_RE = re.compile(
     re.MULTILINE,
 )
 
+# Verbes d'incise courants (pour le cas « verbe + nom propre » : « dit Harry »).
+# Liste curée, volontairement non exhaustive — voir _split_incise (dégradation bornée).
+_INCISE_VERBS = (
+    r"dit|dirent|répondit|répondirent|demanda|demandèrent|murmura|cria|crièrent|"
+    r"reprit|ajouta|lança|soupira|songea|hurla|chuchota|gronda|rétorqua|répliqua|"
+    r"déclara|poursuivit|continua|conclut|fit|gémit|objecta|protesta|insista|"
+    r"expliqua|affirma|marmonna|balbutia|susurra|rugit|beugla|bredouilla|grommela|"
+    r"renchérit|coupa|trancha|s'écria|s'exclama|s'étonna|s'enquit"
+)
+
+# Une incise est repérée par l'inversion verbe-sujet, signal le plus fiable du français :
+#   - clitique : « dit-il », « dit-elle », « demanda-t-elle », « s'écria-t-il »…
+#   - verbe d'incise curé + nom propre : « dit Harry », « répondit Mrs Dursley »…
+# On ne l'extrait QUE si elle est terminale et propre (aucune virgule après le verbe) :
+# « …, répondit-il, mais je viendrai » = dialogue repris → NON splitté (borné, cf. tests).
+_INCISE_VERB = (
+    r"(?:"
+    r"(?:[a-zà-ÿ]{1,3}')?\w+(?:-t)?-(?:il|elle|ils|elles|on|je)"   # inversion clitique
+    r"|(?:" + _INCISE_VERBS + r")\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]*"           # verbe d'incise + nom propre
+    r")"
+)
+_INCISE_RE = re.compile(
+    r"(?P<dlg>.*[,?!…])(?P<inc>\s+" + _INCISE_VERB + r"[^,]*)$",
+    re.UNICODE,
+)
+
 
 @dataclass
 class _Span:
@@ -162,31 +188,60 @@ class _Span:
     is_dialogue: bool
 
 
+def _is_emdash(text: str) -> bool:
+    """Vrai si le span est une réplique ouverte par un tiret cadratin (convention FR)."""
+    return text.lstrip()[:1] in ("—", "–", "―")
+
+
+def _split_incise(span_text: str) -> list[tuple[str, bool]]:
+    """Scinde une réplique en tiret cadratin en ``[(dialogue, True), (incise, False)]``.
+
+    L'incise (« dit-elle froidement ») doit être lue par le narrateur, pas par la voix
+    du personnage. Découpe byte-exact : ``dialogue + incise == span_text``. Si aucune
+    incise terminale propre n'est détectée, renvoie le span inchangé (``[(span_text, True)]``)
+    — dégradation bornée : jamais de crash, jamais de mot perdu (cf. §2.7).
+    """
+    match = _INCISE_RE.match(span_text)
+    if not match:
+        return [(span_text, True)]
+    dlg, inc = match.group("dlg"), match.group("inc")
+    if not dlg.strip() or not inc.strip():
+        return [(span_text, True)]
+    return [(dlg, True), (inc, False)]
+
+
 def _pre_segment(text: str) -> list[_Span]:
     """Découpe *text* en spans ordonnés narration/dialogue, byte-exact (zéro mot perdu).
 
-    Invariant : ``"".join(s.text for s in _pre_segment(t)) == t``.
-    Le type (dialogue vs narration) est déterminé ici via les délimiteurs ; le LLM
+    Invariant : ``"".join(s.text for s in _pre_segment(t)) == t`` et index 1-based contigus.
+    Le type (dialogue vs narration) est déterminé ici via les délimiteurs ; les répliques
+    en tiret cadratin sont en plus scindées de leur incise (_split_incise). Le LLM
     n'attribue qu'un locuteur aux spans de dialogue (cf. §2.7). Un dialogue non
     détecté reste narration (lu par le narrateur) — jamais de crash, jamais de perte.
     """
-    spans: list[_Span] = []
-    idx = 0
+    raw: list[tuple[str, bool]] = []
     pos = 0
     for match in _DIALOGUE_RE.finditer(text):
         start, end = match.span()
         if start > pos:
-            idx += 1
-            spans.append(_Span(idx, text[pos:start], False))
-        idx += 1
-        spans.append(_Span(idx, text[start:end], True))
+            raw.append((text[pos:start], False))
+        raw.append((text[start:end], True))
         pos = end
     if pos < len(text):
-        idx += 1
-        spans.append(_Span(idx, text[pos:], False))
-    if not spans:
-        spans.append(_Span(1, text, False))
-    return spans
+        raw.append((text[pos:], False))
+    if not raw:
+        raw.append((text, False))
+
+    # Extraction de l'incise sur les répliques en tiret cadratin uniquement
+    # (en guillemets, l'incise tombe déjà hors « », rien à faire).
+    pieces: list[tuple[str, bool]] = []
+    for seg_text, is_dialogue in raw:
+        if is_dialogue and _is_emdash(seg_text):
+            pieces.extend(_split_incise(seg_text))
+        else:
+            pieces.append((seg_text, is_dialogue))
+
+    return [_Span(i, t, d) for i, (t, d) in enumerate(pieces, start=1)]
 
 
 def _build_user_prompt(spans: list[_Span]) -> str:
@@ -285,6 +340,8 @@ def _segment_text(span: "_Span") -> str:
         text = text[1:-1].strip()
     else:
         text = re.sub(r'^[ \t]*[—–―]\s*', '', text)
+        # Virgule orpheline laissée par l'extraction d'incise : « …pas, » -> « …pas »
+        text = re.sub(r'\s*,\s*$', '', text)
     return text.strip()
 
 

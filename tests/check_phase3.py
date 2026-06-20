@@ -367,14 +367,14 @@ assert len(dialogue_fr) == 1 and "Bonjour" in dialogue_fr[0].text
 assert "".join(s.text for s in spans_fr) == sample_fr, "invariant byte-exact violé (FR «»)"
 ok("guillemets « » -> 1 dialogue, byte-exact")
 
-# Tiret cadratin en début de ligne (dialogue FR)
-sample_dash = "Elle réfléchit.\n— Tu viens ? demanda-t-elle."
+# Tiret cadratin SANS incise -> reste 1 seul span dialogue
+sample_dash = "Elle réfléchit.\n— Tu viens avec nous demain ?"
 spans_dash = _pre_segment(sample_dash)
 dialogue_dash = [s for s in spans_dash if s.is_dialogue]
 assert len(dialogue_dash) == 1, f"Expected 1 dash-dialogue span, got {len(dialogue_dash)}"
 assert dialogue_dash[0].text.lstrip().startswith("—")
 assert "".join(s.text for s in spans_dash) == sample_dash, "invariant byte-exact violé (tiret)"
-ok("ligne ouverte par — -> 1 dialogue, byte-exact")
+ok("ligne ouverte par — sans incise -> 1 dialogue, byte-exact")
 
 # Narration pure : un seul span, jamais dialogue
 sample_narr = "Le soleil se couchait sur la ville endormie."
@@ -405,6 +405,68 @@ assert "[DIALOGUE]" in prompt and "[NARRATION]" in prompt
 ok("tags DIALOGUE et NARRATION présents")
 assert "\n\n" not in prompt, "le prompt ne doit pas contenir de double saut de ligne"
 ok("whitespace normalisé dans le rendu")
+
+
+# ── _split_incise — l'incise FR part en narration (§2.7) ──────────────────────
+section("_pre_segment isole l'incise (« dit-elle ») du dialogue en tiret cadratin")
+from app.services.llm.base import _split_incise  # noqa: E402,F401
+
+# Incise par inversion clitique, après virgule
+s1 = "— Je ne te crois pas, dit-elle froidement."
+sp1 = _pre_segment(s1)
+assert "".join(s.text for s in sp1) == s1, "byte-exact violé (incise virgule)"
+assert [s.is_dialogue for s in sp1] == [True, False], \
+    f"attendu [dialogue, narration], eu {[s.is_dialogue for s in sp1]}"
+assert "dit-elle" in sp1[1].text and "dit-elle" not in sp1[0].text
+ok("« …pas, dit-elle froidement. » -> dialogue + narration, byte-exact")
+
+# Indices 1-based contigus après split
+assert [s.index for s in sp1] == [1, 2], f"indices non contigus après split: {[s.index for s in sp1]}"
+ok("indices 1-based contigus après extraction d'incise")
+
+# Incise après point d'interrogation
+s2 = "— Tu viens ? demanda-t-elle."
+sp2 = _pre_segment(s2)
+assert "".join(s.text for s in sp2) == s2, "byte-exact violé (incise ?)"
+assert [s.is_dialogue for s in sp2] == [True, False]
+assert sp2[0].text.rstrip().endswith("?") and "demanda-t-elle" in sp2[1].text
+ok("« Tu viens ? demanda-t-elle. » -> dialogue (?) + narration")
+
+# Incise verbe + nom propre (cas HP : « dit Harry »)
+s3 = "— Bonjour, dit Harry."
+sp3 = _pre_segment(s3)
+assert "".join(s.text for s in sp3) == s3, "byte-exact violé (verbe+nom)"
+assert [s.is_dialogue for s in sp3] == [True, False]
+assert "Harry" in sp3[1].text
+ok("« Bonjour, dit Harry. » -> dialogue + narration (verbe+nom propre)")
+
+# Pas d'incise -> dialogue intact (aucun faux positif, pas de sur-segmentation)
+s4 = "— Quelle belle journée !"
+sp4 = _pre_segment(s4)
+assert [s.is_dialogue for s in sp4] == [True], f"sur-segmentation indue: {[s.is_dialogue for s in sp4]}"
+ok("réplique sans incise -> reste 1 dialogue (pas de faux positif)")
+
+# Dialogue REPRIS après incise -> non splitté (borné, jamais de crash ni mot perdu)
+s5 = "— Non, répondit-il, mais je viendrai demain."
+sp5 = _pre_segment(s5)
+assert "".join(s.text for s in sp5) == s5, "byte-exact violé (dialogue repris)"
+assert [s.is_dialogue for s in sp5] == [True], \
+    f"dialogue repris ne doit PAS être splitté (borné): {[s.is_dialogue for s in sp5]}"
+ok("dialogue repris après incise -> non splitté (borné), byte-exact")
+
+# Guillemets : l'incise est déjà hors « » -> comportement inchangé
+s6 = "Il arriva. « Bonjour », dit-il."
+sp6 = _pre_segment(s6)
+assert "".join(s.text for s in sp6) == s6, "byte-exact violé (guillemets inchangé)"
+assert len([s for s in sp6 if s.is_dialogue]) == 1
+ok("guillemets « » -> incise déjà externe, 1 dialogue (inchangé)")
+
+# _segment_text : dialogue sans — ni virgule orpheline ; incise lue telle quelle
+assert _segment_text(sp1[0]) == "Je ne te crois pas", \
+    f"dialogue mal nettoyé: {_segment_text(sp1[0])!r}"
+assert _segment_text(sp1[1]).startswith("dit-elle"), \
+    f"incise narration mal nettoyée: {_segment_text(sp1[1])!r}"
+ok("_segment_text: dialogue sans — ni virgule traînante ; incise lue par le narrateur")
 
 
 # ── 8. Live LLM (optional, gated by SCRIPTVOX_LIVE_TEST=1) ───────────────────

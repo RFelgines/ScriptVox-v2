@@ -528,6 +528,93 @@ l'Étape 5 (qui reste un goulot **LLM**/`num_ctx`/VRAM, pas TTS).
 
 ---
 
+## Phase 13 — Qualité de segmentation (préalable à l'émotion par réplique)
+
+> Découle de l'écoute du spike Qwen3-TTS : l'incise (« dit-elle froidement ») était lue par la voix
+> du personnage. Voir mémoire `segmentation-incise-limitation`. Test-first, Plan-First, GO par étape.
+
+### Étape 1 ✅ (2026-06-20) — Extraction de l'incise FR en narration
+
+**Pourquoi.** Sur une réplique en tiret cadratin, l'incise d'attribution (« dit-elle froidement »,
+« dit Harry ») n'a pas de délimiteur propre et restait collée au dialogue → lue par la voix du
+personnage au lieu du narrateur. Défaut déjà présent dans la sortie EdgeTTS actuelle.
+
+**Livré.** `_split_incise` + `_INCISE_RE` (`app/services/llm/base.py`) : peèle l'incise terminale
+propre (inversion clitique `dit-elle`/`demanda-t-elle`, ou verbe d'incise curé + nom propre `dit
+Harry`) en span NARRATION distinct. Borné : un dialogue *repris* (`…, répondit-il, mais je
+viendrai`) n'est PAS splitté. Invariants préservés (byte-exact + index 1-based contigus).
+`_segment_text` nettoie la virgule orpheline. **Aucun changement de contrat.**
+Test-first : `check_phase3.py` §11 (8 asserts) ; 12 suites sans régression ; `ARCHITECTURE.md §2.7`
+documenté. Fichiers (3) : `app/services/llm/base.py`, `tests/check_phase3.py`, `ARCHITECTURE.md`.
+
+**⚠️ Bloqueur découvert (→ Étape 2).** Sur le vrai texte HP, `raw_text` contient des sauts de ligne
+en milieu de phrase (~1 tous les 53 caractères) ; le regex de dialogue `[—–―][^\n]*` coupe la
+réplique au 1er `\n` → **0 incise extraite sur 74 répliques réelles**, et les paroles elles-mêmes
+sont mal typées narration. Le fix incise est correct mais neutralisé en amont.
+
+### Étape 2 (à planifier) — Normalisation des sauts de ligne intra-paragraphe
+
+Joindre les `\n` internes aux paragraphes (ne garder comme coupures que lignes vides / fins de
+paragraphe), dans `EpubParser` ou en pré-traitement avant `_pre_segment`. Débloque À LA FOIS la
+détection de dialogue et l'extraction d'incise. Vérifier l'impact sur `check_phase2`/`check_phase3`
+et le round-trip byte-exact. Plan-First + GO requis.
+
+---
+
+## Piste candidate (non tranchée) — TTS expressive Qwen3-TTS local
+
+> Spike fait (2026-06-20). Voir mémoire `tts-emotion-qwen3-direction`. Décision encore ouverte — en
+> attente du ressenti d'écoute (qualité FR + effet `instruct`).
+
+**Contexte (vérifié 2026-06-20).** Qwen3-TTS est désormais open-weights (Apache 2.0, sorti janv. 2026),
+FR confirmé, émotion par réplique pilotée par un paramètre `instruct` (langage naturel) — c'est *le*
+levier pour la fonctionnalité « émotion par réplique » souhaitée.
+
+**Cadrage : AJOUTER, pas remplacer.** 4ᵉ provider `QwenTTSProvider` (`TTS_PROVIDER=qwen`) dans le
+Strategy Pattern (§2.2), import paresseux de torch dans la factory. **EdgeTTS reste le défaut** (zéro
+setup, pas de GPU, pas de 4,5 Go à télécharger).
+
+### Spike de faisabilité ✅ (2026-06-20) — `tests/spike_qwen_tts.py`
+
+Modèle 1.7B, `attn=sdpa` (pas de FlashAttention sous Windows). 8 répliques FR × 2 (avec/sans
+`instruct`) = 16 WAV générés dans `Ebook/spike_qwen/` (gitignoré, à écouter). Zéro erreur.
+
+| Métrique | Mesure |
+|---|---|
+| Chargement modèle | 78,1 s |
+| VRAM modèle | 4,18 Go (pic génération 4,37 Go) — mieux que les 6-8 Go estimés en ligne |
+| Temps moyen/réplique | 11,46 s (min 7,72 / max 17,10) |
+| Repère EdgeTTS réel | ~1,02 s/réplique (164 segments / 2 min 48 s, Étape 6 ci-dessus) |
+| **Ratio** | **×11,2 plus lent qu'EdgeTTS** |
+| Sample rate retourné | 24 000 Hz (EdgeTTS = 22 050 Hz, voir risque ci-dessous) |
+
+**Mise à l'échelle** : chapitre 3 HP (164 segments) → ~31 min en Qwen3-TTS vs 2 min 48 s en EdgeTTS.
+
+**Cohabitation VRAM — tranchée par le raisonnement, pas par un test de stress.** Le pipeline est
+séquentiel par construction (analyse → `ANALYZED` → action explicite « Générer » → TTS, potentiellement
+minutes/heures plus tard) et Huey tourne avec `-w 1` (jamais deux tâches en parallèle). Il n'y a donc
+**aucun besoin réel** que `qwen3:8b` et Qwen3-TTS soient résidents en VRAM en même temps. Le seul risque
+est un accident de timing via le `keep_alive` Ollama (~5 min) si on clique Générer juste après l'analyse
+— et ça se corrige en une ligne (`ollama stop qwen3:8b` ou `keep_alive=0` au début de l'étape TTS), pas
+en espérant que les deux tiennent ensemble sur les 10 Go de la carte. **Pas de stress test fait ni
+nécessaire.**
+
+**Risques restants (mis à jour) :**
+- **Perf ×11** confirmée ci-dessus — à peser contre le bénéfice qualité/émotion une fois l'écoute faite.
+- **Sample rate 24 000 Hz ≠ 22 050 Hz EdgeTTS** : `assemble_wav` (Étape 3, Phase 5) lève `ValueError` si
+  les segments d'un même livre n'ont pas le même framerate. Un `QwenTTSProvider` réel devrait resampler
+  vers 22 050 Hz à la frontière du provider (comme EdgeTTS le fait déjà via `miniaudio`), pas changer
+  l'assembleur.
+- Dépendances lourdes (torch CUDA) — viole « no surprise dependencies » → justifié seulement si
+  l'émotion est retenue après écoute.
+- Contrat : exploiter l'émotion = ajouter un param `instruct`/`emotion` à `synthesise(text, voice_id)`
+  (+ champ émotion sur `Segment`, + extraction côté prompt LLM). **Revue humaine obligatoire.**
+
+**Prochaine étape** : écoute des 16 WAV par l'utilisateur (qualité FR + effet réel de l'`instruct`) →
+décision go/no-go sur le chantier émotion (contrat + dépendances).
+
+---
+
 ### Différé / à NE PAS refaire
 - **Voice Studio** (clonage de voix, contrôle d'émotion) — vaporware V1.
 - **Lyrics / texte synchronisé** — faisable plus tard via timestamps de segments.
