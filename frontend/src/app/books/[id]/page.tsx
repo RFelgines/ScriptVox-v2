@@ -9,6 +9,8 @@ import {
   listChapters,
   coverUrl,
   bookMp3Url,
+  chapterAudioUrl,
+  generateChapter,
 } from "@/lib/api";
 import CastingModal from "@/components/CastingModal";
 import { usePlayer } from "@/components/player/PlayerProvider";
@@ -45,10 +47,19 @@ export default function BookDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [castingOpen, setCastingOpen] = useState(false);
+  const [generatingPos, setGeneratingPos] = useState<number | null>(null);
   const { play } = usePlayer();
   // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
+
+  function handleGenerateChapter(position: number) {
+    setGeneratingPos(position);
+    generateChapter(bookId, position)
+      .then(() => setReloadNonce((n) => n + 1))
+      .catch((e) => setError(String(e)))
+      .finally(() => setGeneratingPos(null));
+  }
 
   useEffect(() => {
     let active = true;
@@ -181,6 +192,28 @@ export default function BookDetailPage({
                     >
                       {ch.status}
                     </span>
+                    {book.status === "ANALYZED" && ch.status !== "DONE" && (
+                      <button
+                        onClick={() => handleGenerateChapter(ch.position)}
+                        disabled={generatingPos === ch.position || chapterActive(ch.status)}
+                        className="rounded bg-gray-800 px-2 py-1 text-xs font-medium hover:bg-gray-700 disabled:opacity-50"
+                      >
+                        {generatingPos === ch.position ? "…" : "Générer"}
+                      </button>
+                    )}
+                    {ch.status === "DONE" && (
+                      <button
+                        onClick={() =>
+                          play({
+                            title: `${book.title} — ${ch.title ?? `Chapitre ${ch.position}`}`,
+                            src: chapterAudioUrl(book.id, ch.position),
+                          })
+                        }
+                        className="rounded bg-green-700 px-2 py-1 text-xs font-semibold hover:bg-green-600"
+                      >
+                        ▶ Écouter
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

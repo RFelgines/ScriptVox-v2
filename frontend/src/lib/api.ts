@@ -144,3 +144,27 @@ export function coverUrl(id: number): string {
 export function bookMp3Url(id: number): string {
   return `${API_URL}/books/${id}/audio/mp3`;
 }
+
+export function chapterAudioUrl(bookId: number, position: number): string {
+  return `${API_URL}/books/${bookId}/chapters/${position}/audio`;
+}
+
+export async function generateChapter(
+  bookId: number,
+  position: number,
+): Promise<ChapterSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/${position}/generate`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Génération du chapitre échouée : ${detail}`);
+  }
+  return res.json();
+}
