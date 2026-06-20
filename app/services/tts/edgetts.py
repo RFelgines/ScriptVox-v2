@@ -10,7 +10,11 @@ from app.services.tts.base import BaseTTSProvider
 
 # Logical voice_id -> EdgeTTS neural voice name, keyed by BCP-47 locale.
 # IDs mirror VOICE_CATALOGUE (voice_assignment.py): narrator + male_N / female_N / neutral_N.
-# fr-FR has fewer distinct voices so some slots reuse the same voice.
+# fr-FR only has 2 distinct male / 3 distinct female neural voices (checked live
+# via edge_tts.list_voices()), so some slots must repeat one. male_0 deliberately
+# avoids reusing the narrator voice (Henri) -- it's the first slot filled by the
+# scorer, so the repeat is pushed to male_1/male_2 instead, where it's less often
+# heard right next to narration.
 _VOICE_MAP: dict[str, dict[str, str]] = {
     "en-US": {
         "narrator":  "en-US-ChristopherNeural",
@@ -25,8 +29,8 @@ _VOICE_MAP: dict[str, dict[str, str]] = {
     },
     "fr-FR": {
         "narrator":  "fr-FR-HenriNeural",
-        "male_0":    "fr-FR-HenriNeural",
-        "male_1":    "fr-FR-RemyMultilingualNeural",
+        "male_0":    "fr-FR-RemyMultilingualNeural",
+        "male_1":    "fr-FR-HenriNeural",
         "male_2":    "fr-FR-HenriNeural",
         "female_0":  "fr-FR-DeniseNeural",
         "female_1":  "fr-FR-VivienneMultilingualNeural",
