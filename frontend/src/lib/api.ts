@@ -137,6 +137,20 @@ export async function generateBook(bookId: number): Promise<BookSummary> {
   return res.json();
 }
 
+export async function deleteBook(id: number): Promise<void> {
+  const res = await fetch(`${API_URL}/books/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Suppression échouée : ${detail}`);
+  }
+}
+
 export function coverUrl(id: number): string {
   return `${API_URL}/books/${id}/cover`;
 }

@@ -53,7 +53,7 @@ export default function Home() {
       {books.length > 0 && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {books.map((book) => (
-            <BookCard key={book.id} book={book} />
+            <BookCard key={book.id} book={book} onDeleted={refresh} />
           ))}
         </div>
       )}
