@@ -162,6 +162,7 @@ def _analyze_book_impl(book_id: int) -> None:
         source_path = book.source_path
         book.status = BookStatus.PROCESSING
         book.progress = 0.0
+        book.error_message = None
         book.updated_at = datetime.now(timezone.utc)
         session.add(book)
         session.commit()
@@ -254,6 +255,7 @@ def _generate_book_impl(book_id: int) -> None:
         source_path = book.source_path
         book.status = BookStatus.GENERATING
         book.progress = 0.0
+        book.error_message = None
         book.updated_at = datetime.now(timezone.utc)
         session.add(book)
         session.commit()
@@ -320,6 +322,7 @@ def _generate_chapter_impl(chapter_id: int) -> None:
         book_id = chapter.book_id
         position = chapter.position
         chapter.status = ChapterStatus.GENERATING
+        chapter.error_message = None
         session.add(chapter)
         session.commit()
 

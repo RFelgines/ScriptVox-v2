@@ -277,13 +277,41 @@ with TestClient(app) as client:
     assert resp.status_code == 200
     ok(f"GET /books -> 200  count={len(resp.json())}")
 
-    resp = client.delete(f"/books/{bid}")
-    assert resp.status_code == 204
-    ok(f"DELETE /books/{bid} -> 204")
+    # Seed orphan-file fields directly (simulates a book whose book-level WAV/MP3 and
+    # data/{id}/ folder — cover + per-chapter WAV — were already generated before
+    # deletion; the stubbed analyze_book above never produces these).
+    _del_dir = Path("data") / str(bid)
+    _del_dir.mkdir(parents=True, exist_ok=True)
+    (_del_dir / "cover.jpg").write_bytes(b"fake-cover")
+    (_del_dir / "ch1.wav").write_bytes(b"fake-chapter-wav")
 
-    resp = client.get(f"/books/{bid}")
-    assert resp.status_code == 404
-    ok(f"GET /books/{bid} after delete -> 404")
+    with tempfile.TemporaryDirectory() as _del_tmp:
+        _del_audio = Path(_del_tmp) / "book.wav"
+        _del_mp3 = Path(_del_tmp) / "book.mp3"
+        _del_audio.write_bytes(b"fake-audio")
+        _del_mp3.write_bytes(b"fake-mp3")
+
+        with Session(test_engine) as _del_s:
+            _del_book = _del_s.get(Book, bid)
+            _del_book.audio_path = str(_del_audio)
+            _del_book.mp3_path = str(_del_mp3)
+            _del_s.add(_del_book)
+            _del_s.commit()
+
+        resp = client.delete(f"/books/{bid}")
+        assert resp.status_code == 204
+        ok(f"DELETE /books/{bid} -> 204")
+
+        resp = client.get(f"/books/{bid}")
+        assert resp.status_code == 404
+        ok(f"GET /books/{bid} after delete -> 404")
+
+        assert not _del_audio.exists(), f"audio_path not removed: {_del_audio}"
+        assert not _del_mp3.exists(), f"mp3_path not removed: {_del_mp3}"
+        ok("book audio_path / mp3_path removed from disk")
+
+    assert not _del_dir.exists(), f"data/{bid}/ dir not removed: {_del_dir}"
+    ok(f"data/{bid}/ directory (cover + chapter WAV) removed from disk")
 
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────

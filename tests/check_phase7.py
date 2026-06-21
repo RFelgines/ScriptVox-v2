@@ -792,4 +792,112 @@ ok(f"202, re-dispatch accepted for DONE chapter (chapter_id={_c23_ch_id})")
 app.dependency_overrides.clear()
 
 
+# ── 24-26. Stale error_message cleared on successful retry ──────────────────
+# Régression : un livre/chapitre FAILED puis relancé avec succès gardait l'ancien
+# error_message en base (status terminal correct mais champ d'erreur stale).
+
+# Section 24: _analyze_book_impl clears a pre-existing error_message on success
+section("_analyze_book_impl: stale error_message cleared on successful retry")
+
+_ea_engine = _make_test_engine()
+
+with tempfile.TemporaryDirectory() as _ea_tmp:
+    _ea_epub = Path(_ea_tmp) / "test.epub"
+    shutil.copy(FIXTURE_EPUB, _ea_epub)
+
+    with Session(_ea_engine) as _s:
+        _ea_book = Book(
+            title="RetryAnalyze", source_path=str(_ea_epub),
+            error_message="old analyze failure",
+        )
+        _s.add(_ea_book)
+        _s.commit()
+        _s.refresh(_ea_book)
+        _ea_book_id = _ea_book.id
+
+    with (
+        patch("app.core.db.get_engine", return_value=_ea_engine),
+        patch("app.services.llm.factory.get_llm_provider", return_value=_make_mock_llm()),
+    ):
+        _analyze_book_impl(_ea_book_id)
+
+    with Session(_ea_engine) as _s:
+        _ea_b = _s.get(Book, _ea_book_id)
+        if _ea_b.status == BookStatus.FAILED:
+            die(f"_analyze_book_impl FAILED unexpectedly: {_ea_b.error_message!r}")
+        assert _ea_b.status == BookStatus.ANALYZED, f"Expected ANALYZED, got {_ea_b.status}"
+        assert _ea_b.error_message is None, (
+            f"error_message must be cleared on success, got {_ea_b.error_message!r}"
+        )
+    ok("status=ANALYZED, error_message=None (stale message cleared)")
+
+
+# Section 25: _generate_book_impl clears a pre-existing error_message on success
+section("_generate_book_impl: stale error_message cleared on successful retry")
+
+_eg_engine = _make_test_engine()
+
+with tempfile.TemporaryDirectory() as _eg_tmp:
+    _eg_epub = Path(_eg_tmp) / "test.epub"
+    shutil.copy(FIXTURE_EPUB, _eg_epub)
+    _eg_book_id = _seed_analyzed_book(_eg_engine, str(_eg_epub))
+
+    with Session(_eg_engine) as _s:
+        _eg_b = _s.get(Book, _eg_book_id)
+        _eg_b.error_message = "old generate failure"
+        _s.add(_eg_b)
+        _s.commit()
+
+    with (
+        patch("app.core.db.get_engine", return_value=_eg_engine),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_make_mock_tts()),
+    ):
+        _generate_book_impl(_eg_book_id)
+
+    with Session(_eg_engine) as _s:
+        _eg_b = _s.get(Book, _eg_book_id)
+        if _eg_b.status == BookStatus.FAILED:
+            die(f"_generate_book_impl FAILED unexpectedly: {_eg_b.error_message!r}")
+        assert _eg_b.status == BookStatus.DONE, f"Expected DONE, got {_eg_b.status}"
+        assert _eg_b.error_message is None, (
+            f"error_message must be cleared on success, got {_eg_b.error_message!r}"
+        )
+    ok("status=DONE, error_message=None (stale message cleared)")
+
+
+# Section 26: _generate_chapter_impl clears a pre-existing error_message on success
+section("_generate_chapter_impl: stale error_message cleared on successful retry")
+
+_ec_engine = _make_test_engine()
+
+with tempfile.TemporaryDirectory() as _ec_tmp:
+    _ec_epub = Path(_ec_tmp) / "test.epub"
+    shutil.copy(FIXTURE_EPUB, _ec_epub)
+    _ec_book_id = _seed_analyzed_book(_ec_engine, str(_ec_epub))
+    _ec_ch_id = _get_chapter_id(_ec_engine, _ec_book_id)
+
+    with Session(_ec_engine) as _s:
+        _ec_ch = _s.get(Chapter, _ec_ch_id)
+        _ec_ch.status = ChapterStatus.FAILED
+        _ec_ch.error_message = "old chapter tts failure"
+        _s.add(_ec_ch)
+        _s.commit()
+
+    with (
+        patch("app.core.db.get_engine", return_value=_ec_engine),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_make_mock_tts()),
+    ):
+        _generate_chapter_impl(_ec_ch_id)
+
+    with Session(_ec_engine) as _s:
+        _ec_ch = _s.get(Chapter, _ec_ch_id)
+        if _ec_ch.status == ChapterStatus.FAILED:
+            die(f"_generate_chapter_impl FAILED unexpectedly: {_ec_ch.error_message!r}")
+        assert _ec_ch.status == ChapterStatus.DONE, f"Expected DONE, got {_ec_ch.status}"
+        assert _ec_ch.error_message is None, (
+            f"error_message must be cleared on success, got {_ec_ch.error_message!r}"
+        )
+    ok("status=DONE, error_message=None (stale message cleared)")
+
+
 print("\nPHASE 7 (split worker + route + generate trigger + étapes 3a/3b/3c) OK\n")

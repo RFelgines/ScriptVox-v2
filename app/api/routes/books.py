@@ -1,5 +1,6 @@
 import mimetypes
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -229,8 +230,10 @@ def delete_book(book_id: int, session: Session = Depends(get_session)) -> None:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    source_path = book.source_path
+    paths = (book.source_path, book.audio_path, book.mp3_path)
     session.delete(book)
     session.commit()
-    if source_path and os.path.exists(source_path):
-        os.remove(source_path)
+    for path in paths:
+        if path and os.path.exists(path):
+            os.remove(path)
+    shutil.rmtree(DATA_DIR / str(book_id), ignore_errors=True)

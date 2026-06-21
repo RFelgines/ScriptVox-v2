@@ -655,6 +655,60 @@ bornée) — pas de fuzzy-matching algorithmique ajouté (sur-ingénierie à ce 
 
 **Prochaine étape : B1** — extraction de l'émotion par réplique par le LLM (`SegmentData.emotion`
 + colonne `Segment.emotion` nullable). GO explicite requis avant d'écrire quoi que ce soit.
+**Décision utilisateur (2026-06-21) : B1 attend que les autres points ouverts (run HP complet,
+points listés ci-dessous) soient traités d'abord.**
+
+---
+
+## Hors-Phase — Petits défauts relevés en clôture de Phase 13 (2026-06-21)
+
+### ✅ Étape 2 — `error_message` stale après un retry réussi (2026-06-21)
+
+**Bug.** `_analyze_book_impl` / `_generate_book_impl` / `_generate_chapter_impl`
+(`app/workers/tasks.py`) remettaient `status` à un état "en cours" au démarrage mais ne
+réinitialisaient jamais `error_message`. Un livre/chapitre `FAILED` puis relancé avec succès
+gardait l'ancien message d'erreur en base : état contradictoire (`status=DONE` +
+`error_message="ancienne erreur"`).
+
+**Chemin atteignable confirmé.** Un chapitre `FAILED` peut être régénéré via
+`POST /books/{id}/chapters/{n}/generate` (la route ne garde que `book.status==ANALYZED`, pas
+`chapter.status` — re-dispatch déjà autorisé depuis Phase 7 Étape 3c). Le cas livre n'est pas
+atteignable via l'API actuelle (pas de route retry-analyse ; `POST /books/{id}/generate` exige
+`status==ANALYZED` strict, bloqué si `FAILED`) — corrigé par cohérence (même cause, 1 ligne).
+Invisible dans le frontend actuel (`error_message` affiché seulement si `status==FAILED`,
+`page.tsx:144/186`), mais exposé via l'API (`BookResponse`/`ChapterResponse.error_message`).
+
+**Fix.** `app/workers/tasks.py` : `book.error_message = None` / `chapter.error_message = None`
+ajoutés aux 3 points où le statut passe à `PROCESSING`/`GENERATING`. Aucun changement de contrat.
+
+**Test-first.** `tests/check_phase7.py` sections 24-26 (nouvelles) : pré-remplissage d'un
+`error_message` "ancien" sur livre/chapitre, relance happy path → assert statut terminal correct
+**et** `error_message is None`. 13/13 suites vertes (26/26 sections check_phase7), zéro régression.
+
+Fichiers (2) : `app/workers/tasks.py`, `tests/check_phase7.py`.
+
+### ✅ Étape 3 — Audio orphelin à la suppression d'un livre (2026-06-21)
+
+**Bug.** `delete_book` (`app/api/routes/books.py`) ne supprimait que `book.source_path`. Deux
+emplacements de fichiers générés restaient orphelins sur disque :
+- WAV/MP3 du livre entier (`book.audio_path`/`book.mp3_path`) — écrits à côté de `source_path`
+  (même dossier `data/`, juste une autre extension).
+- `data/{book_id}/` — couverture (`cover.<ext>`) + 1 WAV par chapitre (`ch{position}.wav`).
+
+Les lignes DB (`Chapter`/`Character`) étaient déjà nettoyées via le cascade SQLModel existant
+(`cascade="all, delete-orphan"`) — seul le disque fuyait.
+
+**Fix.** `delete_book` lit aussi `audio_path`/`mp3_path` avant le `session.delete`, les supprime
+s'ils existent (même boucle que `source_path`), puis `shutil.rmtree(DATA_DIR / str(book_id),
+ignore_errors=True)`. Synchrone, dans la même requête `DELETE /books/{id}` — pas de tâche de fond
+ni de nettoyage différé. Aucun changement de contrat (signature/schéma).
+
+**Test-first.** `tests/check_phase2.py` section 6 (HTTP routes) étendue : seed un livre avec
+`audio_path`/`mp3_path` réels + `data/{id}/` peuplé (cover + 1 WAV chapitre) → `DELETE` → assert
+les 4 chemins absents du disque (en plus du contrat HTTP existant : 204 puis 404). 13/13 suites
+vertes, zéro régression.
+
+Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase2.py`.
 
 ---
 
