@@ -552,12 +552,64 @@ en milieu de phrase (~1 tous les 53 caractères) ; le regex de dialogue `[—–
 réplique au 1er `\n` → **0 incise extraite sur 74 répliques réelles**, et les paroles elles-mêmes
 sont mal typées narration. Le fix incise est correct mais neutralisé en amont.
 
-### Étape 2 (à planifier) — Normalisation des sauts de ligne intra-paragraphe
+### Étape 2 ✅ (2026-06-20, commit `294f60f`) — Normalisation des sauts de ligne intra-paragraphe
 
-Joindre les `\n` internes aux paragraphes (ne garder comme coupures que lignes vides / fins de
-paragraphe), dans `EpubParser` ou en pré-traitement avant `_pre_segment`. Débloque À LA FOIS la
-détection de dialogue et l'extraction d'incise. Vérifier l'impact sur `check_phase2`/`check_phase3`
-et le round-trip byte-exact. Plan-First + GO requis.
+**Cause racine.** `soup.get_text(separator="\n", strip=True)` ne rogne que les bords des nœuds
+texte ; les `\n` de hard-wrap XHTML (~80 colonnes) internes à un paragraphe restaient, coupant les
+répliques em-dash au 1er `\n` et neutralisant `_split_incise` (Étape 1).
+
+**Livré.** `_extract_text` (`app/services/epub/parser.py`) : extraction bloc par bloc (`p`, `div`,
+`li`, `h1-6`, blocs feuilles uniquement — évite le double comptage `div>p`), whitespace interne
+(espaces, `\n`, `\xa0`) écrasé en espace simple par bloc. Repli sur l'ancien comportement si aucun
+bloc trouvé (jamais de texte perdu). **Aucune modification de `make_hp_chapter3_fixture.py`
+nécessaire** — il faisait déjà la bonne chose ; c'était la source (`ch.raw_text`) qui était sale.
+Test-first : `check_phase2.py` nouvelle section synthétique (zéro contenu copyrighté) ; 12 suites
+sans régression. **Aucun changement de contrat.**
+
+**Gain mesuré sur le vrai Ch.3 HP** (régénération de `Ebook/hp_chapter3_only.epub`, round-trip
+byte-exact toujours OK) :
+
+| Métrique | Avant | Après |
+|---|---|---|
+| Incises extraites / répliques em-dash | 0 / 74 | **19 / 74** |
+| Total spans | 164 | 179 |
+| Spans dialogue / narration | 82 / 82 | 80 / 99 |
+
+**2 limites découvertes pendant la mesure — NON tranchées, à traiter en tâche séparée :**
+
+- **Bug apostrophe.** `_INCISE_VERBS` (`base.py`) utilise l'apostrophe droite `'` pour les verbes
+  réflexifs (`s'écria`, `s'exclama`, `s'étonna`, `s'enquit`), mais le texte HP réel utilise
+  l'apostrophe typographique `'` → mismatch silencieux, ex. `s'exclama Mr Dursley` non détecté.
+  Fix candidat : classe de caractères acceptant les deux apostrophes (1 ligne), zéro changement
+  de contrat — mais portée et priorité à discuter, pas encore actées.
+- **Incise qui s'étend dans du dialogue continué.** Sur `— X, dit Y avec douceur. Z.`, si `Z` est
+  en réalité la suite du dialogue de Y (convention FR ambiguë sans nouveau tiret/guillemet),
+  `[^,]*` l'absorbe en narration. Ambigu même à la lecture humaine sans contexte plus large.
+  Corriger ou assumer comme limite bornée (cf. Étape 1) : à arbitrer.
+
+### Étape 3 ✅ (2026-06-21) — Bug apostrophe corrigé ; bornage dialogue continué accepté
+
+**Décision (2026-06-21).** Sur les 2 points de l'Étape 2 : **A corrigé** (bug apostrophe),
+**B accepté comme limite bornée** (non corrigé — cf. Étape 1, dégradation bornée déjà assumée).
+
+**A — Bug apostrophe (corrigé).** `app/services/llm/base.py` : nouvelle constante
+`_APOS = r"['']"` (classe acceptant l'apostrophe droite ET la typographique), utilisée dans
+`_INCISE_VERBS` (verbes réflexifs `s'écria`/`s'exclama`/`s'étonna`/`s'enquit`) et dans le préfixe
+clitique de `_INCISE_VERB` (`s'écria-t-il`…). Avant le fix, le texte réel (apostrophe
+typographique `'`) ne matchait jamais la liste codée en apostrophe droite `'` → incise non
+détectée, silencieusement. Test-first : `check_phase3.py` §11, 2 nouveaux asserts (verbe réflexif
++ clitique réflexif, apostrophe typographique) — confirmés en échec sur l'ancien code
+(`[True]` au lieu de `[True, False]`), verts après le fix. 12/12 suites sans régression.
+**Aucun changement de contrat.** Fichiers (2) : `app/services/llm/base.py`, `tests/check_phase3.py`.
+
+**B — Incise absorbant du dialogue continué (accepté, non corrigé).** Sur
+`— X, dit Y avec douceur. Z.` où `Z` reprend en réalité la parole de Y, `[^,]*` l'absorbe en
+narration. Ambigu même à la lecture humaine sans contexte plus large ; corriger risquerait des faux
+positifs pires que la limite actuelle. Reste une dégradation bornée documentée (cf. Étape 1) —
+aucune action prévue sauf signal contraire à l'écoute réelle.
+
+**Phase 13 close.** Prochaine décision = arbitrage utilisateur (run HP complet 18 chapitres / spike
+TTS émotion comparatif / petits défauts `error_message` stale + audio orphelin / cover upload UI).
 
 ---
 

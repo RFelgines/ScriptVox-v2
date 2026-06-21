@@ -156,12 +156,15 @@ _DIALOGUE_RE = re.compile(
 
 # Verbes d'incise courants (pour le cas « verbe + nom propre » : « dit Harry »).
 # Liste curée, volontairement non exhaustive — voir _split_incise (dégradation bornée).
+# Apostrophe tolérante : l'EPUB source utilise la typographique (’ U+2019), pas la droite (').
+_APOS = r"['’]"
 _INCISE_VERBS = (
     r"dit|dirent|répondit|répondirent|demanda|demandèrent|murmura|cria|crièrent|"
     r"reprit|ajouta|lança|soupira|songea|hurla|chuchota|gronda|rétorqua|répliqua|"
     r"déclara|poursuivit|continua|conclut|fit|gémit|objecta|protesta|insista|"
     r"expliqua|affirma|marmonna|balbutia|susurra|rugit|beugla|bredouilla|grommela|"
-    r"renchérit|coupa|trancha|s'écria|s'exclama|s'étonna|s'enquit"
+    r"renchérit|coupa|trancha|s" + _APOS + r"écria|s" + _APOS + r"exclama|"
+    r"s" + _APOS + r"étonna|s" + _APOS + r"enquit"
 )
 
 # Une incise est repérée par l'inversion verbe-sujet, signal le plus fiable du français :
@@ -171,7 +174,7 @@ _INCISE_VERBS = (
 # « …, répondit-il, mais je viendrai » = dialogue repris → NON splitté (borné, cf. tests).
 _INCISE_VERB = (
     r"(?:"
-    r"(?:[a-zà-ÿ]{1,3}')?\w+(?:-t)?-(?:il|elle|ils|elles|on|je)"   # inversion clitique
+    r"(?:[a-zà-ÿ]{1,3}" + _APOS + r")?\w+(?:-t)?-(?:il|elle|ils|elles|on|je)"   # inversion clitique
     r"|(?:" + _INCISE_VERBS + r")\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]*"           # verbe d'incise + nom propre
     r")"
 )

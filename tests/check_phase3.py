@@ -461,6 +461,23 @@ assert "".join(s.text for s in sp6) == s6, "byte-exact violé (guillemets inchan
 assert len([s for s in sp6 if s.is_dialogue]) == 1
 ok("guillemets « » -> incise déjà externe, 1 dialogue (inchangé)")
 
+# Verbe réflexif + apostrophe TYPOGRAPHIQUE (’ U+2019) — celle des vrais EPUB, pas le ' droit
+s7 = "— Sacré petit bonhomme, s’exclama Mr Dursley."
+sp7 = _pre_segment(s7)
+assert "".join(s.text for s in sp7) == s7, "byte-exact violé (apostrophe typographique)"
+assert [s.is_dialogue for s in sp7] == [True, False], \
+    f"incise à apostrophe typographique non détectée: {[s.is_dialogue for s in sp7]}"
+assert "Dursley" in sp7[1].text
+ok("« s’exclama » (apostrophe typographique ’) -> dialogue + narration")
+
+# Inversion clitique réflexive + apostrophe TYPOGRAPHIQUE (« s’écria-t-il »)
+s8 = "— Attends ! s’écria-t-il."
+sp8 = _pre_segment(s8)
+assert "".join(s.text for s in sp8) == s8, "byte-exact violé (clitique typographique)"
+assert [s.is_dialogue for s in sp8] == [True, False], \
+    f"clitique à apostrophe typographique non détecté: {[s.is_dialogue for s in sp8]}"
+ok("« s’écria-t-il » (apostrophe typographique ’) -> dialogue + narration")
+
 # _segment_text : dialogue sans — ni virgule orpheline ; incise lue telle quelle
 assert _segment_text(sp1[0]) == "Je ne te crois pas", \
     f"dialogue mal nettoyé: {_segment_text(sp1[0])!r}"
