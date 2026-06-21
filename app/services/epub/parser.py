@@ -5,6 +5,29 @@ from ebooklib import epub
 
 from app.core.exceptions import EpubParsingError
 
+# Tags de bloc : un paragraphe source = une ligne de raw_text. Le hard-wrap interne
+# (XHTML ~80 colonnes) introduit des \n EN PLEIN MILIEU d'une phrase ou d'une réplique
+# em-dash, ce qui casse leur détection en aval (_pre_segment, ARCHITECTURE.md §2.7) --
+# d'où l'écrasement du whitespace interne à chaque bloc, pas seulement à ses bords.
+_BLOCK_TAGS = ("p", "div", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6")
+
+
+def _is_leaf_block(tag) -> bool:
+    """Vrai si *tag* ne contient aucun autre tag de bloc (évite le double comptage)."""
+    return tag.find(_BLOCK_TAGS) is None
+
+
+def _extract_text(soup: BeautifulSoup) -> str:
+    """Un paragraphe = une ligne ; le whitespace (espaces, \\n de hard-wrap, \\xa0)
+    interne à un même paragraphe est écrasé en un espace simple. Repli sur l'ancien
+    comportement (tout le document, séparateur \\n) si aucun bloc feuille n'est trouvé
+    -- jamais de texte perdu sur un document mal structuré."""
+    leaves = [b for b in soup.find_all(_BLOCK_TAGS) if _is_leaf_block(b)]
+    if not leaves:
+        return soup.get_text(separator="\n", strip=True)
+    lines = [" ".join(b.get_text().split()) for b in leaves]
+    return "\n".join(line for line in lines if line)
+
 
 @dataclass
 class ParsedChapter:
@@ -80,7 +103,7 @@ class EpubParser:
             for tag in soup(["script", "style"]):
                 tag.decompose()
 
-            raw_text = soup.get_text(separator="\n", strip=True)
+            raw_text = _extract_text(soup)
             if not raw_text:
                 continue
 

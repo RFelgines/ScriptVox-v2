@@ -96,6 +96,49 @@ for ch in parsed.chapters:
     ok(f"  ch{ch.position}: {ch.title!r}  ({len(ch.raw_text)} chars)")
 
 
+# ── 2b. Normalisation des sauts de ligne intra-paragraphe ─────────────────────
+section("EpubParser -- hard-wrap interne écrasé, 1 paragraphe = 1 ligne")
+ws_path = str(fixtures / "test_whitespace.epub")
+
+ws_book = epub.EpubBook()
+ws_book.set_title("Whitespace Test")
+ws_book.set_language("fr")
+ws_chapter = epub.EpubHtml(title="Chapitre", file_name="chap01.xhtml")
+# Hard-wrap typique d'un export XHTML (~80 colonnes) : \n en milieu de phrase,
+# et une réplique em-dash coupée par ce même hard-wrap (cas réel HP).
+ws_chapter.content = (
+    "<html><body>"
+    "<p>Alice commençait à se sentir très fatiguée\nde rester assise près de sa sœur.</p>"
+    "<p>— Sacré\npetit bonhomme, gloussa Mr Dursley en quittant la maison.</p>"
+    "<div><p>Premier paragraphe imbriqué.</p><p>Second paragraphe imbriqué.</p></div>"
+    "</body></html>"
+).encode("utf-8")
+ws_book.add_item(ws_chapter)
+ws_nav = epub.EpubNav()
+ws_book.add_item(ws_nav)
+ws_book.spine = ["nav", ws_chapter]
+epub.write_epub(ws_path, ws_book)
+
+ws_parsed = EpubParser().parse(ws_path)
+ws_chapters = [c for c in ws_parsed.chapters if "Sacr" in c.raw_text]
+assert len(ws_chapters) == 1, f"chapitre de test introuvable parmi {len(ws_parsed.chapters)}"
+ws_text = ws_chapters[0].raw_text
+
+assert "fatiguée\nde" not in ws_text, "hard-wrap interne non écrasé (paragraphe narration)"
+assert "fatiguée de rester" in ws_text, f"paragraphe narration corrompu: {ws_text!r}"
+ok("hard-wrap interne d'un paragraphe de narration -> espace simple")
+
+assert "Sacré\npetit" not in ws_text, "hard-wrap interne non écrasé (réplique em-dash)"
+expected_dialogue = "—" + " Sacré petit bonhomme, gloussa Mr Dursley"
+assert expected_dialogue in ws_text, "réplique em-dash corrompue: " + repr(ws_text)
+ok("hard-wrap interne d'une réplique em-dash -> 1 ligne complète (débloque _split_incise)")
+
+lines = ws_text.split("\n")
+assert all(line.strip() for line in lines), f"ligne vide résiduelle: {lines!r}"
+assert len(lines) == 4, f"attendu 4 paragraphes (4 lignes), obtenu {len(lines)}: {lines!r}"
+ok(f"{len(lines)} paragraphes -> {len(lines)} lignes, séparées par un seul \\n (pas de double-comptage div>p)")
+
+
 # ── 3. EpubParsingError ────────────────────────────────────────────────────────
 section("EpubParsingError on invalid path")
 from app.core.exceptions import EpubParsingError  # noqa: E402
