@@ -613,6 +613,51 @@ TTS émotion comparatif / petits défauts `error_message` stale + audio orphelin
 
 ---
 
+## Phase 14 — Qualité multi-chapitres (persistance personnages + émotion par réplique)
+
+> Découle de l'audit pré-run-complet HP du 2026-06-21 (mémoire `fullbook-quality-gaps`). Plan en
+> 4 étapes ordonnées A → B1 → B2 → B3, un GO explicite par étape. Répartition actée : Claude
+> implémente A + B1/B2/B3 ; le catalogue de voix (chantier séparé) reste à l'utilisateur.
+
+### Étape A ✅ (2026-06-21) — Persistance des personnages entre chapitres
+
+**Pourquoi.** Chaque chapitre était analysé indépendamment par le LLM, sans connaissance des
+personnages déjà détectés dans les chapitres précédents. Risque : un même personnage nommé
+différemment selon le chapitre (« Mr Dursley » puis « l'oncle Vernon ») se fragmente en plusieurs
+`Character` distincts → plusieurs voix pour la même personne sur un run long (HP 18 chapitres).
+
+**Contrat (revue humaine faite avant implémentation).**
+`BaseLLMProvider.analyze(text: str, known_characters: list[str] | None = None) -> LLMChapterResult`
+— paramètre optionnel, rétrocompatible. Aucun changement de schéma DB ; le dedup par nom exact
+existant dans `tasks.py` (`char_map`) reste inchangé, juste mieux nourri.
+
+**Livré.**
+- `app/services/llm/base.py` — signature abstraite mise à jour ; `SYSTEM_PROMPT` += règle de
+  réutilisation du nom exact pour un personnage récurrent ; `_build_user_prompt(spans,
+  known_characters=None)` injecte un préambule (`"Known characters from previous chapters: ..."`)
+  si la liste est non vide, sinon rendu strictement identique à avant (no-op vérifié).
+- `app/services/llm/ollama.py` / `gemini.py` — passe-plat du nouveau paramètre.
+- `app/workers/tasks.py` — `_analyze_book` calcule `known = list(char_map.keys())` avant les
+  chunks de chaque chapitre et le transmet à `provider.analyze(chunk, known)` (vide au 1er
+  chapitre, accumulé ensuite).
+
+**Test-first.** `tests/check_phase14.py` (nouveau, 5 sections) : signature `analyze` expose le
+nouveau paramètre avec défaut `None` ; `_build_user_prompt` no-op si `None`/`[]` (régression
+zéro double saut de ligne re-vérifiée) et préambule correct si rempli ; `SYSTEM_PROMPT` contient
+la règle ; pipeline réel `_analyze_book` avec un `FakeProvider` qui enregistre le
+`known_characters` reçu — confirmé `[]` au chapitre 1 puis `['Mr Dursley']` au chapitre 2,
+dedup toujours actif (1 seul `Character` créé). **13/13 suites vertes (12 existantes + nouvelle),
+zéro régression.** Fichiers (5) : `app/services/llm/base.py`, `ollama.py`, `gemini.py`,
+`app/workers/tasks.py`, `tests/check_phase14.py`.
+
+**Risque résiduel assumé.** Le LLM peut quand même dériver rarement malgré la liste (dégradation
+bornée) — pas de fuzzy-matching algorithmique ajouté (sur-ingénierie à ce stade).
+
+**Prochaine étape : B1** — extraction de l'émotion par réplique par le LLM (`SegmentData.emotion`
++ colonne `Segment.emotion` nullable). GO explicite requis avant d'écrire quoi que ce soit.
+
+---
+
 ## Piste candidate (non tranchée) — TTS expressive Qwen3-TTS local
 
 > Spike fait (2026-06-20). Voir mémoire `tts-emotion-qwen3-direction`. Décision encore ouverte — en

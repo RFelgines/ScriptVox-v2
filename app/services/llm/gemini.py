@@ -22,13 +22,15 @@ class GeminiProvider(BaseLLMProvider):
         self._client = genai.Client(api_key=settings.gemini_api_key)
         self._model = settings.gemini_model
 
-    async def analyze(self, text: str) -> LLMChapterResult:
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None
+    ) -> LLMChapterResult:
         spans = _pre_segment(text)
         raw = ""
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
-                contents=_build_user_prompt(spans),
+                contents=_build_user_prompt(spans, known_characters),
                 config=genai_types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
                     response_mime_type="application/json",

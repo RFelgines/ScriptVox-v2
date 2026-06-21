@@ -108,7 +108,9 @@ SYSTEM_PROMPT = (
     "- age_category: CHILD <13, YOUNG_ADULT 13-25, ADULT 26-60, ELDER 60+; use UNKNOWN if ambiguous.\n"
     "- tone: single word for emotional/personality quality, e.g. \"warm\", \"cold\", \"harsh\", \"gentle\".\n"
     "- voice_quality: single word for acoustic quality, e.g. \"deep\", \"raspy\", \"bright\", \"smooth\".\n"
-    "- voice_tone: concise phrase combining tone and quality, e.g. \"soft and hesitant\", \"deep and commanding\"."
+    "- voice_tone: concise phrase combining tone and quality, e.g. \"soft and hesitant\", \"deep and commanding\".\n"
+    "- If a list of known characters from previous chapters is given, reuse the EXACT same "
+    "name for a character who reappears; only introduce a new name for a genuinely new character."
 )
 
 
@@ -139,7 +141,9 @@ class LLMChapterResult:
 
 class BaseLLMProvider(ABC):
     @abstractmethod
-    async def analyze(self, text: str) -> LLMChapterResult: ...
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None
+    ) -> LLMChapterResult: ...
 
 
 # ── Pre-segmentation (label-based protocol, ARCHITECTURE.md §2.7) ────────────────
@@ -247,13 +251,18 @@ def _pre_segment(text: str) -> list[_Span]:
     return [_Span(i, t, d) for i, (t, d) in enumerate(pieces, start=1)]
 
 
-def _build_user_prompt(spans: list[_Span]) -> str:
+def _build_user_prompt(spans: list[_Span], known_characters: list[str] | None = None) -> str:
     """Rend les spans numérotés et tagués pour le LLM : ``[i][DIALOGUE|NARRATION] texte``.
 
     Le texte est normalisé (espaces/sauts de ligne compactés) ; les spans vides après
     normalisation sont omis de l'affichage mais conservent leur index d'origine.
+    Si *known_characters* est non vide, une ligne de préambule liste les personnages déjà
+    détectés dans les chapitres précédents (persistance des personnages, §2.7) ; sinon le
+    rendu est identique à l'appel sans cet argument (no-op).
     """
     lines: list[str] = []
+    if known_characters:
+        lines.append("Known characters from previous chapters: " + ", ".join(known_characters) + ".")
     for span in spans:
         display = " ".join(span.text.split())
         if not display:

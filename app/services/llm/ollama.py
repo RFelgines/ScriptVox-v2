@@ -31,7 +31,9 @@ class OllamaProvider(BaseLLMProvider):
         self._model = settings.ollama_model
         self._num_ctx = settings.ollama_context_tokens
 
-    async def analyze(self, text: str) -> LLMChapterResult:
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None
+    ) -> LLMChapterResult:
         spans = _pre_segment(text)
         raw = ""
         try:
@@ -39,7 +41,7 @@ class OllamaProvider(BaseLLMProvider):
                 model=self._model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": _build_user_prompt(spans)},
+                    {"role": "user", "content": _build_user_prompt(spans, known_characters)},
                 ],
                 format="json",
                 options={"num_ctx": self._num_ctx},

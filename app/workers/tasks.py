@@ -46,8 +46,9 @@ async def _analyze_book(
     n = len(chapter_data)
 
     for i, (chapter_id, raw_text) in enumerate(chapter_data):
+        known = list(char_map.keys())
         chunks = _chunk_text(raw_text, budget)
-        chunk_results = [await provider.analyze(chunk) for chunk in chunks]
+        chunk_results = [await provider.analyze(chunk, known) for chunk in chunks]
         merged = _merge_chunk_results(chunk_results)
 
         with Session(engine) as session:
