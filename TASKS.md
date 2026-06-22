@@ -653,10 +653,42 @@ zéro régression.** Fichiers (5) : `app/services/llm/base.py`, `ollama.py`, `ge
 **Risque résiduel assumé.** Le LLM peut quand même dériver rarement malgré la liste (dégradation
 bornée) — pas de fuzzy-matching algorithmique ajouté (sur-ingénierie à ce stade).
 
-**Prochaine étape : B1** — extraction de l'émotion par réplique par le LLM (`SegmentData.emotion`
-+ colonne `Segment.emotion` nullable). GO explicite requis avant d'écrire quoi que ce soit.
-**Décision utilisateur (2026-06-21) : B1 attend que les autres points ouverts (run HP complet,
-points listés ci-dessous) soient traités d'abord.**
+### Étape B1 ✅ (2026-06-22) — Extraction de l'émotion par réplique de dialogue
+
+**Pourquoi.** Premier domino vers l'intégration future de Qwen3-TTS (émotion + clonage de voix,
+décidée le 2026-06-22 — voir mémoire `feature-roadmap-decisions`). Couche données pure : le LLM
+décrit en langage naturel comment une réplique de dialogue doit être *dite* ; aucun changement de
+comportement TTS (EdgeTTS/Piper/ElevenLabs ignorent toujours ce champ, qui n'est même pas encore
+transmis aux providers).
+
+**Contrat (revu avant implémentation).** `SegmentData.emotion: str | None = None` (dataclass,
+défaut → 100% rétrocompatible) + `Segment.emotion: Optional[str] = None` (colonne nullable,
+⚠️ supprimer `scriptvox.db` avant le 1er run). Émotion **dialogue uniquement** — narration reste
+toujours `None`. Pas d'exposition API (`Segment` n'est exposé dans aucun schéma Pydantic).
+
+**Livré.**
+- `app/services/llm/base.py` — `SYSTEM_PROMPT` += règle `emotion` (texte libre sur
+  `attributions[].emotion`) ; `_parse_llm_json` extrait l'émotion par index (indépendamment de la
+  validité du `character_name`, dégradation bornée cohérente avec le reste du fichier).
+- **Bug trouvé en lisant le code (pas dans le plan d'origine) :** `_merge_chunk_results`
+  reconstruit chaque `SegmentData` pour renuméroter `position` à travers les chunks d'un chapitre
+  découpé par `_chunk_text`, et ne propageait pas `emotion` → perte silencieuse sur tout chapitre
+  chunké. Fix : `emotion=sd.emotion` ajouté à la reconstruction.
+- `app/models/entities.py` — `Segment.emotion`.
+- `app/workers/tasks.py` — `_analyze_book` passe `sd.emotion` au constructeur `Segment(...)`.
+- `ARCHITECTURE.md §2.7` — schéma JSON + note "couche données seule, pas encore consommée par le TTS".
+
+**Test-first.** `check_phase3.py` §5 (extraction + narration toujours `None` + rétrocompat sans le
+champ) et §6 (régression `_merge_chunk_results` — rouge avant le fix, vert après) ; `check_phase14.py`
+§6 (pipeline réel `_analyze_book` avec `FakeProvider`, `Segment.emotion` vérifié en base). 13/13
+suites vertes, zéro régression. Fichiers (6) : `app/services/llm/base.py`, `app/models/entities.py`,
+`app/workers/tasks.py`, `ARCHITECTURE.md`, `tests/check_phase3.py`, `tests/check_phase14.py`.
+
+**Hors scope (explicite) :** pas de transmission aux providers TTS (B2), pas de `QwenTTSProvider`
+(B3), pas d'exposition API, pas d'émotion sur la narration.
+
+**Prochaine étape : B2** — contrat TTS `synthesise(text, voice_id, emotion=None)` sur tous les
+providers existants (no-op rétrocompat). GO explicite requis avant d'écrire quoi que ce soit.
 
 ---
 
