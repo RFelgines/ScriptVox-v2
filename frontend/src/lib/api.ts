@@ -39,6 +39,16 @@ export interface VoiceSummary {
   locale: string | null;
 }
 
+export type MergeSuggestionStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+
+export interface MergeSuggestion {
+  id: number;
+  survivor_character_id: number;
+  merged_character_id: number;
+  reason: string | null;
+  status: MergeSuggestionStatus;
+}
+
 export interface CharacterSummary {
   id: number;
   name: string;
@@ -181,6 +191,40 @@ export async function generateChapter(
     throw new Error(`Génération du chapitre échouée : ${detail}`);
   }
   return res.json();
+}
+
+export async function listMergeSuggestions(bookId: number): Promise<MergeSuggestion[]> {
+  const res = await fetch(`${API_URL}/books/${bookId}/merge-suggestions`);
+  if (!res.ok) throw new Error(`GET /books/${bookId}/merge-suggestions failed: ${res.status}`);
+  return res.json();
+}
+
+async function _resolveMergeSuggestion(
+  suggestionId: number,
+  action: "accept" | "reject",
+): Promise<MergeSuggestion> {
+  const res = await fetch(`${API_URL}/merge-suggestions/${suggestionId}/${action}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Fusion (${action}) échouée : ${detail}`);
+  }
+  return res.json();
+}
+
+export function acceptMergeSuggestion(suggestionId: number): Promise<MergeSuggestion> {
+  return _resolveMergeSuggestion(suggestionId, "accept");
+}
+
+export function rejectMergeSuggestion(suggestionId: number): Promise<MergeSuggestion> {
+  return _resolveMergeSuggestion(suggestionId, "reject");
 }
 
 export async function generateAllChapters(bookId: number): Promise<ChapterSummary[]> {

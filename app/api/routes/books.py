@@ -9,9 +9,9 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from app.core.db import get_session
-from app.core.enums import BookStatus, ChapterStatus
-from app.models import Book, Chapter, Character
-from app.schemas.book import BookResponse, ChapterResponse, CharacterResponse
+from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus
+from app.models import Book, Chapter, Character, CharacterMergeSuggestion
+from app.schemas.book import BookResponse, ChapterResponse, CharacterResponse, MergeSuggestionResponse
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
 DATA_DIR = Path("data")
@@ -245,6 +245,22 @@ def get_book_characters(book_id: int, session: Session = Depends(get_session)) -
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
     characters = session.exec(select(Character).where(Character.book_id == book_id)).all()
     return [CharacterResponse.model_validate(c) for c in characters]
+
+
+@router.get("/{book_id}/merge-suggestions", response_model=list[MergeSuggestionResponse])
+def get_book_merge_suggestions(
+    book_id: int, session: Session = Depends(get_session)
+) -> list[MergeSuggestionResponse]:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    suggestions = session.exec(
+        select(CharacterMergeSuggestion).where(
+            CharacterMergeSuggestion.book_id == book_id,
+            CharacterMergeSuggestion.status == MergeSuggestionStatus.PENDING,
+        )
+    ).all()
+    return [MergeSuggestionResponse.model_validate(s) for s in suggestions]
 
 
 @router.delete("/{book_id}", status_code=204)

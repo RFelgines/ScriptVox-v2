@@ -7,10 +7,15 @@ from app.config import Settings
 from app.core.exceptions import LLMParsingError
 from app.services.llm.base import (
     BaseLLMProvider,
+    CharacterData,
     LLMChapterResult,
+    MERGE_SYSTEM_PROMPT,
+    MergeSuggestion,
     SYSTEM_PROMPT,
+    _build_merge_prompt,
     _build_user_prompt,
     _parse_llm_json,
+    _parse_merge_json,
     _pre_segment,
 )
 
@@ -48,6 +53,29 @@ class OllamaProvider(BaseLLMProvider):
             )
             raw = response.message.content
             return _parse_llm_json(raw, spans)
+        except LLMParsingError:
+            raise
+        except Exception as exc:
+            raise LLMParsingError(raw, exc) from exc
+
+    async def suggest_merges(
+        self, characters: list[CharacterData]
+    ) -> list[MergeSuggestion]:
+        if len(characters) < 2:
+            return []
+        raw = ""
+        try:
+            response = await self._client.chat(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": MERGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": _build_merge_prompt(characters)},
+                ],
+                format="json",
+                options={"num_ctx": self._num_ctx},
+            )
+            raw = response.message.content
+            return _parse_merge_json(raw, characters)
         except LLMParsingError:
             raise
         except Exception as exc:

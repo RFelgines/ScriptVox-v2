@@ -20,8 +20,13 @@ async def _analyze_book(
 ) -> None:
     from sqlalchemy import delete as sa_delete
 
-    from app.models import Book, Character, Segment
-    from app.services.llm.base import GEMINI_MAX_TOKENS, _chunk_text, _merge_chunk_results
+    from app.models import Book, Character, CharacterMergeSuggestion, Segment
+    from app.services.llm.base import (
+        GEMINI_MAX_TOKENS,
+        CharacterData,
+        _chunk_text,
+        _merge_chunk_results,
+    )
     from app.services.llm import factory as llm_factory
 
     settings = get_settings()
@@ -84,6 +89,42 @@ async def _analyze_book(
             book.updated_at = datetime.now(timezone.utc)
             session.add(book)
             session.commit()
+
+    # ── Suggestions de fusion de personnages (livre entier, LLM déjà chaud) ──────
+    # Non bloquant : un échec ici n'empêche pas le livre de passer à ANALYZED.
+    with Session(engine) as session:
+        characters = session.exec(select(Character).where(Character.book_id == book_id)).all()
+
+    if len(characters) >= 2:
+        char_data = [
+            CharacterData(
+                name=c.name,
+                description=c.description,
+                gender=c.gender,
+                age_category=c.age_category,
+                tone=c.tone,
+                voice_quality=c.voice_quality,
+                voice_tone=c.voice_tone,
+            )
+            for c in characters
+        ]
+        try:
+            suggestions = await provider.suggest_merges(char_data)
+        except Exception:
+            logger.exception("suggest_merges failed for book_id=%s (non-blocking)", book_id)
+            suggestions = []
+
+        if suggestions:
+            name_to_id = {c.name: c.id for c in characters}
+            with Session(engine) as session:
+                for sug in suggestions:
+                    session.add(CharacterMergeSuggestion(
+                        book_id=book_id,
+                        survivor_character_id=name_to_id[sug.survivor_name],
+                        merged_character_id=name_to_id[sug.merged_name],
+                        reason=sug.reason,
+                    ))
+                session.commit()
 
 
 async def _synthesise_book(

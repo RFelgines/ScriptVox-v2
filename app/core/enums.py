@@ -35,3 +35,9 @@ class AgeCategory(str, Enum):
     ADULT       = "ADULT"
     ELDER       = "ELDER"
     UNKNOWN     = "UNKNOWN"
+
+
+class MergeSuggestionStatus(str, Enum):
+    PENDING  = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"

@@ -143,11 +143,23 @@ class LLMChapterResult:
     segments: list[SegmentData]
 
 
+@dataclass
+class MergeSuggestion:
+    survivor_name: str
+    merged_name: str
+    reason: str | None = None
+
+
 class BaseLLMProvider(ABC):
     @abstractmethod
     async def analyze(
         self, text: str, known_characters: list[str] | None = None
     ) -> LLMChapterResult: ...
+
+    @abstractmethod
+    async def suggest_merges(
+        self, characters: list[CharacterData]
+    ) -> list[MergeSuggestion]: ...
 
 
 # ── Pre-segmentation (label-based protocol, ARCHITECTURE.md §2.7) ────────────────
@@ -421,3 +433,72 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
         raise LLMParsingError(raw, exc) from exc
 
     return LLMChapterResult(characters=characters, segments=segments)
+
+
+# ── Fusion de personnages (suggest_merges) ──────────────────────────────────────
+
+MERGE_SYSTEM_PROMPT = (
+    "You receive a list of characters detected across a whole book, each with a name "
+    "and short descriptive traits. Some entries might refer to the SAME real person "
+    "under different names (e.g. \"Mr Dursley\" and \"Vernon Dursley\").\n\n"
+    "Your job: identify groups of duplicate names that refer to the same character, "
+    "and for each group, pick the most complete/canonical name as survivor.\n\n"
+    "Return ONLY valid JSON matching this exact schema — no markdown, no commentary:\n"
+    "{\n"
+    '  "merges": [ {"survivor_name": "...", "merged_name": "...", "reason": "..."} ]\n'
+    "}\n\n"
+    "Rules:\n"
+    "- Both survivor_name and merged_name MUST exactly match a name from the input list.\n"
+    "- Only suggest a merge when reasonably confident they are the same person — "
+    "when in doubt, do NOT suggest a merge (a wrong merge destroys a distinct character).\n"
+    "- If a group has 3+ duplicates, emit one entry per non-survivor name, all sharing "
+    "the same survivor_name.\n"
+    "- reason: short free-text explanation, e.g. \"Same person, full name vs. nickname\".\n"
+    "- If no duplicates are found, return {\"merges\": []}."
+)
+
+
+def _build_merge_prompt(characters: list[CharacterData]) -> str:
+    lines = ["Characters detected in this book:"]
+    for c in characters:
+        traits = ", ".join(
+            f"{label}: {value}"
+            for label, value in (
+                ("gender", c.gender.value),
+                ("age", c.age_category.value),
+                ("description", c.description),
+            )
+            if value
+        )
+        lines.append(f"- {c.name} ({traits})" if traits else f"- {c.name}")
+    return "\n".join(lines)
+
+
+def _parse_merge_json(raw: str, characters: list[CharacterData]) -> list[MergeSuggestion]:
+    """Parse la réponse LLM ``{merges}`` ; toute entrée invalide est ignorée (WARNING),
+    jamais de crash (cf. philosophie de dégradation bornée du reste de ce fichier)."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LLMParsingError(raw, exc) from exc
+
+    known_names = {c.name for c in characters}
+    suggestions: list[MergeSuggestion] = []
+    for m in data.get("merges", []):
+        survivor_name = m.get("survivor_name")
+        merged_name = m.get("merged_name")
+        if survivor_name not in known_names or merged_name not in known_names:
+            _logger.warning(
+                "_parse_merge_json: survivor=%r merged=%r not both in known characters, skipped",
+                survivor_name, merged_name,
+            )
+            continue
+        if survivor_name == merged_name:
+            _logger.warning("_parse_merge_json: survivor_name == merged_name (%r), skipped", survivor_name)
+            continue
+        suggestions.append(MergeSuggestion(
+            survivor_name=survivor_name,
+            merged_name=merged_name,
+            reason=m.get("reason"),
+        ))
+    return suggestions

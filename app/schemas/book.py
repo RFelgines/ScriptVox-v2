@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender
+from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender, MergeSuggestionStatus
 
 
 class ChapterResponse(BaseModel):
@@ -30,6 +30,16 @@ class CharacterResponse(BaseModel):
     voice_quality: Optional[str] = None
     voice_tone: Optional[str] = None
     voice_id: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class MergeSuggestionResponse(BaseModel):
+    id: int
+    survivor_character_id: int
+    merged_character_id: int
+    reason: Optional[str] = None
+    status: MergeSuggestionStatus
 
     model_config = {"from_attributes": True}
 

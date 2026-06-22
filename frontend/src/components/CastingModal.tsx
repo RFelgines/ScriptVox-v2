@@ -4,10 +4,14 @@ import { useEffect, useState } from "react";
 import {
   BookStatus,
   CharacterSummary,
+  MergeSuggestion,
   VoiceSummary,
+  acceptMergeSuggestion,
   listCharacters,
+  listMergeSuggestions,
   listVoices,
   patchCharacterVoice,
+  rejectMergeSuggestion,
   generateBook,
 } from "@/lib/api";
 
@@ -24,19 +28,25 @@ export default function CastingModal({
 }) {
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [voices, setVoices] = useState<VoiceSummary[]>([]);
+  const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [resolvingId, setResolvingId] = useState<number | null>(null);
+  const [acceptingAll, setAcceptingAll] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // Bumpé après une action de fusion pour relancer le fetch (personnages + suggestions).
+  const [mergeReloadNonce, setMergeReloadNonce] = useState(0);
 
   // Fetch initial (chaîne .then pour la règle react-hooks/set-state-in-effect).
   useEffect(() => {
     let active = true;
-    Promise.all([listCharacters(bookId), listVoices()])
-      .then(([chars, vs]) => {
+    Promise.all([listCharacters(bookId), listVoices(), listMergeSuggestions(bookId)])
+      .then(([chars, vs, merges]) => {
         if (!active) return;
         setCharacters(chars);
         setVoices(vs);
+        setMergeSuggestions(merges);
         setError(null);
       })
       .catch((e) => {
@@ -48,7 +58,7 @@ export default function CastingModal({
     return () => {
       active = false;
     };
-  }, [bookId]);
+  }, [bookId, mergeReloadNonce]);
 
   // Fermeture au clavier (Esc).
   useEffect(() => {
@@ -70,6 +80,39 @@ export default function CastingModal({
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSavingId(null));
+  }
+
+  function characterName(id: number): string {
+    return characters.find((c) => c.id === id)?.name ?? `#${id}`;
+  }
+
+  function handleResolveMerge(suggestionId: number, action: "accept" | "reject") {
+    setResolvingId(suggestionId);
+    setError(null);
+    const resolve = action === "accept" ? acceptMergeSuggestion : rejectMergeSuggestion;
+    resolve(suggestionId)
+      .then(() => setMergeReloadNonce((n) => n + 1))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setResolvingId(null));
+  }
+
+  function handleAcceptAllMerges() {
+    setAcceptingAll(true);
+    setError(null);
+    // Séquentiel : accepter une suggestion peut en rejeter automatiquement une autre du
+    // même groupe côté backend (doublon 3+) — un 409 sur une suggestion déjà résolue par
+    // ce mécanisme est attendu, pas une vraie erreur, donc ignoré silencieusement ici.
+    mergeSuggestions
+      .reduce<Promise<void>>(
+        (chain, s) =>
+          chain.then(() => acceptMergeSuggestion(s.id).then(
+            () => undefined,
+            () => undefined,
+          )),
+        Promise.resolve(),
+      )
+      .then(() => setMergeReloadNonce((n) => n + 1))
+      .finally(() => setAcceptingAll(false));
   }
 
   function handleGenerate() {
@@ -118,6 +161,54 @@ export default function CastingModal({
           {error && (
             <div className="mb-4 rounded border border-red-700 bg-red-900/40 p-3">
               <p className="text-sm text-red-400">{error}</p>
+            </div>
+          )}
+
+          {mergeSuggestions.length > 0 && (
+            <div className="mb-4 rounded border border-yellow-700 bg-yellow-900/20 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-semibold text-yellow-300">
+                  Fusions de personnages suggérées
+                </p>
+                <button
+                  onClick={handleAcceptAllMerges}
+                  disabled={acceptingAll}
+                  className="rounded bg-yellow-700 px-2 py-1 text-xs font-medium hover:bg-yellow-600 disabled:opacity-50"
+                >
+                  {acceptingAll ? "…" : "Tout accepter"}
+                </button>
+              </div>
+              <ul className="space-y-2">
+                {mergeSuggestions.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center gap-3 rounded bg-gray-950 p-2"
+                  >
+                    <div className="flex-1 text-sm">
+                      <span className="font-medium">{characterName(s.survivor_character_id)}</span>
+                      <span className="text-gray-500"> ← </span>
+                      <span className="text-gray-400">{characterName(s.merged_character_id)}</span>
+                      {s.reason && (
+                        <p className="text-xs text-gray-500">{s.reason}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleResolveMerge(s.id, "accept")}
+                      disabled={resolvingId === s.id || acceptingAll}
+                      className="rounded bg-green-700 px-2 py-1 text-xs font-medium hover:bg-green-600 disabled:opacity-50"
+                    >
+                      Accepter
+                    </button>
+                    <button
+                      onClick={() => handleResolveMerge(s.id, "reject")}
+                      disabled={resolvingId === s.id || acceptingAll}
+                      className="rounded bg-gray-700 px-2 py-1 text-xs font-medium hover:bg-gray-600 disabled:opacity-50"
+                    >
+                      Rejeter
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

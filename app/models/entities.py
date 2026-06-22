@@ -4,7 +4,14 @@ from typing import Optional
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender, SegmentType
+from app.core.enums import (
+    AgeCategory,
+    BookStatus,
+    ChapterStatus,
+    Gender,
+    MergeSuggestionStatus,
+    SegmentType,
+)
 
 
 class Book(SQLModel, table=True):
@@ -28,6 +35,10 @@ class Book(SQLModel, table=True):
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     characters: list["Character"] = Relationship(
+        back_populates="book",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    merge_suggestions: list["CharacterMergeSuggestion"] = Relationship(
         back_populates="book",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
@@ -86,3 +97,16 @@ class Segment(SQLModel, table=True):
 
     chapter: Optional["Chapter"] = Relationship(back_populates="segments")
     character: Optional["Character"] = Relationship(back_populates="segments")
+
+
+class CharacterMergeSuggestion(SQLModel, table=True):
+    __tablename__ = "character_merge_suggestion"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(foreign_key="book.id", index=True)
+    survivor_character_id: int = Field(foreign_key="character.id")
+    merged_character_id: int = Field(foreign_key="character.id")
+    reason: Optional[str] = None
+    status: MergeSuggestionStatus = Field(default=MergeSuggestionStatus.PENDING)
+
+    book: Optional["Book"] = Relationship(back_populates="merge_suggestions")

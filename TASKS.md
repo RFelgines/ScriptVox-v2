@@ -915,6 +915,95 @@ plus tard dans la même mémoire).
 
 ---
 
+## Phase 16 — Fusion de personnages proposée par le LLM ✅ (2026-06-22)
+
+**Pourquoi.** Roadmap [[feature-roadmap-decisions]] point 5 : si le LLM nomme un même
+personnage différemment selon le chapitre (« Mr Dursley » / « Vernon Dursley »), malgré la
+persistance inter-chapitres (Phase 14 Étape A), il peut quand même fragmenter un personnage en
+plusieurs `Character` distincts. Flux UX validé : le LLM propose des fusions, l'utilisateur
+confirme (humain dans la boucle, jamais de fusion automatique sans contrôle — une fusion est
+destructrice : réassignation de `Segment.character_id` + suppression d'un `Character`).
+
+**Plan en 5 étapes (1 GO chacune), repris du même découpage que Phase 14 A→B3.**
+
+### Étape 1 — Schéma DB
+`app/core/enums.py` : `MergeSuggestionStatus` (PENDING/ACCEPTED/REJECTED). `app/models/entities.py` :
+`CharacterMergeSuggestion` (book_id, survivor_character_id, merged_character_id, reason, status) +
+relation cascade sur `Book` (cohérente avec `chapters`/`characters`). Une **paire** (survivant,
+fusionné) par ligne — un groupe de 3 doublons donne 2 lignes partageant le même survivant. ⚠️
+Supprimer `scriptvox.db` avant le 1er run (nouvelle table). Test-first : `tests/check_phase16.py`
+(nouveau) §1-5 — import, enum, table créée par `init_db`, round-trip, cascade delete.
+
+### Étape 2 — Contrat LLM `suggest_merges`
+`app/services/llm/base.py` : `MergeSuggestion` (dataclass), `BaseLLMProvider.suggest_merges`
+(abstrait), `MERGE_SYSTEM_PROMPT`, `_build_merge_prompt`, `_parse_merge_json` (dégradation bornée :
+nom inconnu ou survivant==fusionné → ignoré avec WARNING, jamais de crash — même philosophie que
+`_parse_llm_json`). `app/services/llm/ollama.py`/`gemini.py` : implémentation, fast-path `< 2`
+personnages → `[]` sans appel réseau. §6-9 : prompt/parsing testés en isolation + fast-path vérifié
+sur les deux providers réels (settings factices, zéro appel réseau déclenché).
+
+### Étape 3 — Câblage worker
+`app/workers/tasks.py` : en fin de `_analyze_book` (après la boucle sur tous les chapitres, le LLM
+encore « chaud »), si ≥2 personnages détectés sur tout le livre → `provider.suggest_merges(...)` →
+persistance des `CharacterMergeSuggestion`. **Décision actée** : calcul une seule fois pour tout le
+livre (pas à la volée à l'ouverture de la modale), et **non bloquant** — un échec de l'appel LLM est
+loggé et le livre passe quand même à `ANALYZED` (une suggestion de fusion est un confort, pas une
+condition de réussite de l'analyse). §10-12 : happy path (suggestion persistée avec les bons ids),
+échec LLM non bloquant (0 suggestion, `ANALYZED` quand même), `<2` personnages → jamais appelé.
+
+### Étape 4 — API
+`app/schemas/book.py` : `MergeSuggestionResponse` (ids + reason + status — **pas de noms**, le
+frontend les résout depuis `/characters` qu'il a déjà en mémoire, évite une duplication de données).
+`app/api/routes/books.py` : `GET /books/{id}/merge-suggestions` (ne renvoie que les `PENDING` — pas
+d'usage pour l'historique résolu actuellement). `app/api/routes/merge_suggestions.py` (nouveau
+router, monté sur `/merge-suggestions`) : `POST /{id}/accept` (réassigne les segments du personnage
+fusionné vers le survivant, supprime le personnage fusionné, marque `ACCEPTED`) et `POST /{id}/reject`
+(marque `REJECTED`, ne touche à rien d'autre). 404 id inconnu, 409 si déjà résolu.
+
+**Bug rencontré et corrigé (pas dans le plan initial).** Sans `session.flush()` entre la
+réassignation des segments et la suppression du personnage fusionné, SQLAlchemy rechargeait la
+collection `merged_char.segments` depuis la DB (encore non flushée) pendant le traitement de la
+suppression et écrasait `character_id` avec `NULL` (comportement par défaut de désassociation avant
+suppression, sans cascade `delete` sur la relation `Character.segments`). Confirmé en échec sur le
+test §14 avant le fix, vert après.
+
+**Décision actée pendant l'implémentation.** Accepter une suggestion rejette automatiquement les
+autres suggestions `PENDING` qui référencent le personnage supprimé (cas d'un groupe de 3+
+doublons) — évite qu'une suggestion pointe vers un `Character` qui n'existe plus. Testé en §17.
+
+§13-17 : 404/filtre PENDING-only sur le GET, accept happy path (segments réassignés + personnage
+supprimé), 404/409 sur accept, reject (ne touche à rien), rejet automatique des suggestions caduques
+d'un groupe.
+
+### Étape 5 — Frontend
+`frontend/src/lib/api.ts` : `MergeSuggestion` (type), `listMergeSuggestions`,
+`acceptMergeSuggestion`, `rejectMergeSuggestion`. `frontend/src/components/CastingModal.tsx` :
+nouvelle section « Fusions de personnages suggérées » affichée **avant** la liste de
+personnages/voix (ordre actée dans la roadmap — pas de dépendance technique réelle, `assign_voices`
+ayant déjà tourné avant l'ouverture de la modale ; chaque personnage a déjà sa propre voix, fusionner
+réassigne juste les segments et supprime le personnage fusionné avec sa voix). Bouton « Tout
+accepter » (séquentiel — un 409 sur une suggestion déjà auto-rejetée par effet de bord d'un accept
+précédent est attendu et ignoré silencieusement, pas une vraie erreur) + boutons « Accepter »/« Rejeter »
+par suggestion. Toute action de fusion recharge personnages + suggestions (`mergeReloadNonce`).
+
+**Vérification réelle.** uvicorn + Huey + Ollama réels, upload `tests/fixtures/test.epub` →
+`ANALYZED` (1 personnage réel détecté, fixture trop petite pour que le LLM produise un doublon
+organique) → **2 personnages + 1 suggestion insérés manuellement en base** pour exercer l'UI
+déterministiquement → modale ouverte : section fusion affichée avant la liste de voix, clic
+« Accepter » → suggestion résolue côté backend, personnage fusionné disparu de la liste de voix,
+zéro erreur console. Rejoué avec 2 suggestions simultanées + clic « Tout accepter » → les deux
+résolues séquentiellement, les deux personnages fusionnés supprimés. Livre de test supprimé après
+vérification.
+
+**Piège outillage (déjà noté plus haut dans ce fichier, reconfirmé) :** `preview_click` par
+sélecteur ne déclenche pas toujours le handler React — `element.click()` via `preview_eval`
+fonctionne de manière fiable.
+
+**Hors scope (explicite) :** pas d'UI pour consulter l'historique des suggestions résolues
+(`ACCEPTED`/`REJECTED`) — la modale n'affiche que les `PENDING`, cohérent avec le filtre côté API.
+
+---
+
 ## Piste candidate (non tranchée) — TTS expressive Qwen3-TTS local
 
 > Spike fait (2026-06-20). Voir mémoire `tts-emotion-qwen3-direction`. Décision encore ouverte — en

@@ -7,10 +7,15 @@ from app.config import Settings
 from app.core.exceptions import LLMParsingError
 from app.services.llm.base import (
     BaseLLMProvider,
+    CharacterData,
     LLMChapterResult,
+    MERGE_SYSTEM_PROMPT,
+    MergeSuggestion,
     SYSTEM_PROMPT,
+    _build_merge_prompt,
     _build_user_prompt,
     _parse_llm_json,
+    _parse_merge_json,
     _pre_segment,
 )
 
@@ -38,6 +43,28 @@ class GeminiProvider(BaseLLMProvider):
             )
             raw = response.text
             return _parse_llm_json(raw, spans)
+        except LLMParsingError:
+            raise
+        except Exception as exc:
+            raise LLMParsingError(raw, exc) from exc
+
+    async def suggest_merges(
+        self, characters: list[CharacterData]
+    ) -> list[MergeSuggestion]:
+        if len(characters) < 2:
+            return []
+        raw = ""
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=_build_merge_prompt(characters),
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=MERGE_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                ),
+            )
+            raw = response.text
+            return _parse_merge_json(raw, characters)
         except LLMParsingError:
             raise
         except Exception as exc:
