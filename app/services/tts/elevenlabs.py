@@ -15,7 +15,8 @@ class ElevenLabsProvider(BaseTTSProvider):
     def __init__(self, settings: Settings) -> None:
         self._api_key = settings.elevenlabs_api_key
 
-    async def synthesise(self, text: str, voice_id: str) -> bytes:
+    async def synthesise(self, text: str, voice_id: str, emotion: str | None = None) -> bytes:
+        # emotion accepted for interface parity but ignored (no ElevenLabs lever wired).
         url = _API_URL.format(voice_id=voice_id)
         headers = {"xi-api-key": self._api_key}
         params = {"output_format": f"pcm_{_PCM_SAMPLE_RATE}"}

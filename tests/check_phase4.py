@@ -139,6 +139,19 @@ assert "piper:voice_01" in str(err)
 ok(f"TTSError: {err}")
 
 
+# ── 6b. Contrat B2 : synthesise accepte emotion: str | None = None ────────────
+section("synthesise(text, voice_id, emotion=None) -- contrat sur base + 3 providers")
+import inspect  # noqa: E402
+from app.services.tts.edgetts import EdgeTTSProvider  # noqa: E402
+
+for _cls in (BaseTTSProvider, PiperProvider, ElevenLabsProvider, EdgeTTSProvider):
+    _sig = inspect.signature(_cls.synthesise)
+    assert "emotion" in _sig.parameters, f"{_cls.__name__}.synthesise sans param 'emotion'"
+    assert _sig.parameters["emotion"].default is None, (
+        f"{_cls.__name__}.synthesise : emotion défaut != None"
+    )
+ok("base + Piper + ElevenLabs + EdgeTTS exposent emotion: str|None = None")
+
 
 # ── 7. Import voice_assignment ────────────────────────────────────────────────
 section("voice_assignment module imports cleanly")
@@ -360,7 +373,7 @@ _s21_engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thre
 SQLModel.metadata.create_all(_s21_engine)
 
 
-async def _s21_fake_tts(text: str, voice_id: str) -> bytes:
+async def _s21_fake_tts(text: str, voice_id: str, emotion: str | None = None) -> bytes:
     return _make_wav_bytes(50)
 
 

@@ -687,8 +687,34 @@ suites vertes, zéro régression. Fichiers (6) : `app/services/llm/base.py`, `ap
 **Hors scope (explicite) :** pas de transmission aux providers TTS (B2), pas de `QwenTTSProvider`
 (B3), pas d'exposition API, pas d'émotion sur la narration.
 
-**Prochaine étape : B2** — contrat TTS `synthesise(text, voice_id, emotion=None)` sur tous les
-providers existants (no-op rétrocompat). GO explicite requis avant d'écrire quoi que ce soit.
+### Étape B2 ✅ (2026-06-22) — Contrat TTS `synthesise(..., emotion=None)` (câblage)
+
+**Pourquoi.** Faire transiter `Segment.emotion` (livré en B1) jusqu'à la frontière des providers
+TTS, **sans changer aucun comportement audio**. Prépare B3 (`QwenTTSProvider`, seul futur
+consommateur de l'émotion). Pur câblage, testable sans audio.
+
+**Contrat (revu avant implémentation).** `BaseTTSProvider.synthesise(self, text, voice_id,
+emotion: str | None = None) -> bytes` — paramètre optionnel en dernière position, défaut `None`,
+100% rétrocompatible. Les call-sites le passent en mot-clé (`emotion=seg.emotion`).
+
+**Livré.**
+- Les 3 providers (`piper.py`, `elevenlabs.py`, `edgetts.py`) + l'abstraite (`base.py`) acceptent
+  `emotion` et l'**ignorent** (no-op — aucun n'a de levier émotion).
+- **2 call-sites câblés (pas 1 comme le sketch initial le disait)** : `_synthesise_book`
+  (`app/workers/tasks.py:135`, livre entier) ET `synthesise_chapter`
+  (`app/services/audio/chapter.py:44`, chapitre seul) transmettent `seg.emotion`.
+- `ARCHITECTURE.md §2.2` — contrat mis à jour + note "no-op, seul Qwen3-TTS le consommera".
+
+**Test-first.** `check_phase4.py` §6b (signature `emotion=None` sur base + 3 providers) + fake
+`_s21_fake_tts` mise à niveau (piège : seul mock à signature fixe du repo) ; `check_phase8.py` §12
+(no-op de bout en bout sur EdgeTTS mocké) ; `check_phase6.py` §3 (forwarding `emotion` vérifié via
+`call_args.kwargs` — rouge avant câblage, vert après). 13/13 suites vertes, zéro régression.
+Fichiers (10) : `app/services/tts/base.py`, `piper.py`, `elevenlabs.py`, `edgetts.py`,
+`app/workers/tasks.py`, `app/services/audio/chapter.py`, `ARCHITECTURE.md`,
+`tests/check_phase4.py`, `tests/check_phase6.py`, `tests/check_phase8.py`.
+
+**Prochaine étape : B3** — `QwenTTSProvider` (4e provider, dépendances lourdes torch/CUDA dans
+`requirements-qwen.txt`, `emotion` → param `instruct`). Nécessite PC + écoute. GO explicite requis.
 
 ---
 

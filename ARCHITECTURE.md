@@ -58,7 +58,7 @@ Same principle for speech synthesis.
 
 ```
 app/services/tts/
-├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id) -> bytes
+├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id, emotion=None) -> bytes
 ├── piper.py          # PiperProvider    — local, offline; subprocess piper.exe; voice_id → PIPER_VOICES_DIR/<id>.onnx
 ├── elevenlabs.py     # ElevenLabsProvider — cloud, high quality; voice_id = ElevenLabs voice UUID
 └── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 22050 Hz
@@ -68,6 +68,10 @@ app/services/tts/
 > Toute distribution de ScriptVox incluant Piper doit respecter cette licence.
 
 Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts`
+
+> **`emotion` (Phase 14 §B2)** is forwarded from `Segment.emotion` to `synthesise()`; the three
+> existing providers accept it but ignore it (no-op — none has an emotion lever). Only a future
+> Qwen3-TTS provider (§B3) will consume it (via its `instruct` parameter).
 
 > `edgetts` is the default (`TTS_PROVIDER=edgetts` in `.env.example`). It requires internet
 > access at synthesis time and no API key. Optional: `EDGETTS_LOCALE` (default `en-US`).

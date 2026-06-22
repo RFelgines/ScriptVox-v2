@@ -132,7 +132,7 @@ async def _synthesise_book(
             if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
             else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
         )
-        wav_chunks.append(await provider.synthesise(seg.text, voice_id))
+        wav_chunks.append(await provider.synthesise(seg.text, voice_id, emotion=seg.emotion))
 
         with Session(engine) as session:
             book = session.get(Book, book_id)

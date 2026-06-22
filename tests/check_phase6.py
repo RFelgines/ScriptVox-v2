@@ -107,7 +107,8 @@ def _seed_done_book(engine) -> tuple[int, int]:
         s.add(Segment(chapter_id=chapter_id, position=1, text="Once.",
                       segment_type=SegmentType.NARRATION))
         s.add(Segment(chapter_id=chapter_id, position=2, text="Hello!",
-                      segment_type=SegmentType.DIALOGUE, character_id=char.id))
+                      segment_type=SegmentType.DIALOGUE, character_id=char.id,
+                      emotion="furious"))
         s.commit()
     return book_id, chapter_id
 
@@ -155,6 +156,12 @@ ok(f"2 segments -> 100-frame WAV bytes ({len(_wav)} bytes)")
 _called_voices = {call.args[1] for call in _mock_tts.synthesise.call_args_list}
 assert _called_voices == {"narrator", "female_0"}, f"Unexpected voices: {_called_voices}"
 ok(f"Voice routing correct: {_called_voices}")
+
+# B2 : l'émotion du segment est transmise à synthesise (kwarg 'emotion')
+# NARRATION -> emotion=None ; DIALOGUE (seed) -> emotion="furious"
+_emotions = {call.kwargs.get("emotion") for call in _mock_tts.synthesise.call_args_list}
+assert _emotions == {None, "furious"}, f"émotion non transmise: {_emotions}"
+ok(f"emotion forwarded to synthesise: {_emotions}")
 
 
 # ── 4. synthesise_chapter on empty chapter raises ValueError ─────────────────

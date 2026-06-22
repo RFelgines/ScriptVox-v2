@@ -41,6 +41,6 @@ async def synthesise_chapter(
             if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
             else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
         )
-        wav_chunks.append(await tts.synthesise(seg.text, voice_id))
+        wav_chunks.append(await tts.synthesise(seg.text, voice_id, emotion=seg.emotion))
 
     return assemble_wav_bytes(wav_chunks)

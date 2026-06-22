@@ -261,6 +261,24 @@ try:
 except Exception as e:
     check("WAV valide retourne", False, str(e))
 
+
+# ── Section 12 (B2) : emotion fournie -> no-op (EdgeTTS l'ignore), pas de crash ─
+
+section("synthesise(..., emotion=...) -> WAV valide, no-op (EdgeTTS ignore emotion)")
+
+async def _call_success_emotion():
+    mock_comm = MagicMock()
+    mock_comm.stream.return_value = _success_stream()
+    with patch.object(_edgetts_mod.edge_tts, "Communicate", return_value=mock_comm), \
+         patch.object(_edgetts_mod.miniaudio, "decode", return_value=_FakeDecoded()):
+        return await p_en.synthesise("hello", "narrator", emotion="furious")
+
+try:
+    _wav_emo = asyncio.run(_call_success_emotion())
+    check("emotion fournie -> WAV RIFF valide (no-op)", _wav_emo[:4] == b"RIFF")
+except Exception as e:
+    check("emotion fournie -> WAV RIFF valide (no-op)", False, str(e))
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")
