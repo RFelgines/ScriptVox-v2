@@ -53,6 +53,31 @@ export default function BookDetailPage({
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
 
+  // ?casting=auto (posé par la bibliothèque après upload) : lu une seule fois via
+  // un initialiseur paresseux de useState plutôt qu'un effet + setState (la règle
+  // react-hooks/set-state-in-effect interdit un setState synchrone au corps d'un
+  // effet — même convention que ailleurs dans ce fichier) ; lu manuellement via
+  // window.location plutôt que useSearchParams pour éviter le besoin d'un
+  // Suspense boundary (cf. doc Next : useSearchParams force le CSR jusqu'au
+  // Suspense parent le plus proche pendant le prerendering).
+  const [autoFlag] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("casting") === "auto",
+  );
+  const [autoOpened, setAutoOpened] = useState(false);
+
+  useEffect(() => {
+    if (!(autoFlag && book?.status === "ANALYZED" && !autoOpened)) return;
+    // setState différé en microtâche pour rester hors du corps synchrone de
+    // l'effet (même contournement que `refresh()` ailleurs dans ce projet).
+    Promise.resolve().then(() => {
+      setCastingOpen(true);
+      setAutoOpened(true);
+      window.history.replaceState(null, "", `/books/${bookId}`);
+    });
+  }, [autoFlag, book?.status, autoOpened, bookId]);
+
   function handleGenerateChapter(position: number) {
     setGeneratingPos(position);
     generateChapter(bookId, position)
@@ -144,6 +169,13 @@ export default function BookDetailPage({
               {book.status === "FAILED" && book.error_message && (
                 <p className="mt-2 text-sm text-red-400">{book.error_message}</p>
               )}
+              {autoFlag &&
+                !autoOpened &&
+                (book.status === "PENDING" || book.status === "PROCESSING") && (
+                  <p className="mt-2 text-sm text-gray-500">
+                    Analyse en cours — le casting s&apos;ouvrira automatiquement.
+                  </p>
+                )}
               {(book.status === "ANALYZED" ||
                 book.status === "GENERATING" ||
                 book.status === "DONE") && (

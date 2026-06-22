@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { listBooks, BookSummary } from "@/lib/api";
 import UploadDropzone from "@/components/UploadDropzone";
 import BookCard from "@/components/BookCard";
 
 export default function Home() {
+  const router = useRouter();
   const [books, setBooks] = useState<BookSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,6 +22,13 @@ export default function Home() {
       .finally(() => setLoading(false));
   }
 
+  // Après l'upload, on navigue directement sur le livre avec ?casting=auto :
+  // la modale de casting s'ouvrira d'elle-même dès que l'analyse atteint ANALYZED
+  // (cf. books/[id]/page.tsx), servant de confirmation "tout valider ou ajuster".
+  function handleUploaded(book: BookSummary) {
+    router.push(`/books/${book.id}?casting=auto`);
+  }
+
   useEffect(() => {
     refresh();
   }, []);
@@ -29,7 +38,7 @@ export default function Home() {
       <h1 className="text-3xl font-bold mb-2">ScriptVox</h1>
       <p className="text-gray-400 mb-8">EPUB → audiobook multi-voix</p>
 
-      <UploadDropzone onUploaded={refresh} />
+      <UploadDropzone onUploaded={handleUploaded} />
 
       {loading && <p className="text-gray-500">Connexion à l&apos;API…</p>}
 
