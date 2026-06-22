@@ -1004,6 +1004,100 @@ fonctionne de manière fiable.
 
 ---
 
+## Frontend — Fondations UI ✅ (2026-06-22)
+
+**Pourquoi.** Roadmap [[feature-roadmap-decisions]] point 1 : dette concrète identifiée
+(`STATUS_COLOR` dupliqué, pattern bouton réécrit ~12 fois avec incohérences, panneau d'erreur
+dupliqué 3×) avant que catalogue de voix / Qwen ne remodèlent les écrans les plus exposés
+(modale Casting, vue chapitre). Cadré comme **refactor d'extraction sans changement visuel**
+(zéro nouvelle dépendance, zéro contrat backend) — plan détaillé approuvé en amont,
+voir mémoire `frontend-foundations-plan`.
+
+**Livré (Étapes 0-5, 1 GO chacune) :**
+- **Étape 0** — Baseline : 3 screenshots de référence (accueil, détail livre `ANALYZED`, modale
+  Casting avec suggestion de fusion insérée manuellement en base), lint+build verts.
+- **Étape 1** — `frontend/src/lib/status.ts` (`STATUS_COLOR` + `statusColor()`), dédupliqué de
+  `BookCard.tsx` / `books/[id]/page.tsx`.
+- **Étape 2** — `frontend/src/components/ui/StatusBadge.tsx`. Rend toujours un `<p>` (pas un
+  `<span>` comme l'imaginait le plan) : le site header de page détail appliquait `mt-2`, qui aurait
+  été ignoré en layout normal sur un élément inline — sans incidence dans les 2 autres sites
+  (parents `flex`, le tag racine n'y change rien pour un flex item). Préflight Tailwind confirmé
+  actif (`p { margin: 0 }`), donc aucun changement visuel.
+- **Étape 3** — `frontend/src/components/ui/Button.tsx` (variant `primary`/`secondary`/`warning`,
+  size `sm`/`md`/`lg`, `className` override). Migration des 5 boutons de `books/[id]/page.tsx`.
+- **Étape 4** — Migration des 4 boutons de `CastingModal.tsx` vers `Button`.
+- **Étape 5** — `frontend/src/components/ui/Alert.tsx` (`title?`, `children`, `className?`).
+  Migration des 3 panneaux d'erreur (`page.tsx`, `books/[id]/page.tsx`, `CastingModal.tsx`).
+
+**Bug réel trouvé et corrigé pendant l'implémentation (pas un simple écart cosmétique).**
+Tailwind v4 ordonne les classes générées selon son échelle interne, **pas** selon l'ordre du
+`className` HTML : un override `disabled:opacity-40` (ou `p-3`) concaténé en dernier dans le
+`className` ne gagnait PAS sur le `disabled:opacity-50` (ou `p-4`) de base du composant — mesuré
+via `preview_inspect`/`getComputedStyle` (`opacity: 0.5` au lieu de `0.4` attendu). **Fix** :
+suffixe important `!` de Tailwind v4 (`disabled:opacity-40!`, `p-3!`) — revérifié après coup.
+**Implication pour tout futur composant `ui/*` de ce projet** : un override de `className` qui
+partage une propriété CSS avec une classe de base du composant doit utiliser le suffixe `!`,
+sinon il est silencieusement ignoré. Ajouté aux pièges durables (mémoire `project-scriptvox`).
+
+**Étape 6 (extraction `Modal.tsx`) explicitement abandonnée.** Décision (2026-06-22, discutée
+avec l'utilisateur) : un seul modal existe dans toute l'app (`CastingModal`) — extraire une
+coquille « réutilisable » sans second appelant pour valider la forme de l'API est une abstraction
+spéculative (contraire à CLAUDE.md « ne pas designer pour des besoins hypothétiques »). Les futurs
+consommateurs (pré-écoute point 6, édition de segment point 7) sont non démarrés et conditionnés à
+une session audio. À reprendre quand un 2ᵉ modal réel sera construit — même effort plus tard, avec
+un vrai 2ᵉ cas d'usage pour calibrer l'API.
+
+**Incohérences détectées et listées (non corrigées, conformément au plan) :**
+- `font-medium` → `font-semibold` sur "Casting" et "Générer" (page détail) — le composant `Button`
+  n'a qu'un seul poids de police, le plan acceptait cet écart par avance.
+- Boutons `variant="primary"` : texte désormais `text-white` (`rgb(255,255,255)`) explicite contre
+  l'ancien héritage `text-gray-100` (`rgb(243,244,246)`) du `<main>` parent. Écart de 12/255 par
+  canal, imperceptible sur fond vert — vérifié via `preview_inspect`, pas seulement à l'œil.
+
+**Vérification.** `npm run lint` + `npm run build` verts à chaque étape. Les 3 écrans baseline
+revérifiés pixel-identiques après chaque étape (upload réel `tests/fixtures/test.epub`, suggestion
+de fusion insérée manuellement). Les 3 panneaux d'erreur testés via leurs vrais chemins de
+déclenchement : backend arrêté (accueil), id de livre inexistant (page détail), `window.fetch`
+patché temporairement via `preview_eval` puis restauré (CastingModal). Console sans erreur sur
+tous les scénarios.
+
+**Piège outillage reconfirmé (déjà noté en Phase 16, pas un bug applicatif)** : `preview_screenshot`
+se bloque en timeout sur un serveur frontend déjà ouvert depuis un certain temps — `preview_stop` +
+`preview_start` du serveur frontend résout systématiquement le problème.
+
+Fichiers (9) : `frontend/src/lib/status.ts`, `frontend/src/components/ui/StatusBadge.tsx`,
+`frontend/src/components/ui/Button.tsx`, `frontend/src/components/ui/Alert.tsx`,
+`frontend/src/components/BookCard.tsx`, `frontend/src/app/page.tsx`,
+`frontend/src/app/books/[id]/page.tsx`, `frontend/src/components/CastingModal.tsx`.
+
+---
+
+## Échantillons d'écoute B3 générés (2026-06-22 soir) — verdict utilisateur en attente
+
+**Pourquoi.** B3 (`QwenTTSProvider`, voir Phase 14 ci-dessus) restait codé mais non clos : aucune
+écoute réelle n'avait validé la qualité FR, l'effet de l'`instruct`, ni le mapping `_VOICE_MAP`
+(preset Qwen → genre, deviné). L'utilisateur prévoyait une vérification audio le soir même mais
+n'avait pas encore accès à son PC au moment de la demande.
+
+**Livré (préparation, pas une clôture).** `tests/spike_qwen_b3_listening.py` (nouveau, hors suite
+de régression) appelle le **vrai** `QwenTTSProvider.synthesise()` de production (pas le SDK Qwen
+brut comme le spike du 2026-06-20) — valide donc aussi le chemin d'intégration réel
+(`resolve_voice`/`_VOICE_MAP`, resampling 24000→22050 Hz). `ollama stop qwen3:8b` appelé en
+best-effort avant chargement (VRAM libre confirmée via `nvidia-smi` avant lancement : 9,4/10 Go).
+17 WAV générés avec succès (exit 0) dans `Ebook/qwen_b3_listening/` (gitignoré) — 9 `voice_<id>.wav`
+(même phrase neutre sur les 9 voice_id, pour juger `_VOICE_MAP`) + 8 `emotion_NN_<label>_<sans|avec>
+_instruct.wav` (4 émotions × `female_1`, pour juger l'effet de l'`instruct`). Tous vérifiés
+mono/16-bit/22050 Hz, 2,5-4,6 s. Modèle chargé en 89 s puis 8-13 s/réplique (cohérent avec le spike
+précédent). **Envoyés directement à l'utilisateur via `SendUserFile`** pour écoute le soir même,
+sans dépendre d'un nouvel accès à la machine.
+
+**Pas encore fait** : le verdict d'écoute lui-même (tâche utilisateur, pas automatisable). Checklist
+détaillée par fichier + branches d'action selon le verdict (mapping à corriger / instruct
+non-concluant / qualité FR décevante) → mémoire `tts-emotion-qwen3-direction`. Tant que ce verdict
+n'est pas rendu, B3 reste listé NON CLOS et le chantier clonage (point 8 roadmap) reste bloqué.
+
+---
+
 ## Piste candidate (non tranchée) — TTS expressive Qwen3-TTS local
 
 > Spike fait (2026-06-20). Voir mémoire `tts-emotion-qwen3-direction`. Décision encore ouverte — en
