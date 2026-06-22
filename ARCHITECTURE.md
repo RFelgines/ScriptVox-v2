@@ -112,10 +112,25 @@ Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts | qwen
 
 **Ollama timeouts (via httpx `Timeout` object):**
 
-| Variable                  | Default  | Purpose                                  |
-|---------------------------|----------|------------------------------------------|
-| `OLLAMA_CONNECT_TIMEOUT`  | 60 s     | TCP handshake + model cold-start         |
-| `OLLAMA_READ_TIMEOUT`     | 600 s    | Wait for the complete LLM response       |
+| Variable                        | Default  | Purpose                                          |
+|----------------------------------|----------|---------------------------------------------------|
+| `OLLAMA_CONNECT_TIMEOUT`        | 60 s     | TCP handshake + model cold-start                  |
+| `OLLAMA_READ_TIMEOUT`           | 600 s    | Floor for the per-request read timeout            |
+| `OLLAMA_TIMEOUT_PER_1K_TOKENS`  | 200 s    | Extra read-timeout budget per 1000 estimated prompt tokens |
+
+**Dynamic read timeout (2026-06-22/23, found on a real HP run — a dense chapter exceeded a
+fixed `OLLAMA_READ_TIMEOUT` twice, once at 600 s and again at 1200 s).** A single fixed timeout
+either cuts off a legitimately slow request (dense chapter, and/or a local model partially
+offloaded to CPU when VRAM is tight — `ollama ps` showing e.g. `31% CPU` is a sign of this,
+*not* a code bug) or wastes time waiting on small chapters. `OllamaProvider` computes the read
+timeout per request as `floor + (estimated_prompt_tokens / 1000) * per_1k_tokens`
+(`_compute_read_timeout` in `app/services/llm/base.py`, reuses `_estimate_tokens`), mutating the
+underlying `httpx.AsyncClient.timeout` (`self._client._client`, read fresh by httpx on every
+request — verified) right before each `chat()` call in both `analyze` and `suggest_merges`. This
+does **not** fix CPU-fallback slowness itself (still governed by the `num_ctx` trade-off,
+§2.3) — it only ensures the timeout scales with the work requested instead of an arbitrary fixed
+ceiling. `GeminiProvider` is unaffected (cloud API, no local VRAM contention, no configurable
+timeout existed before this).
 
 **Response robustness:**
 

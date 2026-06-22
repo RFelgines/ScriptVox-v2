@@ -175,6 +175,45 @@ del os.environ["GEMINI_MODEL"]
 get_settings.cache_clear()
 
 
+# ── 3c. Dynamic read timeout -- floor + tokens scaling, applied to the httpx client ──
+section("OllamaProvider: timeout de lecture dynamique = floor + tokens_estimés/1000 * per_1k_tokens")
+from app.services.llm.base import (  # noqa: E402
+    _build_user_prompt as _b_build_user_prompt,
+    _compute_read_timeout,
+    _pre_segment as _b_pre_segment,
+)
+
+assert _compute_read_timeout("a" * 4000, floor=600.0, per_1k_tokens=200.0) == 800.0, (
+    "1000 tokens estimés (4000 chars) -> floor 600 + 1*200 = 800"
+)
+assert _compute_read_timeout("", floor=600.0, per_1k_tokens=200.0) == 600.0, (
+    "texte vide -> reste exactement au plancher"
+)
+assert 600.0 < _compute_read_timeout("short", floor=600.0, per_1k_tokens=200.0) < 601.0, (
+    "texte minuscule -> proche du plancher (extra quasi nul)"
+)
+ok("_compute_read_timeout: floor + tokens/1000 * per_1k_tokens")
+
+
+async def _ollama_capture_timeout(*_a, **_kw):
+    return _FakeOllamaResponse('{"characters": [], "attributions": []}')
+
+
+_dyn_chapter_text = "Elle marcha lentement vers la porte. " * 500  # assez gros pour dépasser le plancher
+provider._client.chat = _ollama_capture_timeout
+asyncio.run(provider.analyze(_dyn_chapter_text))
+_dyn_prompt = _b_build_user_prompt(_b_pre_segment(_dyn_chapter_text), None)
+_expected_timeout = _compute_read_timeout(
+    _dyn_prompt, provider._read_timeout_floor, provider._timeout_per_1k_tokens
+)
+assert _expected_timeout > provider._read_timeout_floor, "le texte doit dépasser le plancher pour ce test"
+assert provider._client._client.timeout.read == _expected_timeout, (
+    f"timeout.read={provider._client._client.timeout.read} attendu {_expected_timeout}"
+)
+ok(f"timeout dynamique appliqué au client httpx interne : {_expected_timeout:.1f}s "
+   f"(floor={provider._read_timeout_floor}s)")
+
+
 # ── 4. _chunk_text -- token budgeting ─────────────────────────────────────────
 section("_chunk_text splits correctly")
 

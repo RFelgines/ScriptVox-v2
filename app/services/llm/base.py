@@ -294,6 +294,13 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+def _compute_read_timeout(prompt: str, floor: float, per_1k_tokens: float) -> float:
+    """Read timeout for one LLM request: a fixed floor plus extra time scaled to the
+    estimated prompt size, so a dense chapter (or a slow/CPU-offloaded local model)
+    isn't cut off before it can finish. See ARCHITECTURE.md §2.5."""
+    return floor + (_estimate_tokens(prompt) / 1000) * per_1k_tokens
+
+
 def _split_by_sep(text: str, sep: str, max_tokens: int) -> list[str]:
     parts = [p for p in text.split(sep) if p.strip()]
     chunks: list[str] = []

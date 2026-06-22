@@ -45,6 +45,9 @@ class Settings:
             self.ollama_read_timeout: float = float(
                 os.environ.get("OLLAMA_READ_TIMEOUT", "600")
             )
+            self.ollama_timeout_per_1k_tokens: float = float(
+                os.environ.get("OLLAMA_TIMEOUT_PER_1K_TOKENS", "200")
+            )
 
         if self.tts_provider == "piper":
             self.piper_voices_dir: str = _require("PIPER_VOICES_DIR")
