@@ -4,7 +4,7 @@ import httpx
 import ollama as ollama_lib
 
 from app.config import Settings
-from app.core.exceptions import LLMParsingError
+from app.core.exceptions import LLMRequestError
 from app.services.llm.base import (
     BaseLLMProvider,
     CharacterData,
@@ -40,7 +40,6 @@ class OllamaProvider(BaseLLMProvider):
         self, text: str, known_characters: list[str] | None = None
     ) -> LLMChapterResult:
         spans = _pre_segment(text)
-        raw = ""
         try:
             response = await self._client.chat(
                 model=self._model,
@@ -51,19 +50,15 @@ class OllamaProvider(BaseLLMProvider):
                 format="json",
                 options={"num_ctx": self._num_ctx},
             )
-            raw = response.message.content
-            return _parse_llm_json(raw, spans)
-        except LLMParsingError:
-            raise
         except Exception as exc:
-            raise LLMParsingError(raw, exc) from exc
+            raise LLMRequestError(exc) from exc
+        return _parse_llm_json(response.message.content, spans)
 
     async def suggest_merges(
         self, characters: list[CharacterData]
     ) -> list[MergeSuggestion]:
         if len(characters) < 2:
             return []
-        raw = ""
         try:
             response = await self._client.chat(
                 model=self._model,
@@ -74,9 +69,6 @@ class OllamaProvider(BaseLLMProvider):
                 format="json",
                 options={"num_ctx": self._num_ctx},
             )
-            raw = response.message.content
-            return _parse_merge_json(raw, characters)
-        except LLMParsingError:
-            raise
         except Exception as exc:
-            raise LLMParsingError(raw, exc) from exc
+            raise LLMRequestError(exc) from exc
+        return _parse_merge_json(response.message.content, characters)

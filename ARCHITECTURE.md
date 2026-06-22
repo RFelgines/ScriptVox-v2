@@ -124,6 +124,17 @@ Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts | qwen
   (defined in `app/core/exceptions.py`).
 - Never silently swallow or ignore a malformed LLM response.
 
+**Two distinct failure modes, two distinct exceptions (2026-06-22, found on a real HP run —
+a chapter exceeded `OLLAMA_READ_TIMEOUT`).** `OllamaProvider`/`GeminiProvider` (`analyze` and
+`suggest_merges`) wrap *only* the network call in `try/except Exception -> raise LLMRequestError(exc)`
+(no response received, nothing to log). `_parse_llm_json`/`_parse_merge_json` (`app/services/llm/base.py`)
+independently raise `LLMParsingError` on a malformed/unparseable response. The two used to be
+conflated (a single broad `except Exception` around both the network call *and* the parsing,
+always raising `LLMParsingError` even on a timeout) — a `ReadTimeout` then surfaced as
+`"LLM response parsing failed: "` with an empty raw response, hiding the real cause. Both are
+plain `Exception` subclasses, so the worker's generic `except Exception as exc: error_message =
+str(exc)` (`app/workers/tasks.py`) needs no change — only `str(exc)` becomes accurate.
+
 ### 2.6 Job State Machine (CRITICAL)
 
 Every long-running task is tracked in the database from creation.

@@ -88,6 +88,93 @@ del os.environ["GEMINI_MODEL"]
 get_settings.cache_clear()
 
 
+# ── 3b. Network failure -> LLMRequestError, NOT LLMParsingError ──────────────
+section("Provider analyze()/suggest_merges(): échec réseau -> LLMRequestError ; JSON invalide -> toujours LLMParsingError")
+import asyncio  # noqa: E402
+from app.core.exceptions import LLMRequestError  # noqa: E402
+from app.core.enums import Gender as _Gender  # noqa: E402
+from app.services.llm.base import CharacterData as _CharacterData  # noqa: E402
+
+_two_chars = [
+    _CharacterData(name="Alice", description="d", gender=_Gender.FEMALE),
+    _CharacterData(name="Bob", description="d", gender=_Gender.MALE),
+]
+
+
+class _FakeOllamaResponse:
+    def __init__(self, content: str) -> None:
+        self.message = type("M", (), {"content": content})()
+
+
+async def _ollama_network_failure(*_a, **_kw):
+    raise ConnectionError("simulated network failure")
+
+
+async def _ollama_bad_json(*_a, **_kw):
+    return _FakeOllamaResponse("not json at all {{{")
+
+
+provider._client.chat = _ollama_network_failure
+try:
+    asyncio.run(provider.analyze("some chapter text"))
+    die("Expected LLMRequestError on network failure (Ollama analyze)")
+except LLMRequestError:
+    ok("OllamaProvider.analyze(): échec réseau -> LLMRequestError")
+
+try:
+    asyncio.run(provider.suggest_merges(_two_chars))
+    die("Expected LLMRequestError on network failure (Ollama suggest_merges)")
+except LLMRequestError:
+    ok("OllamaProvider.suggest_merges(): échec réseau -> LLMRequestError")
+
+provider._client.chat = _ollama_bad_json
+try:
+    asyncio.run(provider.analyze("some chapter text"))
+    die("Expected LLMParsingError on malformed JSON (Ollama analyze)")
+except LLMParsingError:
+    ok("OllamaProvider.analyze(): JSON invalide -> toujours LLMParsingError (régression)")
+
+
+class _FakeGeminiResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+async def _gemini_network_failure(*_a, **_kw):
+    raise ConnectionError("simulated network failure")
+
+
+async def _gemini_bad_json(*_a, **_kw):
+    return _FakeGeminiResponse("not json at all {{{")
+
+
+os.environ["LLM_PROVIDER"] = "gemini"
+os.environ["GEMINI_API_KEY"] = "fake-key-for-type-check"
+os.environ["GEMINI_MODEL"] = "gemini-2.0-flash"
+get_settings.cache_clear()
+_gemini_provider_2 = get_llm_provider(get_settings())
+assert isinstance(_gemini_provider_2, GeminiProvider)
+
+_gemini_provider_2._client.aio.models.generate_content = _gemini_network_failure
+try:
+    asyncio.run(_gemini_provider_2.analyze("some chapter text"))
+    die("Expected LLMRequestError on network failure (Gemini analyze)")
+except LLMRequestError:
+    ok("GeminiProvider.analyze(): échec réseau -> LLMRequestError")
+
+_gemini_provider_2._client.aio.models.generate_content = _gemini_bad_json
+try:
+    asyncio.run(_gemini_provider_2.analyze("some chapter text"))
+    die("Expected LLMParsingError on malformed JSON (Gemini analyze)")
+except LLMParsingError:
+    ok("GeminiProvider.analyze(): JSON invalide -> toujours LLMParsingError (régression)")
+
+os.environ["LLM_PROVIDER"] = "ollama"
+del os.environ["GEMINI_API_KEY"]
+del os.environ["GEMINI_MODEL"]
+get_settings.cache_clear()
+
+
 # ── 4. _chunk_text -- token budgeting ─────────────────────────────────────────
 section("_chunk_text splits correctly")
 

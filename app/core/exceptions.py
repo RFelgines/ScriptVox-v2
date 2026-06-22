@@ -5,6 +5,12 @@ class EpubParsingError(Exception):
         self.cause = cause
 
 
+class LLMRequestError(Exception):
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(f"LLM request failed: {cause}")
+        self.cause = cause
+
+
 class LLMParsingError(Exception):
     def __init__(self, raw_response: str, cause: Exception) -> None:
         import logging

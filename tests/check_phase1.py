@@ -34,6 +34,8 @@ _OLLAMA_VARS = {
     "OLLAMA_BASE_URL": "http://localhost:11434",
     "OLLAMA_MODEL": "llama3",
     "OLLAMA_CONTEXT_TOKENS": "8192",
+    "OLLAMA_CONNECT_TIMEOUT": "60",
+    "OLLAMA_READ_TIMEOUT": "600",
     "DATABASE_URL": "sqlite:///./scriptvox.db",
     "HUEY_DB_PATH": "./huey.db",
     "PIPER_VOICES_DIR": "./voices",

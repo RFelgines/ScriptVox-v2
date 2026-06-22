@@ -4,7 +4,7 @@ from google import genai
 from google.genai import types as genai_types
 
 from app.config import Settings
-from app.core.exceptions import LLMParsingError
+from app.core.exceptions import LLMRequestError
 from app.services.llm.base import (
     BaseLLMProvider,
     CharacterData,
@@ -31,7 +31,6 @@ class GeminiProvider(BaseLLMProvider):
         self, text: str, known_characters: list[str] | None = None
     ) -> LLMChapterResult:
         spans = _pre_segment(text)
-        raw = ""
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
@@ -41,19 +40,15 @@ class GeminiProvider(BaseLLMProvider):
                     response_mime_type="application/json",
                 ),
             )
-            raw = response.text
-            return _parse_llm_json(raw, spans)
-        except LLMParsingError:
-            raise
         except Exception as exc:
-            raise LLMParsingError(raw, exc) from exc
+            raise LLMRequestError(exc) from exc
+        return _parse_llm_json(response.text, spans)
 
     async def suggest_merges(
         self, characters: list[CharacterData]
     ) -> list[MergeSuggestion]:
         if len(characters) < 2:
             return []
-        raw = ""
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
@@ -63,9 +58,6 @@ class GeminiProvider(BaseLLMProvider):
                     response_mime_type="application/json",
                 ),
             )
-            raw = response.text
-            return _parse_merge_json(raw, characters)
-        except LLMParsingError:
-            raise
         except Exception as exc:
-            raise LLMParsingError(raw, exc) from exc
+            raise LLMRequestError(exc) from exc
+        return _parse_merge_json(response.text, characters)
