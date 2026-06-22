@@ -390,6 +390,12 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
         raise LLMParsingError(raw, exc) from exc
 
     try:
+        raw_characters = data.get("characters", [])
+        for c in raw_characters:
+            if not isinstance(c, dict):
+                _logger.warning(
+                    "_parse_llm_json: character entry is not an object (%r), skipped", c
+                )
         characters = [
             CharacterData(
                 name=c["name"],
@@ -400,24 +406,36 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
                 voice_quality=c.get("voice_quality"),
                 voice_tone=c.get("voice_tone"),
             )
-            for c in data.get("characters", [])
+            for c in raw_characters
+            if isinstance(c, dict)
         ]
         known_names = {c.name for c in characters}
         attr_map: dict[int, str] = {}
         emotion_map: dict[int, str] = {}
         for a in data.get("attributions", []):
+            if not isinstance(a, dict):
+                _logger.warning(
+                    "_parse_llm_json: attribution entry is not an object (%r), skipped", a
+                )
+                continue
+            index = a.get("index")
+            if index is None:
+                _logger.warning(
+                    "_parse_llm_json: attribution missing 'index' (%r), skipped", a
+                )
+                continue
             name = a.get("character_name")
             if name and name in known_names:
-                attr_map[a["index"]] = name
+                attr_map[index] = name
             else:
                 _logger.warning(
                     "_parse_llm_json: attribution index=%s character=%r not in characters list, "
                     "falling back to narrator",
-                    a.get("index"), name,
+                    index, name,
                 )
             emotion = a.get("emotion")
             if emotion:
-                emotion_map[a["index"]] = emotion
+                emotion_map[index] = emotion
 
         segments: list[SegmentData] = []
         pos = 0
@@ -436,7 +454,7 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
                 character_name=char_name,
                 emotion=emotion,
             ))
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
         raise LLMParsingError(raw, exc) from exc
 
     return LLMChapterResult(characters=characters, segments=segments)

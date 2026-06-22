@@ -297,6 +297,30 @@ except LLMParsingError as exc:
     assert exc.raw_response == "not json at all {{{"
     ok(f"LLMParsingError sur JSON invalide : {exc}")
 
+# Entrée d'attribution malformée (chaîne au lieu d'objet) -> ignorée, pas de crash
+# (trouvé sur un vrai run HP : un chapitre dense a perdu 26 min de calcul LLM sur ce cas)
+_malformed_attr_json = json.dumps({
+    "characters": [
+        {"name": "Alice", "description": "curious girl", "gender": "FEMALE"},
+    ],
+    "attributions": ["oops, just a string", {"index": 2, "character_name": "Alice"}],
+})
+_malformed_attr_result = _parse_llm_json(_malformed_attr_json, _test_spans)
+assert _malformed_attr_result.segments[1].character_name == "Alice", (
+    "l'entrée valide doit quand même être traitée malgré l'entrée malformée"
+)
+ok("attribution malformée (chaîne au lieu d'objet) -> ignorée, entrée valide suivante traitée")
+
+# Entrée de personnage malformée (chaîne au lieu d'objet) -> ignorée, pas de crash
+_malformed_char_json = json.dumps({
+    "characters": ["oops, just a string", {"name": "Bob", "gender": "MALE"}],
+    "attributions": [],
+})
+_malformed_char_result = _parse_llm_json(_malformed_char_json, _test_spans)
+assert len(_malformed_char_result.characters) == 1
+assert _malformed_char_result.characters[0].name == "Bob"
+ok("personnage malformé (chaîne au lieu d'objet) -> ignoré, personnage valide suivant traité")
+
 # Gender inconnu -> UNKNOWN, pas de crash
 coerced = _parse_llm_json(json.dumps({
     "characters": [{"name": "Alice", "gender": "INVALID_GENDER", "description": "test"}],
