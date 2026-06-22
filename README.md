@@ -32,11 +32,15 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size — **32768 recommended** (8192 truncates responses on real novel chapters) |
 | `GEMINI_API_KEY` | `LLM_PROVIDER=gemini` | Gemini API key |
 | `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
-| `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `elevenlabs` (cloud) |
+| `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `elevenlabs` (cloud) · `qwen` (local GPU, emotion) |
 | `EDGETTS_LOCALE` | `TTS_PROVIDER=edgetts` | BCP-47 locale for voice selection, e.g. `en-US` (default), `fr-FR` |
 | `PIPER_VOICES_DIR` | `TTS_PROVIDER=piper` | Path to the folder containing `.onnx` voice files |
 | `PIPER_BINARY_PATH` | `TTS_PROVIDER=piper` | Path to the `piper` executable (see Piper binary below) |
 | `ELEVENLABS_API_KEY` | `TTS_PROVIDER=elevenlabs` | ElevenLabs API key |
+| `QWEN_MODEL` | `TTS_PROVIDER=qwen` | `1.7b` (default) or `0.6b` — see Qwen3-TTS below |
+| `QWEN_LANGUAGE` | `TTS_PROVIDER=qwen` | Language passed to the model, e.g. `French` (default) |
+| `QWEN_DEVICE` | `TTS_PROVIDER=qwen` | torch device string, default `cuda:0` |
+| `QWEN_ATTN` | `TTS_PROVIDER=qwen` | `sdpa` (default, no FlashAttention 2) or `flash_attention_2` |
 | `DATABASE_URL` | always | SQLite path, e.g. `sqlite:///./scriptvox.db` |
 | `HUEY_DB_PATH` | always | Huey task queue DB path, e.g. `./huey.db` |
 
@@ -142,6 +146,36 @@ The voice assignment service uses a fixed catalogue of IDs — you must supply f
 
 ---
 
+## Qwen3-TTS (optional, expressive TTS — local GPU)
+
+`QwenTTSProvider` is a 4th TTS backend that consumes the **per-line emotion** extracted by
+the LLM analysis (`Segment.emotion`, e.g. *"furious and panicked"*) via Qwen3-TTS's `instruct`
+parameter — the other 3 providers accept this field but ignore it.
+
+**Status (2026-06-22): implemented, NOT yet ear-verified.** The code path is tested with mocks
+only — the real model has not been validated for French audio quality or the actual effect of
+`instruct` in this integration. Treat it as experimental until that listening pass happens.
+
+**Cost of opting in:** GPU + CUDA required, ~4-6 GB VRAM, ~4.5 GB model download on first use,
+and roughly **11× slower per line than EdgeTTS** (measured by `tests/spike_qwen_tts.py`).
+
+1. Install `torch` for your CUDA version, then the rest of the optional deps:
+   ```bash
+   pip install torch --index-url https://download.pytorch.org/whl/cu128
+   pip install -r requirements-qwen.txt
+   ```
+2. Set `TTS_PROVIDER=qwen` in `.env` (see the `QWEN_*` variables above).
+
+> Qwen3-TTS always returns 24 000 Hz audio; `QwenTTSProvider` resamples it to 22 050 Hz
+> (stdlib `audioop`) so it stays compatible with the other providers' WAV format.
+
+> The mapping from ScriptVox's logical voice catalogue (`narrator`, `male_0`…`neutral_1`) to
+> Qwen's 9 speaker presets (`Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ryan`, `Aiden`,
+> `Ono_Anna`, `Sohee`) is a best-effort guess — Qwen's own docs don't label presets by gender.
+> Verify by ear once you generate real audio; see `app/services/tts/qwen.py`.
+
+---
+
 ## Tests
 
 Each phase has its own test suite. Run them in order to verify the full stack:
@@ -159,6 +193,8 @@ Each phase has its own test suite. Run them in order to verify the full stack:
 .venv\Scripts\python tests\check_phase10.py  # Cover image extraction & endpoints
 .venv\Scripts\python tests\check_phase11.py  # MP3 output (wav_to_mp3, GET /audio/mp3)
 .venv\Scripts\python tests\check_phase12.py  # CORS (Settings.frontend_origins, middleware)
+.venv\Scripts\python tests\check_phase14.py  # Character persistence across chapters (known_characters)
+.venv\Scripts\python tests\check_phase15.py  # QwenTTSProvider (config, voice mapping, mocked synthesis)
 ```
 
 All suites mock external providers (LLM, TTS, network) and run fully offline.

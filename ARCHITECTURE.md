@@ -61,17 +61,27 @@ app/services/tts/
 ├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id, emotion=None) -> bytes
 ├── piper.py          # PiperProvider    — local, offline; subprocess piper.exe; voice_id → PIPER_VOICES_DIR/<id>.onnx
 ├── elevenlabs.py     # ElevenLabsProvider — cloud, high quality; voice_id = ElevenLabs voice UUID
-└── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 22050 Hz
+├── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 22050 Hz
+└── qwen.py           # QwenTTSProvider  — local GPU, expressive; emotion → `instruct` param; torch/qwen-tts lazy-imported
 ```
 
 > **Licence Piper:** `piper-tts` est distribué sous **GPL-3.0** (`OHF-Voice/piper1-gpl`).
 > Toute distribution de ScriptVox incluant Piper doit respecter cette licence.
 
-Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts`
+Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts | qwen`
 
-> **`emotion` (Phase 14 §B2)** is forwarded from `Segment.emotion` to `synthesise()`; the three
-> existing providers accept it but ignore it (no-op — none has an emotion lever). Only a future
-> Qwen3-TTS provider (§B3) will consume it (via its `instruct` parameter).
+> **`emotion` (Phase 14 §B2)** is forwarded from `Segment.emotion` to `synthesise()`. Piper,
+> ElevenLabs and EdgeTTS accept it but ignore it (no-op — none has an emotion lever).
+> **`QwenTTSProvider` (§B3, 2026-06-22) is the only consumer**: `emotion` is forwarded as the
+> `instruct` parameter to `generate_custom_voice`. `torch`/`qwen_tts` are heavy optional deps
+> (`requirements-qwen.txt`, not in `requirements.txt`), imported lazily inside the provider —
+> `app/services/tts/qwen.py` never binds them at module scope, so importing the module (or the
+> factory choosing a different provider) never requires them to be installed. Model loaded once
+> per provider instance (= once per Huey task), reused across `synthesise()` calls. Output is
+> always 24 000 Hz from the model, resampled to 22 050 Hz via stdlib `audioop.ratecv` to match
+> the other providers' WAV format. ⚠️ **B3 stays open**: shipped with mocks-only tests
+> (`tests/check_phase15.py`); the real-audio listening pass (French quality, `instruct` effect,
+> and the speaker-preset→gender mapping in `_VOICE_MAP`, a best-effort guess) is still pending.
 
 > `edgetts` is the default (`TTS_PROVIDER=edgetts` in `.env.example`). It requires internet
 > access at synthesis time and no API key. Optional: `EDGETTS_LOCALE` (default `en-US`).

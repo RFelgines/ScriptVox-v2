@@ -9,5 +9,8 @@ def get_tts_provider(settings: Settings) -> BaseTTSProvider:
     if settings.tts_provider == "elevenlabs":
         from app.services.tts.elevenlabs import ElevenLabsProvider
         return ElevenLabsProvider(settings)
+    if settings.tts_provider == "qwen":
+        from app.services.tts.qwen import QwenTTSProvider
+        return QwenTTSProvider(settings)
     from app.services.tts.piper import PiperProvider
     return PiperProvider(settings)

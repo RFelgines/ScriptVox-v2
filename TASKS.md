@@ -716,6 +716,67 @@ Fichiers (10) : `app/services/tts/base.py`, `piper.py`, `elevenlabs.py`, `edgett
 **Prochaine étape : B3** — `QwenTTSProvider` (4e provider, dépendances lourdes torch/CUDA dans
 `requirements-qwen.txt`, `emotion` → param `instruct`). Nécessite PC + écoute. GO explicite requis.
 
+### Étape B3 ✅ codée (2026-06-22) — `QwenTTSProvider` (4e provider) — ⚠️ NON CLOS (écoute différée)
+
+**Décision actée.** B3 s'écrit et se teste **exclusivement via mocks** — le vrai modèle Qwen3-TTS
+n'est jamais chargé en CI. La vérification audio réelle (qualité FR + effet `instruct` +
+justesse du mapping preset→genre) est **différée à une écoute manuelle par l'utilisateur** :
+B3 reste un TODO permanent tant que cette écoute n'a pas eu lieu.
+
+**Livré.**
+- `app/services/tts/qwen.py` (nouveau) : `QwenTTSProvider.synthesise(text, voice_id,
+  emotion=None)`. `_VOICE_MAP` (9 ids logiques → 9 presets Qwen `Vivian/Serena/Uncle_Fu/Dylan/
+  Eric/Ryan/Aiden/Ono_Anna/Sohee`, mapping **best-effort non vérifié** — Qwen ne documente pas
+  le genre des presets). `_import_qwen_deps()` isole `import torch` + `from qwen_tts import
+  Qwen3TTSModel` dans sa propre fonction — **rien n'est importé au niveau module**, donc
+  `import app.services.tts.qwen` ne nécessite jamais torch/qwen-tts installés (seul le 1er
+  appel à `synthesise()` avec `TTS_PROVIDER=qwen` les requiert réellement). `_ensure_model()`
+  charge le modèle une seule fois par instance (= une fois par tâche Huey), réutilisé ensuite.
+  `emotion` → kwarg `instruct` de `generate_custom_voice` **seulement si non vide** (sinon
+  absent, pas de `instruct=None`). Resampling 24000→22050 Hz via stdlib `audioop.ratecv`
+  (zéro nouvelle dépendance). `_float_to_pcm16` convertit les floats `[-1,1]` du modèle en
+  PCM16 sans numpy (stdlib `array` pur). Erreurs `ImportError` (deps absentes) et toute
+  exception du modèle → `TTSError` avec message actionnable (`pip install -r
+  requirements-qwen.txt`).
+- `app/services/tts/factory.py` : branche `qwen` → import paresseux de `QwenTTSProvider`
+  (cohérent avec les autres providers).
+- `app/config.py` : `"qwen"` ajouté à `_VALID_TTS` ; bloc `if self.tts_provider == "qwen":`
+  avec 4 variables à défaut (`QWEN_MODEL=1.7b`, `QWEN_LANGUAGE=French`, `QWEN_DEVICE=cuda:0`,
+  `QWEN_ATTN=sdpa`). **Déviation assumée vs §2.4 (fail-fast) :** pas de validation de la
+  présence réelle de torch/CUDA au démarrage — impossible sans importer torch, ce qui
+  annulerait l'intérêt de l'import paresseux/dépendance optionnelle. Le défaut applicatif
+  reste fail-fast (`TTSError` actionnable) au 1er appel `synthesise()` si les deps manquent.
+- `requirements-qwen.txt` (nouveau) + `.env.example` (4 nouvelles vars `QWEN_*`) + `README.md`
+  (section dédiée + tableau de config + ligne `check_phase15.py`) + `ARCHITECTURE.md §2.2`.
+
+**Test-first.** `tests/check_phase15.py` (nouveau, 13 sections, mocks uniquement) : config
+(défauts + override), **import du module sans torch/qwen_tts liés au niveau module** (vérifié
+via `"torch" not in vars(qwen_mod)`, pas via trafic `sys.modules` — piège rencontré, voir
+ci-dessous), factory, couverture + unicité de `_VOICE_MAP`, voice_id inconnu → `TTSError` avant
+tout chargement modèle, `_float_to_pcm16` (clamp inclus), `_resample_to_output` (identité +
+24000→22050), deps absentes → `TTSError` actionnable, happy path (modèle mocké) → WAV 22050 Hz
+mono 16-bit valide, `emotion` transmis en `instruct` ssi non vide, modèle chargé une seule fois
+sur 2 appels. **14/14 suites vertes** (13 existantes + nouvelle), zéro régression.
+
+**⚠️ Piège rencontré et documenté (pas un bug applicatif, un piège de test).** Première version
+du test utilisait `unittest.mock.patch.dict(sys.modules, {"torch": None, "qwen_tts": None})`
+pour simuler un import bloqué. `patch.dict` restaure **tout le dict** `sys.modules` à son état
+d'avant le `with` à la sortie — pas seulement les clés explicitement passées — ce qui purgeait
+aussi `app.services.tts.qwen` (et transitivement `app.core.exceptions`) du cache après le bloc.
+Conséquence : tout import ultérieur du module se faisait pour de vrai (rechargement complet,
+**chargement réel du modèle Qwen3-TTS** pendant le test, téléchargement HuggingFace inclus) et
+créait une **2e classe `TTSError` distincte** (le `except TTSError` du test ne matchait plus
+l'exception réellement levée). Fix : abandon de la manipulation `sys.modules`, remplacée par une
+assertion structurelle plus simple et plus sûre (`"torch" not in vars(qwen_mod)` après un import
+normal) — teste la même propriété (import paresseux) sans aucun risque d'incohérence de cache.
+
+**Pas de changement de schéma DB.** Pas de changement de contrat (signature `synthesise`
+déjà posée en B2).
+
+**Reste à faire avant de clore B3 (TODO permanent) :** écoute réelle de l'audio Qwen3-TTS en
+français (qualité + effet `instruct`) ; vérifier/corriger `_VOICE_MAP` à l'oreille (mapping
+preset→genre non confirmé par la doc Qwen) — tâche utilisateur, pas automatisable.
+
 ---
 
 ## Hors-Phase — Petits défauts relevés en clôture de Phase 13 (2026-06-21)

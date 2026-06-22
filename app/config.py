@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _VALID_LLM = frozenset({"gemini", "ollama"})
-_VALID_TTS = frozenset({"piper", "elevenlabs", "edgetts"})
+_VALID_TTS = frozenset({"piper", "elevenlabs", "edgetts", "qwen"})
 
 
 def _require(name: str) -> str:
@@ -65,6 +65,14 @@ class Settings:
 
         if self.tts_provider == "elevenlabs":
             self.elevenlabs_api_key: str = _require("ELEVENLABS_API_KEY")
+
+        if self.tts_provider == "qwen":
+            # torch/qwen-tts are optional heavy deps (requirements-qwen.txt), imported lazily
+            # by the provider -- cannot fail-fast on their absence here without importing them.
+            self.qwen_model: str = os.environ.get("QWEN_MODEL", "1.7b").strip() or "1.7b"
+            self.qwen_language: str = os.environ.get("QWEN_LANGUAGE", "French").strip() or "French"
+            self.qwen_device: str = os.environ.get("QWEN_DEVICE", "cuda:0").strip() or "cuda:0"
+            self.qwen_attn: str = os.environ.get("QWEN_ATTN", "sdpa").strip() or "sdpa"
 
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")

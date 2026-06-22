@@ -1,0 +1,15 @@
+# ─── ScriptVox — optional Qwen3-TTS provider (TTS_PROVIDER=qwen) ─────────────
+# NOT installed by `pip install -r requirements.txt`. These are heavy, GPU/CUDA
+# specific dependencies (~2-3 GB) that the default EdgeTTS/Piper/ElevenLabs
+# providers never need. Install this file ONLY if you want emotion-per-line
+# synthesis via Qwen3-TTS. See README.md "Qwen3-TTS (optional, expressive TTS)".
+#
+# torch must be installed separately first, with the CUDA index URL matching
+# your GPU driver (cu128 below targets CUDA 12.8):
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r requirements-qwen.txt
+#
+# qwen-tts ships open-weights models (Apache 2.0) downloaded from HuggingFace
+# on first use (~4.5 GB for the 1.7B CustomVoice variant).
+qwen-tts
