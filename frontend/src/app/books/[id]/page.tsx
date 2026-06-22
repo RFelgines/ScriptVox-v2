@@ -11,6 +11,7 @@ import {
   bookMp3Url,
   chapterAudioUrl,
   generateChapter,
+  generateAllChapters,
 } from "@/lib/api";
 import CastingModal from "@/components/CastingModal";
 import { usePlayer } from "@/components/player/PlayerProvider";
@@ -48,6 +49,7 @@ export default function BookDetailPage({
   const [loading, setLoading] = useState(true);
   const [castingOpen, setCastingOpen] = useState(false);
   const [generatingPos, setGeneratingPos] = useState<number | null>(null);
+  const [generatingAll, setGeneratingAll] = useState(false);
   const { play } = usePlayer();
   // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
   // ANALYZED, qui n'est pas un état « actif »).
@@ -84,6 +86,14 @@ export default function BookDetailPage({
       .then(() => setReloadNonce((n) => n + 1))
       .catch((e) => setError(String(e)))
       .finally(() => setGeneratingPos(null));
+  }
+
+  function handleGenerateAllChapters() {
+    setGeneratingAll(true);
+    generateAllChapters(bookId)
+      .then(() => setReloadNonce((n) => n + 1))
+      .catch((e) => setError(String(e)))
+      .finally(() => setGeneratingAll(false));
   }
 
   useEffect(() => {
@@ -198,9 +208,21 @@ export default function BookDetailPage({
           </header>
 
           <section className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold">
-              Chapitres ({chapters.length})
-            </h2>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                Chapitres ({chapters.length})
+              </h2>
+              {book.status === "ANALYZED" &&
+                chapters.some((c) => c.status !== "DONE") && (
+                  <button
+                    onClick={handleGenerateAllChapters}
+                    disabled={generatingAll}
+                    className="rounded bg-orange-700 px-3 py-1.5 text-sm font-semibold hover:bg-orange-600 disabled:opacity-50"
+                  >
+                    {generatingAll ? "…" : "Générer tout l'audio"}
+                  </button>
+                )}
+            </div>
             {chapters.length === 0 ? (
               <p className="text-gray-500">Aucun chapitre pour l&apos;instant.</p>
             ) : (

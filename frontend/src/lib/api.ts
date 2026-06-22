@@ -182,3 +182,20 @@ export async function generateChapter(
   }
   return res.json();
 }
+
+export async function generateAllChapters(bookId: number): Promise<ChapterSummary[]> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/generate`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Génération de tous les chapitres échouée : ${detail}`);
+  }
+  return res.json();
+}

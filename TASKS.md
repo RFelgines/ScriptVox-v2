@@ -831,6 +831,90 @@ Fichiers (2) : `app/api/routes/books.py`, `tests/check_phase2.py`.
 
 ---
 
+## Auto-convert ✅ (2026-06-22, commit `f2d90a1`) — casting automatique après analyse
+
+**Pourquoi.** Roadmap [[feature-roadmap-decisions]] point 2 : aujourd'hui le livre s'arrête à
+`ANALYZED` et l'utilisateur doit revenir manuellement sur la page livre puis cliquer « Casting ».
+Option retenue (sur 2 proposées) : **frontend pur**, pas de case « convertir automatiquement » ni
+de colonne DB — un bouton/flux qui ouvre directement la confirmation après upload.
+
+**Livré.** Frontend pur (2 fichiers, 0 backend, 0 nouvelle dépendance, 0 changement de contrat).
+- `frontend/src/app/page.tsx` : après `uploadBook`, navigation directe vers
+  `/books/{id}?casting=auto` (`useRouter().push`, `next/navigation`) au lieu d'un simple `refresh()`
+  de la bibliothèque.
+- `frontend/src/app/books/[id]/page.tsx` : `autoFlag` lu une seule fois via un **initialiseur
+  paresseux de `useState`** (`new URLSearchParams(window.location.search).get("casting") ===
+  "auto"`, gardé par `typeof window !== "undefined"` pour la passe SSR) — pas un effet, pour ne
+  pas déclencher la règle `react-hooks/set-state-in-effect`. Un effet dépendant de
+  `[autoFlag, book?.status, autoOpened, bookId]` ouvre `CastingModal` (inchangée) dès que
+  `book.status === "ANALYZED"`, une seule fois (garde `autoOpened`), puis nettoie l'URL
+  (`history.replaceState`). Le `setCastingOpen`/`setAutoOpened` sont différés dans
+  `Promise.resolve().then(...)` (même contournement que `refresh()` ailleurs dans ce fichier) pour
+  rester hors du corps synchrone de l'effet. Message « Analyse en cours — le casting s'ouvrira
+  automatiquement. » affiché pendant `PENDING`/`PROCESSING` si `autoFlag`.
+
+**Test-first.** Pas de harness de test frontend (README). Vérification : `npm run build` +
+`npm run lint` verts, puis **run réel complet** (uvicorn + worker Huey + Ollama qwen3:8b réel,
+`tests/fixtures/test.epub`) : upload → `ANALYZED` (~45 s) → modale ouverte automatiquement avec
+casting déjà rempli (Alice → female_1) → clic « Générer l'audio » → `DONE` → rechargement de la
+page sans le paramètre confirmé **sans** réouverture de la modale (comportement manuel intact).
+
+**Hors scope (explicite) :** pas de case « convertir automatiquement » (option 1, écartée), pas de
+changement du chemin manuel (bouton « Casting » inchangé), pas de gestion du cas `FAILED` (l'effet
+ne se déclenche que sur `ANALYZED`, l'erreur existante s'affiche normalement).
+
+---
+
+## Génération de tous les chapitres en un clic ✅ (2026-06-22)
+
+**Pourquoi.** Roadmap [[feature-roadmap-decisions]] point 4 (confirmé prioritaire par
+l'utilisateur) : aujourd'hui il faut cliquer « Générer » chapitre par chapitre, manuellement, un à
+la fois. Manquait un seul déclencheur pour lancer tous les chapitres d'un coup ; le polling
+existant capte ensuite les `GENERATING→DONE` un par un (Huey `-w 1` les traite séquentiellement de
+toute façon).
+
+**Contrat (revu avant implémentation).** Nouvelle route `POST /books/{book_id}/chapters/generate`
+→ 202 + `list[ChapterResponse]`. Gardes identiques à `POST /chapters/{position}/generate` : 404
+livre inconnu, 409 si `book.status != ANALYZED`. Dispatche `generate_chapter` (task Huey existante,
+inchangée) pour chaque chapitre dont `status != DONE` (re-génère les `FAILED`, saute les `DONE`).
+Zéro changement de schéma DB, zéro nouvelle dépendance — réutilise entièrement la mécanique
+existante (Phase 7 Étape 3b).
+
+**Livré.**
+- `app/api/routes/books.py` — `trigger_all_chapters_generate`, placée juste avant `list_chapters`.
+  Pas de conflit de routage avec `/{book_id}/chapters/{position}/generate` (nombre de segments de
+  chemin différent — FastAPI les distingue sans ambiguïté quel que soit l'ordre de déclaration).
+- `frontend/src/lib/api.ts` — `generateAllChapters(bookId)`.
+- `frontend/src/app/books/[id]/page.tsx` — bouton « Générer tout l'audio » dans l'en-tête de la
+  section Chapitres, visible si `book.status === "ANALYZED"` et qu'au moins un chapitre n'est pas
+  `DONE` ; désactivé pendant l'appel. Réutilise le `reloadNonce` existant pour relancer le polling
+  (même pattern que `handleGenerateChapter`).
+
+**Test-first.** `tests/check_phase7.py` sections 27-29 (nouvelles) : 404 livre inconnu · 409 si
+`status != ANALYZED` · happy path (3 chapitres dont 1 `DONE` et 1 `FAILED` → `generate_chapter`
+appelé uniquement pour les 2 non-`DONE`, le `DONE` est sauté). 14/14 suites vertes, zéro
+régression. `npm run build` + `npm run lint` verts.
+
+**Vérification réelle.** uvicorn + worker Huey + Ollama `qwen3:8b` + EdgeTTS réels, upload
+`tests/fixtures/test.epub` → `ANALYZED` (3 chapitres `PENDING`) → clic « Générer tout l'audio » →
+`POST /books/{id}/chapters/generate` → 3× `generate_chapter` dispatchés → les 3 chapitres passent à
+`DONE` (synthèse EdgeTTS réelle) → bouton disparaît (plus aucun chapitre non-`DONE`) → lecture audio
+chapitre 1 confirmée sans erreur console. Livre de test supprimé après vérification.
+
+**⚠️ Piège rencontré (outil de preview, pas un bug applicatif).** `preview_click` (clic par
+sélecteur CSS) ne déclenchait pas le handler React du bouton (aucune requête réseau, aucun effet) —
+cause non investiguée plus avant (possible mismatch coordonnées/scroll avec le rendu Turbopack).
+Contournement : `element.click()` via `preview_eval`, qui a fonctionné immédiatement et confirmé le
+flux de bout en bout. Sans incidence sur le code livré — symptôme propre à l'outillage de
+vérification, pas au frontend.
+
+**Hors scope (explicite) :** pas de % de progression intra-chapitre (par segment) — discuté dans
+[[feature-roadmap-decisions]] point 4 comme optionnel/plus de travail, non demandé ici ; pas de
+réassemblage à la demande du WAV/MP3 livre entier depuis les chapitres (point d'archi noté pour
+plus tard dans la même mémoire).
+
+---
+
 ## Piste candidate (non tranchée) — TTS expressive Qwen3-TTS local
 
 > Spike fait (2026-06-20). Voir mémoire `tts-emotion-qwen3-direction`. Décision encore ouverte — en

@@ -175,6 +175,28 @@ def trigger_chapter_generate(
     return ChapterResponse.model_validate(chapter)
 
 
+@router.post("/{book_id}/chapters/generate", response_model=list[ChapterResponse], status_code=202)
+def trigger_all_chapters_generate(
+    book_id: int,
+    session: Session = Depends(get_session),
+) -> list[ChapterResponse]:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if book.status != BookStatus.ANALYZED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Book {book_id} is not ready for chapter generation (status={book.status.value}). Expected ANALYZED.",
+        )
+    chapters = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
+    ).all()
+    for chapter in chapters:
+        if chapter.status != ChapterStatus.DONE:
+            generate_chapter(chapter.id)
+    return [ChapterResponse.model_validate(c) for c in chapters]
+
+
 @router.get("/{book_id}/chapters", response_model=list[ChapterResponse])
 def list_chapters(book_id: int, session: Session = Depends(get_session)) -> list[ChapterResponse]:
     book = session.get(Book, book_id)

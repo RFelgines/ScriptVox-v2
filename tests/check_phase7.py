@@ -900,4 +900,80 @@ with tempfile.TemporaryDirectory() as _ec_tmp:
     ok("status=DONE, error_message=None (stale message cleared)")
 
 
+# ── 27-29. POST /books/{id}/chapters/generate — dispatch ALL chapters at once ──
+
+_call_engine = _make_test_engine()
+
+
+def _call_session():
+    with Session(_call_engine) as _s:
+        yield _s
+
+
+app.dependency_overrides[get_session] = _call_session
+
+# Section 27: 404 if book not found
+section("POST /books/{id}/chapters/generate — 404 if book not found")
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r27 = _tc.post("/books/9999/chapters/generate")
+    assert _r27.status_code == 404, f"Expected 404, got {_r27.status_code}"
+ok("404 for non-existent book")
+
+# Section 28: 409 if book status != ANALYZED
+section("POST /books/{id}/chapters/generate — 409 if book status != ANALYZED")
+
+with Session(_call_engine) as _s:
+    _r28_book = Book(title="NotAnalyzed", source_path="/tmp/x.epub", status=BookStatus.PROCESSING)
+    _s.add(_r28_book)
+    _s.commit()
+    _s.refresh(_r28_book)
+    _r28_book_id = _r28_book.id
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r28 = _tc.post(f"/books/{_r28_book_id}/chapters/generate")
+    assert _r28.status_code == 409, f"Expected 409, got {_r28.status_code}"
+ok("409 for book status=PROCESSING")
+
+# Section 29: happy path — dispatch only non-DONE chapters, skip the DONE one
+section("POST /books/{id}/chapters/generate — dispatches only non-DONE chapters")
+
+with Session(_call_engine) as _s:
+    _r29_book = Book(title="AllChapters", source_path="/tmp/y.epub", status=BookStatus.ANALYZED)
+    _s.add(_r29_book)
+    _s.commit()
+    _s.refresh(_r29_book)
+    _r29_book_id = _r29_book.id
+
+    _r29_ch1 = Chapter(book_id=_r29_book_id, position=1, raw_text="a", status=ChapterStatus.DONE, audio_path="/data/1/ch1.wav")
+    _r29_ch2 = Chapter(book_id=_r29_book_id, position=2, raw_text="b", status=ChapterStatus.PENDING)
+    _r29_ch3 = Chapter(book_id=_r29_book_id, position=3, raw_text="c", status=ChapterStatus.FAILED, error_message="boom")
+    _s.add(_r29_ch1)
+    _s.add(_r29_ch2)
+    _s.add(_r29_ch3)
+    _s.commit()
+    _s.refresh(_r29_ch1)
+    _s.refresh(_r29_ch2)
+    _s.refresh(_r29_ch3)
+    _r29_ch2_id, _r29_ch3_id = _r29_ch2.id, _r29_ch3.id
+
+_r29_calls: list = []
+books_module.generate_chapter = lambda chapter_id: _r29_calls.append(chapter_id)
+
+with TestClient(app) as _tc:
+    _r29 = _tc.post(f"/books/{_r29_book_id}/chapters/generate")
+    assert _r29.status_code == 202, f"Expected 202, got {_r29.status_code} ({_r29.text})"
+    _r29_data = _r29.json()
+    assert len(_r29_data) == 3, f"Expected 3 chapters in response, got {len(_r29_data)}"
+
+books_module.generate_chapter = _generate_chapter_task  # restore
+
+assert sorted(_r29_calls) == sorted([_r29_ch2_id, _r29_ch3_id]), (
+    f"Expected generate_chapter called for PENDING+FAILED chapters {[_r29_ch2_id, _r29_ch3_id]}, got {_r29_calls}"
+)
+ok(f"202, generate_chapter dispatched for 2 non-DONE chapters, DONE chapter skipped (got {_r29_calls})")
+
+app.dependency_overrides.clear()
+
+
 print("\nPHASE 7 (split worker + route + generate trigger + étapes 3a/3b/3c) OK\n")
