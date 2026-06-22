@@ -143,6 +143,27 @@ assert result.segments[1].character_name == "Alice"
 assert result.segments[1].text == "Hello!", f"délimiteurs non retirés: {result.segments[1].text!r}"
 ok("JSON valide parsé, segments reconstruits, délimiteurs retirés")
 
+# Émotion par réplique (Phase 14 B1) : présente sur le dialogue, absente sur la narration
+emo_json = json.dumps({
+    "characters": [
+        {"name": "Alice", "description": "curious girl", "gender": "FEMALE", "voice_tone": "soft"},
+    ],
+    "attributions": [{"index": 2, "character_name": "Alice", "emotion": "furious and panicked"}],
+})
+emo_result = _parse_llm_json(emo_json, _test_spans)
+assert emo_result.segments[1].emotion == "furious and panicked", (
+    f"emotion non extraite: {emo_result.segments[1].emotion!r}"
+)
+assert emo_result.segments[0].emotion is None, (
+    f"narration ne doit jamais porter d'emotion: {emo_result.segments[0].emotion!r}"
+)
+ok("emotion extraite sur le dialogue, absente sur la narration")
+
+# Rétrocompat : JSON sans champ emotion -> None, pas de crash
+no_emo = _parse_llm_json(valid_json, _test_spans)
+assert no_emo.segments[1].emotion is None, f"attendu None, got {no_emo.segments[1].emotion!r}"
+ok("JSON sans 'emotion' (ancien format) -> emotion=None, pas de crash")
+
 try:
     _parse_llm_json("not json at all {{{", [])
     die("Expected LLMParsingError on invalid JSON")
@@ -194,6 +215,19 @@ assert merged.characters[1].name == "Bob"
 assert merged.segments[0].position == 1
 assert merged.segments[1].position == 2  # renumbered continuously
 ok("2 chars deduplicated, 2 segments renumbered")
+
+# Emotion (Phase 14 B1) doit survivre à la reconstruction inter-chunks (régression silencieuse
+# si _merge_chunk_results oublie de la propager -- un chapitre découpé en plusieurs chunks
+# par _chunk_text perdrait alors l'emotion sans erreur visible).
+r3 = LLMChapterResult(
+    characters=[],
+    segments=[SegmentData(1, "text3", SegmentType.DIALOGUE, "Bob", emotion="cheerful")],
+)
+merged2 = _merge_chunk_results([r1, r3])
+assert merged2.segments[1].emotion == "cheerful", (
+    f"emotion perdue par _merge_chunk_results: {merged2.segments[1].emotion!r}"
+)
+ok("emotion propagée à travers _merge_chunk_results (renumbering inter-chunks)")
 
 
 # ── 7. Full pipeline with mock LLM ────────────────────────────────────────────

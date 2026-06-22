@@ -76,6 +76,7 @@ async def _analyze_book(
                     text=sd.text,
                     segment_type=sd.segment_type,
                     character_id=char_id,
+                    emotion=sd.emotion,
                 ))
 
             book = session.get(Book, book_id)

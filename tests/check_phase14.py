@@ -168,6 +168,63 @@ check("1 seul Character créé malgré 2 chapitres (dedup par nom exact toujours
 _engine.dispose()
 
 
+# ── 6. Étape B1 -- Segment.emotion persisté depuis SegmentData.emotion ────────
+section("_analyze_book (réel) -- Segment.emotion persisté (dialogue) / None (narration)")
+
+_engine_b1 = create_engine(
+    "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+)
+SQLModel.metadata.create_all(_engine_b1)
+
+with Session(_engine_b1) as _session_b1:
+    _book_b1 = Book(title="Test B1", source_path="/tmp/t.epub")
+    _session_b1.add(_book_b1)
+    _session_b1.commit()
+    _book_b1_id = _book_b1.id
+
+
+class _EmotionProvider:
+    """Renvoie 1 narration (sans emotion) + 1 dialogue (avec emotion)."""
+
+    async def analyze(self, text: str, known_characters: list[str] | None = None) -> LLMChapterResult:
+        return LLMChapterResult(
+            characters=[CharacterData(name="Bob", description=None, gender=Gender.MALE)],
+            segments=[
+                SegmentData(
+                    position=1, text="La pluie tombait.",
+                    segment_type=SegmentType.NARRATION, character_name=None,
+                ),
+                SegmentData(
+                    position=2, text="Sors d'ici !",
+                    segment_type=SegmentType.DIALOGUE, character_name="Bob",
+                    emotion="furious",
+                ),
+            ],
+        )
+
+
+llm_factory.get_llm_provider = lambda settings: _EmotionProvider()
+try:
+    asyncio.run(_analyze_book(_book_b1_id, [(1, "Chapitre.")], _engine_b1))
+finally:
+    llm_factory.get_llm_provider = _original_get_provider
+
+from app.models import Segment  # noqa: E402
+
+with Session(_engine_b1) as _session_b1:
+    _segs = _session_b1.exec(
+        select(Segment).where(Segment.chapter_id == 1).order_by(Segment.position)
+    ).all()
+
+check("2 segments créés", len(_segs) == 2, f"got {len(_segs)}")
+check("narration -> emotion=None en base", _segs[0].emotion is None,
+      f"got {_segs[0].emotion!r}")
+check("dialogue -> emotion='furious' en base", _segs[1].emotion == "furious",
+      f"got {_segs[1].emotion!r}")
+
+_engine_b1.dispose()
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 for leftover in ("scriptvox_test_p14.db", "huey_test_p14.db"):
     if os.path.exists(leftover):

@@ -98,11 +98,14 @@ SYSTEM_PROMPT = (
     '      "tone": "...", "voice_quality": "...", "voice_tone": "..."\n'
     '    }\n'
     "  ],\n"
-    '  "attributions": [ {"index": 2, "character_name": "..."} ]\n'
+    '  "attributions": [ {"index": 2, "character_name": "...", "emotion": "..."} ]\n'
     "}\n\n"
     "Rules:\n"
     "- attributions: ONE entry per [DIALOGUE] span only, keyed by its <index>. Never include NARRATION spans.\n"
     "- character_name must exactly match a name in the characters array.\n"
+    "- emotion: short free-text description of HOW the dialogue line should be delivered, e.g. "
+    "\"furious and panicked\", \"soft and hesitant\", \"calm\"; use \"neutral\" if the line carries no "
+    "notable emotional charge. Omit only if genuinely undeterminable.\n"
     "- NEVER reproduce or repeat span text — output indices and names only.\n"
     "- gender: infer from pronouns/context; use UNKNOWN if ambiguous.\n"
     "- age_category: CHILD <13, YOUNG_ADULT 13-25, ADULT 26-60, ELDER 60+; use UNKNOWN if ambiguous.\n"
@@ -131,6 +134,7 @@ class SegmentData:
     text: str
     segment_type: SegmentType
     character_name: str | None
+    emotion: str | None = None
 
 
 @dataclass
@@ -334,6 +338,7 @@ def _merge_chunk_results(results: list[LLMChapterResult]) -> LLMChapterResult:
                 text=sd.text,
                 segment_type=sd.segment_type,
                 character_name=sd.character_name,
+                emotion=sd.emotion,
             ))
 
     return LLMChapterResult(characters=list(seen.values()), segments=segments)
@@ -380,6 +385,7 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
         ]
         known_names = {c.name for c in characters}
         attr_map: dict[int, str] = {}
+        emotion_map: dict[int, str] = {}
         for a in data.get("attributions", []):
             name = a.get("character_name")
             if name and name in known_names:
@@ -390,6 +396,9 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
                     "falling back to narrator",
                     a.get("index"), name,
                 )
+            emotion = a.get("emotion")
+            if emotion:
+                emotion_map[a["index"]] = emotion
 
         segments: list[SegmentData] = []
         pos = 0
@@ -400,11 +409,13 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
             pos += 1
             seg_type = SegmentType.DIALOGUE if span.is_dialogue else SegmentType.NARRATION
             char_name = attr_map.get(span.index) if span.is_dialogue else None
+            emotion = emotion_map.get(span.index) if span.is_dialogue else None
             segments.append(SegmentData(
                 position=pos,
                 text=text,
                 segment_type=seg_type,
                 character_name=char_name,
+                emotion=emotion,
             ))
     except (KeyError, ValueError) as exc:
         raise LLMParsingError(raw, exc) from exc

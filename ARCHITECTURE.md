@@ -170,19 +170,24 @@ inference fast (response size = O(dialogue spans), not O(input tokens)) and is w
          "age_category": "CHILD|YOUNG_ADULT|ADULT|ELDER|UNKNOWN",
          "tone": "...", "voice_quality": "...", "voice_tone": "..." }
      ],
-     "attributions": [ { "index": 3, "character_name": "Marie" } ]
+     "attributions": [ { "index": 3, "character_name": "Marie", "emotion": "furious and panicked" } ]
    }
    ```
 
    `characters[]` drives casting (schema unchanged). `attributions[]` has one entry per
    `[DIALOGUE]` span; `character_name` must match a listed character, otherwise the span
-   falls back to the narrator.
+   falls back to the narrator. `emotion` (Phase 14 §B1) is free text describing how the line
+   should be delivered (e.g. `"soft and hesitant"`, `"calm"`); optional, `null`/absent if
+   undeterminable. **Data layer only** — not yet consumed by any TTS provider (`synthesise()`
+   is unchanged); it exists to feed a future Qwen3-TTS `instruct` parameter.
 
 3. **Reconstruction (Python).** Each span becomes a
-   `SegmentData(position=index, text, segment_type=DIALOGUE|NARRATION, character_name)`.
-   The resulting `LLMChapterResult` is **identical in shape** to the previous protocol, so the
-   worker, the DB and `_merge_chunk_results` are untouched. The public contract
-   `analyze(text) -> LLMChapterResult` is preserved.
+   `SegmentData(position=index, text, segment_type=DIALOGUE|NARRATION, character_name, emotion)`.
+   `emotion` is only ever set on `DIALOGUE` spans (narration stays `None`) and must survive
+   `_merge_chunk_results`' renumbering when a chapter is split across token-budget chunks. The
+   resulting `LLMChapterResult` is otherwise **identical in shape** to the previous protocol, so
+   the worker, the DB and `_merge_chunk_results` are untouched beyond propagating this field. The
+   public contract `analyze(text) -> LLMChapterResult` is preserved.
 
 ---
 

@@ -82,6 +82,7 @@ class Segment(SQLModel, table=True):
     text: str
     segment_type: SegmentType = Field(default=SegmentType.NARRATION)
     character_id: Optional[int] = Field(default=None, foreign_key="character.id", index=True)
+    emotion: Optional[str] = None
 
     chapter: Optional["Chapter"] = Relationship(back_populates="segments")
     character: Optional["Character"] = Relationship(back_populates="segments")
