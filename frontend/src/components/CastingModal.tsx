@@ -14,6 +14,8 @@ import {
   rejectMergeSuggestion,
   generateBook,
 } from "@/lib/api";
+import Button from "@/components/ui/Button";
+import Alert from "@/components/ui/Alert";
 
 export default function CastingModal({
   bookId,
@@ -159,9 +161,9 @@ export default function CastingModal({
           {loading && <p className="text-gray-500">Chargement…</p>}
 
           {error && (
-            <div className="mb-4 rounded border border-red-700 bg-red-900/40 p-3">
+            <Alert className="mb-4 p-3!">
               <p className="text-sm text-red-400">{error}</p>
-            </div>
+            </Alert>
           )}
 
           {mergeSuggestions.length > 0 && (
@@ -170,13 +172,15 @@ export default function CastingModal({
                 <p className="text-sm font-semibold text-yellow-300">
                   Fusions de personnages suggérées
                 </p>
-                <button
+                <Button
+                  variant="warning"
+                  size="sm"
                   onClick={handleAcceptAllMerges}
                   disabled={acceptingAll}
-                  className="rounded bg-yellow-700 px-2 py-1 text-xs font-medium hover:bg-yellow-600 disabled:opacity-50"
+                  className="bg-yellow-700 hover:bg-yellow-600"
                 >
                   {acceptingAll ? "…" : "Tout accepter"}
-                </button>
+                </Button>
               </div>
               <ul className="space-y-2">
                 {mergeSuggestions.map((s) => (
@@ -192,20 +196,22 @@ export default function CastingModal({
                         <p className="text-xs text-gray-500">{s.reason}</p>
                       )}
                     </div>
-                    <button
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={() => handleResolveMerge(s.id, "accept")}
                       disabled={resolvingId === s.id || acceptingAll}
-                      className="rounded bg-green-700 px-2 py-1 text-xs font-medium hover:bg-green-600 disabled:opacity-50"
                     >
                       Accepter
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      size="sm"
                       onClick={() => handleResolveMerge(s.id, "reject")}
                       disabled={resolvingId === s.id || acceptingAll}
-                      className="rounded bg-gray-700 px-2 py-1 text-xs font-medium hover:bg-gray-600 disabled:opacity-50"
+                      className="bg-gray-700 hover:bg-gray-600"
                     >
                       Rejeter
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -270,7 +276,9 @@ export default function CastingModal({
               ? `Langue : ${voices[0].locale}`
               : "Langue : selon le provider TTS"}
           </p>
-          <button
+          <Button
+            variant="primary"
+            size="lg"
             onClick={handleGenerate}
             disabled={!canGenerate}
             title={
@@ -278,10 +286,10 @@ export default function CastingModal({
                 ? undefined
                 : "Génération possible uniquement quand le livre est ANALYZED"
             }
-            className="rounded bg-green-700 px-4 py-2 text-sm font-semibold hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+            className="disabled:opacity-40!"
           >
             {generating ? "Lancement…" : "Générer l'audio"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

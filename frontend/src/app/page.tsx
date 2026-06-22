@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { listBooks, BookSummary } from "@/lib/api";
 import UploadDropzone from "@/components/UploadDropzone";
 import BookCard from "@/components/BookCard";
+import Alert from "@/components/ui/Alert";
 
 export default function Home() {
   const router = useRouter();
@@ -43,8 +44,7 @@ export default function Home() {
       {loading && <p className="text-gray-500">Connexion à l&apos;API…</p>}
 
       {error && (
-        <div className="bg-red-900/40 border border-red-700 rounded p-4 mb-6">
-          <p className="font-semibold text-red-300">Impossible de joindre l&apos;API</p>
+        <Alert title="Impossible de joindre l'API" className="mb-6">
           <p className="text-sm text-red-400 mt-1">{error}</p>
           <p className="text-sm text-gray-400 mt-2">
             Vérifiez que l&apos;API tourne sur{" "}
@@ -52,7 +52,7 @@ export default function Home() {
               {process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}
             </code>
           </p>
-        </div>
+        </Alert>
       )}
 
       {!loading && !error && books.length === 0 && (

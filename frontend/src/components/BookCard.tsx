@@ -3,15 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { BookSummary, coverUrl, deleteBook } from "@/lib/api";
-
-const STATUS_COLOR: Record<string, string> = {
-  PENDING: "text-gray-400",
-  PROCESSING: "text-blue-400",
-  ANALYZED: "text-yellow-400",
-  GENERATING: "text-orange-400",
-  DONE: "text-green-400",
-  FAILED: "text-red-400",
-};
+import StatusBadge from "@/components/ui/StatusBadge";
 
 export default function BookCard({
   book,
@@ -65,11 +57,7 @@ export default function BookCard({
           </p>
           <div className="mt-auto flex items-center justify-between">
             <span className="text-xs text-gray-500">#{book.id}</span>
-            <span
-              className={`text-xs font-semibold ${STATUS_COLOR[book.status] ?? "text-gray-400"}`}
-            >
-              {book.status}
-            </span>
+            <StatusBadge status={book.status} className="text-xs" />
           </div>
           {book.progress > 0 && book.progress < 100 && (
             <div className="h-1 w-full overflow-hidden rounded bg-gray-800">
