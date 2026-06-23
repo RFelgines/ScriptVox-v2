@@ -13,6 +13,13 @@ import {
 export interface Track {
   title: string;
   src: string;
+  // Métadonnées optionnelles : permettent au bandeau déplié d'afficher la
+  // couverture et la liste des chapitres + navigation prev/next. Absentes pour
+  // les pistes hors-contexte livre (ex. aperçu de voix).
+  bookId?: number;
+  bookTitle?: string;
+  coverUrl?: string;
+  chapterPosition?: number;
 }
 
 interface PlayerState {

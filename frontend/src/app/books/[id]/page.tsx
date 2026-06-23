@@ -175,7 +175,15 @@ export default function BookDetailPage({
               {book.status === "DONE" && book.mp3_path && (
                 <Button
                   variant="primary"
-                  onClick={() => play({ title: book.title, src: bookMp3Url(book.id) })}
+                  onClick={() =>
+                    play({
+                      title: book.title,
+                      src: bookMp3Url(book.id),
+                      bookId: book.id,
+                      bookTitle: book.title,
+                      coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
+                    })
+                  }
                   className="mt-3 ml-2"
                 >
                   ▶ Écouter
@@ -236,6 +244,10 @@ export default function BookDetailPage({
                           play({
                             title: `${book.title} — ${ch.title ?? `Chapitre ${ch.position}`}`,
                             src: chapterAudioUrl(book.id, ch.position),
+                            bookId: book.id,
+                            bookTitle: book.title,
+                            coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
+                            chapterPosition: ch.position,
                           })
                         }
                       >
