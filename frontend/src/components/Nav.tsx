@@ -26,7 +26,10 @@ export default function Nav() {
     <header className="sticky top-0 z-30 border-b border-gray-800 bg-gray-900/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
         <Link href="/" className="text-lg font-bold tracking-tight text-gray-100">
-          Script<span className="text-amber-500">Vox</span>
+          Script
+          <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
+            Vox
+          </span>
         </Link>
         <nav className="flex items-center gap-1">
           {TABS.map((tab) => {
@@ -38,7 +41,7 @@ export default function Nav() {
                 aria-current={active ? "page" : undefined}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                   active
-                    ? "bg-gray-800 text-amber-400"
+                    ? "bg-gray-800 text-violet-400"
                     : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-100"
                 }`}
               >
