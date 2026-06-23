@@ -7,7 +7,7 @@ Run: .venv/Scripts/python tests/check_phase9.py
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -685,6 +685,61 @@ check("3 voix TOUTES distinctes (pas de collision sur male_0)",
       len(set(_vids27)) == 3, f"got {_vids27}")
 check("toutes des voix MALE (male_0/1/2)",
       all(v in ("male_0", "male_1", "male_2") for v in _vids27), f"got {_vids27}")
+
+
+# ══════════════════════════════════════════════════════
+# Phase 17 — GET /voices/{voice_id}/sample (aperçu audio)
+# ══════════════════════════════════════════════════════
+
+from app.api.routes.voices import get_tts_provider_dep  # noqa: E402
+
+_sample_dir = ROOT / "data" / "voice_samples"
+_sample_cache_file = _sample_dir / "edgetts_female_0.wav"
+if _sample_cache_file.exists():
+    _sample_cache_file.unlink()
+
+# ── Section 29: 200, audio/wav, contenu = sortie du provider ─────────────────
+
+section("GET /voices/{id}/sample: 200, audio/wav, synthèse via le provider TTS")
+
+_mock_provider = MagicMock()
+_mock_provider.synthesise = AsyncMock(return_value=b"FAKE_WAV_BYTES")
+
+app.dependency_overrides[get_settings] = lambda: mock_edge
+app.dependency_overrides[get_tts_provider_dep] = lambda: _mock_provider
+
+with TestClient(app) as tc:
+    resp = tc.get("/voices/female_0/sample")
+    check("status 200", resp.status_code == 200, f"got {resp.status_code}")
+    check("content-type audio/wav", resp.headers.get("content-type") == "audio/wav",
+          f"got {resp.headers.get('content-type')!r}")
+    check("contenu == sortie du provider", resp.content == b"FAKE_WAV_BYTES",
+          f"got {resp.content!r}")
+    check("synthesise appelé une fois", _mock_provider.synthesise.call_count == 1,
+          f"got {_mock_provider.synthesise.call_count}")
+
+# ── Section 30: 2e appel -> cache disque, provider PAS rappelé ───────────────
+
+section("GET /voices/{id}/sample: 2e appel -> servi depuis le cache, pas de resynthèse")
+
+with TestClient(app) as tc:
+    resp2 = tc.get("/voices/female_0/sample")
+    check("status 200", resp2.status_code == 200, f"got {resp2.status_code}")
+    check("synthesise TOUJOURS appelé une seule fois (cache)",
+          _mock_provider.synthesise.call_count == 1,
+          f"got {_mock_provider.synthesise.call_count}")
+
+# ── Section 31: voice_id inconnu -> 404, provider jamais appelé ──────────────
+
+section("GET /voices/{id}/sample: voice_id inconnu -> 404")
+
+with TestClient(app, raise_server_exceptions=False) as tc:
+    resp3 = tc.get("/voices/ghost_voice/sample")
+    check("status 404", resp3.status_code == 404, f"got {resp3.status_code}")
+
+app.dependency_overrides.clear()
+if _sample_cache_file.exists():
+    _sample_cache_file.unlink()
 
 
 # ══════════════════════════════════════════════════════

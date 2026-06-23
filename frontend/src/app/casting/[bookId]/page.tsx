@@ -16,7 +16,9 @@ import {
   listVoices,
   patchCharacterVoice,
   rejectMergeSuggestion,
+  voiceSampleUrl,
 } from "@/lib/api";
+import { usePlayer } from "@/components/player/PlayerProvider";
 import Button from "@/components/ui/Button";
 import Alert from "@/components/ui/Alert";
 
@@ -28,6 +30,7 @@ export default function CastingPage({
   const { bookId: bookIdParam } = use(params);
   const bookId = Number(bookIdParam);
   const router = useRouter();
+  const { play } = usePlayer();
 
   const [book, setBook] = useState<BookSummary | null>(null);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
@@ -179,6 +182,18 @@ export default function CastingPage({
               </option>
             ))}
           </select>
+          {c.voice_id && (
+            <button
+              onClick={() =>
+                play({ title: `Aperçu — ${c.voice_id}`, src: voiceSampleUrl(c.voice_id!) })
+              }
+              title="Écouter un aperçu de cette voix"
+              aria-label="Écouter un aperçu de cette voix"
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+            >
+              ▶
+            </button>
+          )}
           {savingId === c.id && <span className="text-xs text-gray-500">…</span>}
         </div>
       </li>

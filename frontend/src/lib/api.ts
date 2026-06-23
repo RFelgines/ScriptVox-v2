@@ -166,6 +166,10 @@ export function coverUrl(id: number): string {
   return `${API_URL}/books/${id}/cover`;
 }
 
+export function voiceSampleUrl(voiceId: string): string {
+  return `${API_URL}/voices/${voiceId}/sample`;
+}
+
 export function bookMp3Url(id: number): string {
   return `${API_URL}/books/${id}/audio/mp3`;
 }
