@@ -6,11 +6,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.core.db import get_session
 from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus
-from app.models import Book, Chapter, Character, CharacterMergeSuggestion
+from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment
 from app.schemas.book import BookResponse, ChapterResponse, CharacterResponse, MergeSuggestionResponse
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
@@ -244,7 +244,21 @@ def get_book_characters(book_id: int, session: Session = Depends(get_session)) -
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
     characters = session.exec(select(Character).where(Character.book_id == book_id)).all()
-    return [CharacterResponse.model_validate(c) for c in characters]
+
+    counts = dict(
+        session.exec(
+            select(Segment.character_id, func.count(Segment.id))
+            .where(Segment.character_id.in_([c.id for c in characters]))
+            .group_by(Segment.character_id)
+        ).all()
+    )
+
+    results = []
+    for c in characters:
+        r = CharacterResponse.model_validate(c)
+        r.segment_count = counts.get(c.id, 0)
+        results.append(r)
+    return results
 
 
 @router.get("/{book_id}/merge-suggestions", response_model=list[MergeSuggestionResponse])

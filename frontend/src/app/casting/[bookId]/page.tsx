@@ -41,6 +41,8 @@ export default function CastingPage({
   const [generating, setGenerating] = useState(false);
   // Bumpé après une action de fusion pour relancer le fetch (personnages + suggestions).
   const [mergeReloadNonce, setMergeReloadNonce] = useState(0);
+  const [search, setSearch] = useState("");
+  const [showSecondary, setShowSecondary] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -129,6 +131,60 @@ export default function CastingPage({
   const assignable = voices.filter((v) => v.id !== "narrator");
   const canGenerate = book?.status === "ANALYZED" && !generating;
 
+  const needle = search.trim().toLowerCase();
+  const filtered = needle
+    ? characters.filter((c) => c.name.toLowerCase().includes(needle))
+    : characters;
+  // Tri par importance narrative (nb de répliques) plutôt que l'ordre DB arbitraire.
+  const mainCharacters = filtered
+    .filter((c) => c.segment_count > 0)
+    .sort((a, b) => b.segment_count - a.segment_count);
+  // "Bruit" : personnages détectés sans aucune réplique (ex. dédicace) — repliés par
+  // défaut plutôt que masqués, l'utilisateur peut vouloir leur assigner une voix.
+  const secondaryCharacters = filtered.filter((c) => c.segment_count === 0);
+
+  function renderCharacterRow(c: CharacterSummary) {
+    return (
+      <li
+        key={c.id}
+        className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900 p-3"
+      >
+        <div className="flex-1">
+          <p className="font-medium">{c.name}</p>
+          <p className="text-xs text-gray-500">
+            {c.gender}
+            {c.age_category && c.age_category !== "UNKNOWN" ? ` · ${c.age_category}` : ""}
+            {c.segment_count > 0
+              ? ` · ${c.segment_count} réplique${c.segment_count > 1 ? "s" : ""}`
+              : ""}
+          </p>
+          {c.description && (
+            <p className="mt-1 line-clamp-2 text-xs text-gray-600">{c.description}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={c.voice_id ?? ""}
+            disabled={savingId === c.id}
+            onChange={(e) => handleVoiceChange(c.id, e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm disabled:opacity-50"
+          >
+            <option value="" disabled>
+              Choisir…
+            </option>
+            {assignable.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.id}
+                {v.gender ? ` — ${v.gender}` : ""}
+              </option>
+            ))}
+          </select>
+          {savingId === c.id && <span className="text-xs text-gray-500">…</span>}
+        </div>
+      </li>
+    );
+  }
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
       <Link href={`/books/${bookId}`} className="text-sm text-gray-400 hover:text-gray-200">
@@ -206,44 +262,36 @@ export default function CastingPage({
       )}
 
       {characters.length > 0 && (
-        <ul className="mt-6 space-y-3">
-          {characters.map((c) => (
-            <li
-              key={c.id}
-              className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900 p-3"
-            >
-              <div className="flex-1">
-                <p className="font-medium">{c.name}</p>
-                <p className="text-xs text-gray-500">
-                  {c.gender}
-                  {c.age_category && c.age_category !== "UNKNOWN" ? ` · ${c.age_category}` : ""}
-                </p>
-                {c.description && (
-                  <p className="mt-1 line-clamp-2 text-xs text-gray-600">{c.description}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <select
-                  value={c.voice_id ?? ""}
-                  disabled={savingId === c.id}
-                  onChange={(e) => handleVoiceChange(c.id, e.target.value)}
-                  className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm disabled:opacity-50"
-                >
-                  <option value="" disabled>
-                    Choisir…
-                  </option>
-                  {assignable.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.id}
-                      {v.gender ? ` — ${v.gender}` : ""}
-                    </option>
-                  ))}
-                </select>
-                {savingId === c.id && <span className="text-xs text-gray-500">…</span>}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher un personnage…"
+            className="mt-6 w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm placeholder:text-gray-500"
+          />
+
+          {mainCharacters.length > 0 ? (
+            <ul className="mt-4 space-y-3">{mainCharacters.map(renderCharacterRow)}</ul>
+          ) : (
+            <p className="mt-4 text-sm text-gray-500">Aucun personnage ne correspond.</p>
+          )}
+
+          {secondaryCharacters.length > 0 && (
+            <div className="mt-6">
+              <button
+                onClick={() => setShowSecondary((v) => !v)}
+                className="text-sm text-gray-500 hover:text-gray-300"
+              >
+                {showSecondary ? "▾" : "▸"} Personnages secondaires sans réplique (
+                {secondaryCharacters.length})
+              </button>
+              {showSecondary && (
+                <ul className="mt-3 space-y-3">{secondaryCharacters.map(renderCharacterRow)}</ul>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       <div className="mt-8 flex items-center justify-between gap-3 border-t border-gray-800 pt-4">

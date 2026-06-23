@@ -30,6 +30,7 @@ class CharacterResponse(BaseModel):
     voice_quality: Optional[str] = None
     voice_tone: Optional[str] = None
     voice_id: Optional[str] = None
+    segment_count: int = 0
 
     model_config = {"from_attributes": True}
 

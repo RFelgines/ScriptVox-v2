@@ -687,6 +687,62 @@ check("toutes des voix MALE (male_0/1/2)",
       all(v in ("male_0", "male_1", "male_2") for v in _vids27), f"got {_vids27}")
 
 
+# ══════════════════════════════════════════════════════
+# Phase 17 — GET /books/{id}/characters expose segment_count
+# ══════════════════════════════════════════════════════
+
+from app.models.entities import Chapter, Segment  # noqa: E402
+from app.core.enums import SegmentType  # noqa: E402
+
+# ── Section 28: segment_count reflète le vrai nombre de segments par personnage ──
+
+section("GET /books/{id}/characters: segment_count correct (y compris 0)")
+
+_eng28 = _make_engine()
+with Session(_eng28) as _s28:
+    _book28 = Book(title="SegCount Test", source_path="/tmp/segcount.epub")
+    _s28.add(_book28)
+    _s28.flush()
+    _chap28 = Chapter(book_id=_book28.id, position=1, raw_text="texte")
+    _s28.add(_chap28)
+    _s28.flush()
+    _talkative = Character(book_id=_book28.id, name="Talkative", gender=Gender.MALE)
+    _silent = Character(book_id=_book28.id, name="Silent", gender=Gender.FEMALE)
+    _s28.add_all([_talkative, _silent])
+    _s28.flush()
+    _s28.add_all([
+        Segment(chapter_id=_chap28.id, position=i, text=f"ligne {i}",
+                segment_type=SegmentType.DIALOGUE, character_id=_talkative.id)
+        for i in range(3)
+    ])
+    _s28.commit()
+    _book28_id = _book28.id
+    _talkative_id = _talkative.id
+    _silent_id = _silent.id
+
+
+def _s28_get_session():
+    with Session(_eng28) as s:
+        yield s
+
+
+app.dependency_overrides[get_session] = _s28_get_session
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app) as tc:
+    resp = tc.get(f"/books/{_book28_id}/characters")
+    check("status 200", resp.status_code == 200, f"got {resp.status_code}")
+    by_id = {c["id"]: c for c in resp.json()}
+    check("Talkative -> segment_count == 3",
+          by_id.get(_talkative_id, {}).get("segment_count") == 3,
+          f"got {by_id.get(_talkative_id)}")
+    check("Silent -> segment_count == 0 (personnage sans dialogue)",
+          by_id.get(_silent_id, {}).get("segment_count") == 0,
+          f"got {by_id.get(_silent_id)}")
+
+app.dependency_overrides.clear()
+
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")

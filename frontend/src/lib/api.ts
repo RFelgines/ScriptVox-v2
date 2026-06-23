@@ -59,6 +59,7 @@ export interface CharacterSummary {
   voice_quality: string | null;
   voice_tone: string | null;
   voice_id: string | null;
+  segment_count: number;
 }
 
 export async function listBooks(): Promise<BookSummary[]> {
