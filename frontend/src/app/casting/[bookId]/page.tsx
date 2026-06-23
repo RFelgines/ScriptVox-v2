@@ -4,16 +4,19 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AppSettings,
   BookSummary,
   CharacterSummary,
   MergeSuggestion,
   VoiceSummary,
   acceptMergeSuggestion,
   generateBook,
+  getAppSettings,
   getBook,
   listCharacters,
   listMergeSuggestions,
   listVoices,
+  patchBookProvider,
   patchCharacterVoice,
   rejectMergeSuggestion,
   voiceSampleUrl,
@@ -46,6 +49,8 @@ export default function CastingPage({
   const [mergeReloadNonce, setMergeReloadNonce] = useState(0);
   const [search, setSearch] = useState("");
   const [showSecondary, setShowSecondary] = useState(false);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [savingProvider, setSavingProvider] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -54,13 +59,15 @@ export default function CastingPage({
       listCharacters(bookId),
       listVoices(),
       listMergeSuggestions(bookId),
+      getAppSettings(),
     ])
-      .then(([b, chars, vs, merges]) => {
+      .then(([b, chars, vs, merges, settings]) => {
         if (!active) return;
         setBook(b);
         setCharacters(chars);
         setVoices(vs);
         setMergeSuggestions(merges);
+        setAppSettings(settings);
         setError(null);
       })
       .catch((e) => {
@@ -73,6 +80,15 @@ export default function CastingPage({
       active = false;
     };
   }, [bookId, mergeReloadNonce]);
+
+  function handleProviderChange(value: string) {
+    setSavingProvider(true);
+    setError(null);
+    patchBookProvider(bookId, value || null)
+      .then((updated) => setBook(updated))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSavingProvider(false));
+  }
 
   function handleVoiceChange(characterId: number, voiceId: string) {
     setSavingId(characterId);
@@ -310,9 +326,29 @@ export default function CastingPage({
       )}
 
       <div className="mt-8 flex items-center justify-between gap-3 border-t border-gray-800 pt-4">
-        <p className="text-xs text-gray-500">
-          {voices[0]?.locale ? `Langue : ${voices[0].locale}` : "Langue : selon le provider TTS"}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-gray-500">
+            {voices[0]?.locale ? `Langue : ${voices[0].locale}` : "Langue : selon le provider TTS"}
+          </p>
+          {appSettings && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-500">
+              Moteur :
+              <select
+                value={book?.tts_provider ?? ""}
+                disabled={savingProvider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className="rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-xs text-gray-200 disabled:opacity-50"
+              >
+                <option value="">Par défaut ({appSettings.default_tts_provider})</option>
+                {appSettings.available_tts_providers.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         <Button
           variant="primary"
           size="lg"

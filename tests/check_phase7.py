@@ -973,6 +973,50 @@ assert sorted(_r29_calls) == sorted([_r29_ch2_id, _r29_ch3_id]), (
 )
 ok(f"202, generate_chapter dispatched for 2 non-DONE chapters, DONE chapter skipped (got {_r29_calls})")
 
+# ── Phase 17 — PATCH /books/{id}: provider TTS par livre ──────────────────────
+
+app.dependency_overrides[get_session] = _rb_session
+
+section("PATCH /books/{id}: tts_provider valide -> 200 + persisté")
+
+with Session(_rb_engine) as _s30:
+    _r30_book = Book(title="ProviderTest", source_path="/tmp/provider.epub")
+    _s30.add(_r30_book)
+    _s30.commit()
+    _r30_book_id = _r30_book.id
+
+with TestClient(app) as _tc:
+    _r30 = _tc.patch(f"/books/{_r30_book_id}", json={"tts_provider": "elevenlabs"})
+    assert _r30.status_code == 200, f"Expected 200, got {_r30.status_code} ({_r30.text})"
+    assert _r30.json()["tts_provider"] == "elevenlabs", f"got {_r30.json()}"
+ok("tts_provider='elevenlabs' persisté et renvoyé dans BookResponse")
+
+section("PATCH /books/{id}: tts_provider invalide -> 422")
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r31 = _tc.patch(f"/books/{_r30_book_id}", json={"tts_provider": "ghost_provider"})
+    assert _r31.status_code == 422, f"Expected 422, got {_r31.status_code} ({_r31.text})"
+ok("422 si tts_provider hors catalogue")
+
+section("PATCH /books/{id}: livre inexistant -> 404")
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r32 = _tc.patch("/books/999999", json={"tts_provider": "edgetts"})
+    assert _r32.status_code == 404, f"Expected 404, got {_r32.status_code} ({_r32.text})"
+ok("404 si book_id inconnu")
+
+section("GET /settings: provider par défaut + liste des providers disponibles")
+
+with TestClient(app) as _tc:
+    _r33 = _tc.get("/settings")
+    assert _r33.status_code == 200, f"Expected 200, got {_r33.status_code} ({_r33.text})"
+    _r33_data = _r33.json()
+    assert _r33_data["default_tts_provider"], f"got {_r33_data}"
+    assert set(_r33_data["available_tts_providers"]) == {"piper", "elevenlabs", "edgetts", "qwen"}, (
+        f"got {_r33_data['available_tts_providers']}"
+    )
+ok(f"GET /settings -> {_r33_data}")
+
 app.dependency_overrides.clear()
 
 

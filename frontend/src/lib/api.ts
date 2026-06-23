@@ -19,6 +19,12 @@ export interface BookSummary {
   audio_path: string | null;
   mp3_path: string | null;
   cover_path: string | null;
+  tts_provider: string | null;
+}
+
+export interface AppSettings {
+  default_tts_provider: string;
+  available_tts_providers: string[];
 }
 
 export type ChapterStatus = "PENDING" | "GENERATING" | "DONE" | "FAILED";
@@ -88,6 +94,36 @@ export async function uploadBook(file: File): Promise<BookSummary> {
 export async function getBook(id: number): Promise<BookSummary> {
   const res = await fetch(`${API_URL}/books/${id}`);
   if (!res.ok) throw new Error(`GET /books/${id} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function patchBookProvider(
+  bookId: number,
+  ttsProvider: string | null,
+): Promise<BookSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tts_provider: ttsProvider }),
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) {
+        detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      }
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Changement de provider échoué : ${detail}`);
+  }
+  return res.json();
+}
+
+export async function getAppSettings(): Promise<AppSettings> {
+  const res = await fetch(`${API_URL}/settings`);
+  if (!res.ok) throw new Error(`GET /settings failed: ${res.status}`);
   return res.json();
 }
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _VALID_LLM = frozenset({"gemini", "ollama"})
-_VALID_TTS = frozenset({"piper", "elevenlabs", "edgetts", "qwen"})
+VALID_TTS_PROVIDERS = frozenset({"piper", "elevenlabs", "edgetts", "qwen"})
 
 
 def _require(name: str) -> str:
@@ -25,10 +25,10 @@ class Settings:
             )
 
         self.tts_provider: str = _require("TTS_PROVIDER")
-        if self.tts_provider not in _VALID_TTS:
+        if self.tts_provider not in VALID_TTS_PROVIDERS:
             raise ValueError(
                 f"Invalid TTS_PROVIDER={self.tts_provider!r}. "
-                f"Accepted values: {sorted(_VALID_TTS)}"
+                f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
             )
 
         if self.llm_provider == "gemini":

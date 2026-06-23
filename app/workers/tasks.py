@@ -140,9 +140,9 @@ async def _synthesise_book(
     from app.services.voice_assignment import NARRATOR_VOICE_ID
 
     settings = get_settings()
-    provider = tts_factory.get_tts_provider(settings)
 
     with Session(engine) as session:
+        book = session.get(Book, book_id)
         chapters = session.exec(
             select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
         ).all()
@@ -163,6 +163,7 @@ async def _synthesise_book(
     if not all_segments:
         return ""
 
+    provider = tts_factory.get_tts_provider(settings, override=book.tts_provider if book else None)
     n = len(all_segments)
     wav_chunks: list[bytes] = []
 
@@ -337,12 +338,17 @@ def _generate_book_impl(book_id: int) -> None:
 
 
 async def _synthesise_chapter_worker(chapter_id: int, engine) -> bytes:
+    from app.models import Book, Chapter
     from app.services.audio.chapter import synthesise_chapter
     from app.services.tts import factory as tts_factory
 
     settings = get_settings()
-    provider = tts_factory.get_tts_provider(settings)
     with Session(engine) as session:
+        chapter = session.get(Chapter, chapter_id)
+        book = session.get(Book, chapter.book_id) if chapter else None
+        provider = tts_factory.get_tts_provider(
+            settings, override=book.tts_provider if book else None
+        )
         return await synthesise_chapter(chapter_id, session, provider)
 
 

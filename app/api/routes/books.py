@@ -8,10 +8,17 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session, func, select
 
+from app.config import VALID_TTS_PROVIDERS
 from app.core.db import get_session
 from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus
 from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment
-from app.schemas.book import BookResponse, ChapterResponse, CharacterResponse, MergeSuggestionResponse
+from app.schemas.book import (
+    BookResponse,
+    BookUpdate,
+    ChapterResponse,
+    CharacterResponse,
+    MergeSuggestionResponse,
+)
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
 DATA_DIR = Path("data")
@@ -63,6 +70,30 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> BookRespo
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    return BookResponse.model_validate(book)
+
+
+@router.patch("/{book_id}", response_model=BookResponse)
+def patch_book(
+    book_id: int,
+    body: BookUpdate,
+    session: Session = Depends(get_session),
+) -> BookResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if body.tts_provider is not None and body.tts_provider not in VALID_TTS_PROVIDERS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid tts_provider {body.tts_provider!r}. "
+                f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
+            ),
+        )
+    book.tts_provider = body.tts_provider
+    session.add(book)
+    session.commit()
+    session.refresh(book)
     return BookResponse.model_validate(book)
 
 
