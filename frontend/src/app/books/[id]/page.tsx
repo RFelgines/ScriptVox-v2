@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BookSummary,
   ChapterSummary,
@@ -13,7 +14,6 @@ import {
   generateChapter,
   generateAllChapters,
 } from "@/lib/api";
-import CastingModal from "@/components/CastingModal";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Button from "@/components/ui/Button";
@@ -36,12 +36,12 @@ export default function BookDetailPage({
 }) {
   const { id } = use(params);
   const bookId = Number(id);
+  const router = useRouter();
 
   const [book, setBook] = useState<BookSummary | null>(null);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [castingOpen, setCastingOpen] = useState(false);
   const [generatingPos, setGeneratingPos] = useState<number | null>(null);
   const [generatingAll, setGeneratingAll] = useState(false);
   const { play } = usePlayer();
@@ -49,10 +49,9 @@ export default function BookDetailPage({
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
 
-  // ?casting=auto (posé par la bibliothèque après upload) : lu une seule fois via
-  // un initialiseur paresseux de useState plutôt qu'un effet + setState (la règle
-  // react-hooks/set-state-in-effect interdit un setState synchrone au corps d'un
-  // effet — même convention que ailleurs dans ce fichier) ; lu manuellement via
+  // ?casting=auto (posé par la bibliothèque après upload) : redirige vers la page
+  // de casting dédiée dès que l'analyse atteint ANALYZED, servant de confirmation
+  // "tout valider ou ajuster" sans action de l'utilisateur. Lu manuellement via
   // window.location plutôt que useSearchParams pour éviter le besoin d'un
   // Suspense boundary (cf. doc Next : useSearchParams force le CSR jusqu'au
   // Suspense parent le plus proche pendant le prerendering).
@@ -61,18 +60,11 @@ export default function BookDetailPage({
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("casting") === "auto",
   );
-  const [autoOpened, setAutoOpened] = useState(false);
 
   useEffect(() => {
-    if (!(autoFlag && book?.status === "ANALYZED" && !autoOpened)) return;
-    // setState différé en microtâche pour rester hors du corps synchrone de
-    // l'effet (même contournement que `refresh()` ailleurs dans ce projet).
-    Promise.resolve().then(() => {
-      setCastingOpen(true);
-      setAutoOpened(true);
-      window.history.replaceState(null, "", `/books/${bookId}`);
-    });
-  }, [autoFlag, book?.status, autoOpened, bookId]);
+    if (!(autoFlag && book?.status === "ANALYZED")) return;
+    router.push(`/casting/${bookId}`);
+  }, [autoFlag, book?.status, bookId, router]);
 
   function handleGenerateChapter(position: number) {
     setGeneratingPos(position);
@@ -168,19 +160,17 @@ export default function BookDetailPage({
               {book.status === "FAILED" && book.error_message && (
                 <p className="mt-2 text-sm text-red-400">{book.error_message}</p>
               )}
-              {autoFlag &&
-                !autoOpened &&
-                (book.status === "PENDING" || book.status === "PROCESSING") && (
-                  <p className="mt-2 text-sm text-gray-500">
-                    Analyse en cours — le casting s&apos;ouvrira automatiquement.
-                  </p>
-                )}
+              {autoFlag && (book.status === "PENDING" || book.status === "PROCESSING") && (
+                <p className="mt-2 text-sm text-gray-500">
+                  Analyse en cours — le casting s&apos;ouvrira automatiquement.
+                </p>
+              )}
               {(book.status === "ANALYZED" ||
                 book.status === "GENERATING" ||
                 book.status === "DONE") && (
-                <Button onClick={() => setCastingOpen(true)} className="mt-3">
-                  Casting
-                </Button>
+                <Link href={`/casting/${book.id}`}>
+                  <Button className="mt-3">Casting</Button>
+                </Link>
               )}
               {book.status === "DONE" && book.mp3_path && (
                 <Button
@@ -257,15 +247,6 @@ export default function BookDetailPage({
               </ul>
             )}
           </section>
-
-          {castingOpen && (
-            <CastingModal
-              bookId={book.id}
-              bookStatus={book.status}
-              onClose={() => setCastingOpen(false)}
-              onGenerated={() => setReloadNonce((n) => n + 1)}
-            />
-          )}
         </>
       )}
     </main>
