@@ -35,16 +35,22 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
-      <h1 className="text-3xl font-bold mb-2">ScriptVox</h1>
-      <p className="text-gray-400 mb-8">EPUB → audiobook multi-voix</p>
+    <main className="mx-auto w-full max-w-6xl px-6 py-8">
+      <div className="mb-6 flex items-baseline justify-between gap-4">
+        <h1 className="text-2xl font-bold">Bibliothèque</h1>
+        {!loading && !error && books.length > 0 && (
+          <span className="text-sm text-gray-500">
+            {books.length} livre{books.length > 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
 
       <UploadDropzone onUploaded={handleUploaded} />
 
-      {loading && <p className="text-gray-500">Connexion à l&apos;API…</p>}
+      {loading && <p className="mt-6 text-gray-500">Connexion à l&apos;API…</p>}
 
       {error && (
-        <Alert title="Impossible de joindre l'API" className="mb-6">
+        <Alert title="Impossible de joindre l'API" className="mt-6">
           <p className="text-sm text-red-400 mt-1">{error}</p>
           <p className="text-sm text-gray-400 mt-2">
             Vérifiez que l&apos;API tourne sur{" "}
@@ -56,11 +62,11 @@ export default function Home() {
       )}
 
       {!loading && !error && books.length === 0 && (
-        <p className="text-gray-500">Aucun livre. Glissez un EPUB ci-dessus.</p>
+        <p className="mt-6 text-gray-500">Aucun livre. Glissez un EPUB ci-dessus.</p>
       )}
 
       {books.length > 0 && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {books.map((book) => (
             <BookCard key={book.id} book={book} onDeleted={refresh} />
           ))}
