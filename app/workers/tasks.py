@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 from datetime import datetime, timezone
 
 from huey import SqliteHuey
@@ -33,7 +32,7 @@ async def _analyze_book(
     provider = llm_factory.get_llm_provider(settings)
 
     budget = (
-        math.floor(settings.ollama_context_tokens * 0.8)
+        settings.ollama_chunk_tokens
         if settings.llm_provider == "ollama"
         else GEMINI_MAX_TOKENS
     )

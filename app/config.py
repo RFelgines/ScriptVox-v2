@@ -39,6 +39,12 @@ class Settings:
             self.ollama_base_url: str = _require("OLLAMA_BASE_URL")
             self.ollama_model: str = _require("OLLAMA_MODEL")
             self.ollama_context_tokens: int = int(_require("OLLAMA_CONTEXT_TOKENS"))
+            # Budget de découpe en chunks, découplé de la fenêtre de contexte : des chunks
+            # plus petits gardent la SORTIE JSON (liste d'attributions) loin de la troncature
+            # et permettent un num_ctx réduit 100% GPU. Voir ARCHITECTURE.md §2.5.
+            self.ollama_chunk_tokens: int = int(
+                os.environ.get("OLLAMA_CHUNK_TOKENS", "4000")
+            )
             self.ollama_connect_timeout: float = float(
                 os.environ.get("OLLAMA_CONNECT_TIMEOUT", "60")
             )

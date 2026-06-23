@@ -64,8 +64,18 @@ assert s.llm_provider == "ollama"
 assert s.tts_provider == "piper"
 assert s.ollama_connect_timeout == 60.0
 assert s.ollama_read_timeout == 600.0
+assert s.ollama_chunk_tokens == 4000, "défaut OLLAMA_CHUNK_TOKENS attendu = 4000"
 ok(f"LLM={s.llm_provider}  TTS={s.tts_provider}  context={s.ollama_context_tokens} tokens")
 ok(f"timeouts: connect={s.ollama_connect_timeout}s  read={s.ollama_read_timeout}s")
+ok(f"chunk budget (défaut) = {s.ollama_chunk_tokens} tokens")
+
+# OLLAMA_CHUNK_TOKENS surchargeable par l'environnement
+_set_env(OLLAMA_CHUNK_TOKENS="6000")
+get_settings.cache_clear()
+assert get_settings().ollama_chunk_tokens == 6000, "OLLAMA_CHUNK_TOKENS doit être lu depuis l'env"
+_del_env("OLLAMA_CHUNK_TOKENS")
+get_settings.cache_clear()
+ok("OLLAMA_CHUNK_TOKENS surchargeable + retombe sur le défaut")
 
 # ─── 2. Fail-fast: missing LLM_PROVIDER ──────────────────────────────────────
 section("Config — fail-fast: missing LLM_PROVIDER")

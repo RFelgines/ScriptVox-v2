@@ -199,10 +199,12 @@ async def _ollama_capture_timeout(*_a, **_kw):
     return _FakeOllamaResponse('{"characters": [], "attributions": []}')
 
 
+from app.services.llm.ollama import _NO_THINK_SUFFIX  # noqa: E402
+
 _dyn_chapter_text = "Elle marcha lentement vers la porte. " * 500  # assez gros pour dépasser le plancher
 provider._client.chat = _ollama_capture_timeout
 asyncio.run(provider.analyze(_dyn_chapter_text))
-_dyn_prompt = _b_build_user_prompt(_b_pre_segment(_dyn_chapter_text), None)
+_dyn_prompt = _b_build_user_prompt(_b_pre_segment(_dyn_chapter_text), None) + _NO_THINK_SUFFIX
 _expected_timeout = _compute_read_timeout(
     _dyn_prompt, provider._read_timeout_floor, provider._timeout_per_1k_tokens
 )

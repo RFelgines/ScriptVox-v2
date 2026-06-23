@@ -22,6 +22,11 @@ from app.services.llm.base import (
 
 logger = logging.getLogger(__name__)
 
+# Qwen3 reasoning models emit a hidden <think> block by default, costing time and context
+# budget for no benefit on this structured-extraction task. /no_think is Qwen3's documented
+# soft-switch, read from the latest user turn (see ARCHITECTURE.md §2.5).
+_NO_THINK_SUFFIX = "\n\n/no_think"
+
 
 class OllamaProvider(BaseLLMProvider):
     def __init__(self, settings: Settings) -> None:
@@ -52,7 +57,7 @@ class OllamaProvider(BaseLLMProvider):
         self, text: str, known_characters: list[str] | None = None
     ) -> LLMChapterResult:
         spans = _pre_segment(text)
-        prompt = _build_user_prompt(spans, known_characters)
+        prompt = _build_user_prompt(spans, known_characters) + _NO_THINK_SUFFIX
         self._set_dynamic_read_timeout(prompt)
         try:
             response = await self._client.chat(
@@ -73,7 +78,7 @@ class OllamaProvider(BaseLLMProvider):
     ) -> list[MergeSuggestion]:
         if len(characters) < 2:
             return []
-        prompt = _build_merge_prompt(characters)
+        prompt = _build_merge_prompt(characters) + _NO_THINK_SUFFIX
         self._set_dynamic_read_timeout(prompt)
         try:
             response = await self._client.chat(
