@@ -71,6 +71,20 @@ def _extract_cover(book) -> tuple[bytes | None, str | None]:
             if content:
                 return content, item.media_type or None
 
+    # Strategy 4: fallback for EPUBs with NO formal cover declaration at all (no OPF
+    # <meta name="cover">, no EPUB3 manifest property) -- common with older conversion
+    # tools (observed: an "AlexandriZ"-generated EPUB whose cover item is named "cover"
+    # by convention only). Best-effort: an image item whose id or filename mentions
+    # "cover", picking the first match in manifest order.
+    for item in book.get_items():
+        if item.get_type() != ebooklib.ITEM_IMAGE:
+            continue
+        haystack = f"{item.get_id()} {item.get_name()}".lower()
+        if "cover" in haystack:
+            content = item.get_content()
+            if content:
+                return content, item.media_type or None
+
     return None, None
 
 

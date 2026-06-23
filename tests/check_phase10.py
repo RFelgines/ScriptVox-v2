@@ -69,6 +69,28 @@ def _make_epub_with_cover(path: str) -> None:
     epub.write_epub(path, book)
 
 
+def _make_epub_with_unofficial_cover(path: str) -> None:
+    """Reproduit un EPUB sans déclaration officielle de couverture (pas de
+    <meta name="cover"> OPF, pas de propriété de manifeste EPUB3) -- juste un item
+    image nommé "cover" par convention, comme observé sur un vrai fichier généré par
+    un outil tiers (AlexandriZ). N'utilise PAS book.set_cover() qui produirait une
+    déclaration officielle et n'exercerait pas la 4e stratégie de repli."""
+    from ebooklib import epub
+    book = epub.EpubBook()
+    book.set_title("Livre avec couverture non déclarée")
+    book.set_language("fr")
+    cover_item = epub.EpubImage(
+        uid="cover", file_name="cover.jpeg", media_type="image/jpeg", content=_FAKE_JPEG,
+    )
+    book.add_item(cover_item)
+    c1 = epub.EpubHtml(title="Chapitre 1", file_name="ch01.xhtml")
+    c1.content = b"<html><body><p>Bonjour.</p></body></html>"
+    book.add_item(c1)
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", c1]
+    epub.write_epub(path, book)
+
+
 def _make_epub_without_cover(path: str) -> None:
     from ebooklib import epub
     book = epub.EpubBook()
@@ -104,6 +126,18 @@ with tempfile.TemporaryDirectory() as tmpdir:
     _make_epub_with_cover(p)
     parsed = EpubParser().parse(p)
     check("cover_image non nul", parsed.cover_image is not None)
+    check("cover_media_type = image/jpeg", parsed.cover_media_type == "image/jpeg")
+    if parsed.cover_image is not None:
+        check("contenu = fake JPEG", parsed.cover_image == _FAKE_JPEG)
+
+
+# ── 2bis. Parser détecte une couverture SANS déclaration officielle (item "cover") ──
+section("EpubParser -- couverture sans déclaration officielle (item id/nom 'cover') => détectée")
+with tempfile.TemporaryDirectory() as tmpdir:
+    p = str(Path(tmpdir) / "unofficial_cover.epub")
+    _make_epub_with_unofficial_cover(p)
+    parsed = EpubParser().parse(p)
+    check("cover_image non nul (stratégie de repli)", parsed.cover_image is not None)
     check("cover_media_type = image/jpeg", parsed.cover_media_type == "image/jpeg")
     if parsed.cover_image is not None:
         check("contenu = fake JPEG", parsed.cover_image == _FAKE_JPEG)
