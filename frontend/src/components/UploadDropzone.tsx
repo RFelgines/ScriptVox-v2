@@ -49,8 +49,8 @@ export default function UploadDropzone({
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
           dragging
-            ? "border-blue-500 bg-blue-500/10"
-            : "border-gray-700 hover:border-gray-600"
+            ? "border-violet-500 bg-violet-500/10"
+            : "border-gray-700 hover:border-violet-700/60"
         } ${uploading ? "pointer-events-none opacity-60" : ""}`}
       >
         <input

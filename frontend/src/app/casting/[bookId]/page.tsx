@@ -242,9 +242,9 @@ export default function CastingPage({
       )}
 
       {mergeSuggestions.length > 0 && (
-        <div className="mt-6 rounded border border-yellow-700 bg-yellow-900/20 p-3">
+        <div className="mt-6 rounded border border-amber-700 bg-amber-900/20 p-3">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-semibold text-yellow-300">
+            <p className="text-sm font-semibold text-amber-300">
               Fusions de personnages suggérées
             </p>
             <Button
@@ -252,7 +252,6 @@ export default function CastingPage({
               size="sm"
               onClick={handleAcceptAllMerges}
               disabled={acceptingAll}
-              className="bg-yellow-700 hover:bg-yellow-600"
             >
               {acceptingAll ? "…" : "Tout accepter"}
             </Button>

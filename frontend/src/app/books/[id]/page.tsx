@@ -152,7 +152,7 @@ export default function BookDetailPage({
               {book.progress > 0 && book.progress < 100 && (
                 <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded bg-gray-800">
                   <div
-                    className="h-full bg-orange-400"
+                    className="h-full bg-violet-500"
                     style={{ width: `${book.progress}%` }}
                   />
                 </div>

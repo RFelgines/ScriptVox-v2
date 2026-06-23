@@ -102,7 +102,7 @@ export default function PlayerBar() {
                       disabled={!playableCh}
                       className={`w-full rounded px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
                         active
-                          ? "bg-gray-800 text-amber-400"
+                          ? "bg-gray-800 text-violet-400"
                           : "text-gray-300 hover:bg-gray-800/60"
                       }`}
                     >
@@ -123,7 +123,7 @@ export default function PlayerBar() {
         <button
           onClick={toggle}
           aria-label={isPlaying ? "Pause" : "Lire"}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-700 text-white hover:bg-green-600"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-600 text-white hover:bg-violet-500"
         >
           {isPlaying ? (
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -157,7 +157,7 @@ export default function PlayerBar() {
             step={1}
             value={currentTime}
             onChange={(e) => seek(Number(e.target.value))}
-            className="h-1 flex-1 cursor-pointer accent-green-500"
+            className="h-1 flex-1 cursor-pointer accent-violet-500"
             aria-label="Progression"
           />
           <span className="w-10 shrink-0 text-xs text-gray-400">{fmt(duration)}</span>

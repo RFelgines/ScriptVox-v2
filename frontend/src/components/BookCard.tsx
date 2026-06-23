@@ -62,7 +62,7 @@ export default function BookCard({
           {book.progress > 0 && book.progress < 100 && (
             <div className="h-1 w-full overflow-hidden rounded bg-gray-800">
               <div
-                className="h-full bg-orange-400"
+                className="h-full bg-violet-500"
                 style={{ width: `${book.progress}%` }}
               />
             </div>
