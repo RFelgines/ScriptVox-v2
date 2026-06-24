@@ -20,7 +20,12 @@ def get_engine() -> Engine:
 
 def init_db(engine: Engine | None = None) -> None:
     import app.models  # noqa: F401 — registers all SQLModel tables with metadata
-    SQLModel.metadata.create_all(engine or get_engine())
+    eng = engine or get_engine()
+    SQLModel.metadata.create_all(eng)
+
+    from app.services.voice_assignment import seed_catalogue_voices
+    with Session(eng) as session:
+        seed_catalogue_voices(session)
 
 
 def get_session() -> Generator[Session, None, None]:

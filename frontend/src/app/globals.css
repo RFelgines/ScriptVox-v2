@@ -3,3 +3,16 @@
 @theme inline {
   --font-sans: var(--font-outfit);
 }
+
+/* Cercle de voix animé (onglet Voix, façon ElevenLabs) -- dégradé qui se
+   déplace en boucle, pas d'icône statique. */
+@keyframes voice-orb-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.voice-orb {
+  background-image: linear-gradient(135deg, #a855f7, #ec4899, #8b5cf6, #a855f7);
+  background-size: 200% 200%;
+  animation: voice-orb-shift 6s ease-in-out infinite;
+}

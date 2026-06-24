@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
-from app.core.enums import AgeCategory, Gender
-from app.models.entities import Character
+from app.core.enums import AgeCategory, Gender, VoiceKind
+from app.models.entities import Character, Voice
 
 NARRATOR_VOICE_ID: str = "narrator"
 
@@ -72,6 +72,31 @@ def list_catalogue_voices() -> list[tuple[str, Gender | None]]:
                 voices.append((voice_id, gender))
                 seen.add(voice_id)
     return voices
+
+
+def _humanize_voice_id(voice_id: str) -> str:
+    return voice_id.replace("_", " ").title()
+
+
+def seed_catalogue_voices(session: Session) -> None:
+    """Insert any catalogue voice missing from the Voice table (idempotent).
+
+    Voice is the user-facing source of truth (onglet Voix, favoris) ; ce
+    seed la peuple depuis list_catalogue_voices() sans toucher à
+    assign_voices/_score_voice, qui continuent d'utiliser VOICE_CATALOGUE /
+    _CATALOGUE_META directement pour l'attribution automatique.
+    """
+    existing = {v.voice_id for v in session.exec(select(Voice)).all()}
+    for voice_id, gender in list_catalogue_voices():
+        if voice_id in existing:
+            continue
+        session.add(Voice(
+            voice_id=voice_id,
+            name=_humanize_voice_id(voice_id),
+            kind=VoiceKind.CATALOGUE,
+            gender=gender,
+        ))
+    session.commit()
 
 
 def assign_voices(book_id: int, session: Session) -> None:

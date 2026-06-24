@@ -11,6 +11,7 @@ from app.core.enums import (
     Gender,
     MergeSuggestionStatus,
     SegmentType,
+    VoiceKind,
 )
 
 
@@ -111,3 +112,22 @@ class CharacterMergeSuggestion(SQLModel, table=True):
     status: MergeSuggestionStatus = Field(default=MergeSuggestionStatus.PENDING)
 
     book: Optional["Book"] = Relationship(back_populates="merge_suggestions")
+
+
+class Voice(SQLModel, table=True):
+    __tablename__ = "voice"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Identifiant logique stable (ex. "male_0", "narrator") -- c'est CE champ que
+    # Character.voice_id référence (en chaîne libre, pas de FK : préserve la
+    # compatibilité avec les attributions existantes sans migration).
+    voice_id: str = Field(unique=True, index=True)
+    name: str
+    kind: VoiceKind = Field(default=VoiceKind.CATALOGUE)
+    gender: Optional[Gender] = None
+    locale: Optional[str] = None
+    is_favorite: bool = Field(default=False)
+    # Réservé au clonage (Phase 3b, non implémenté) -- chemin de l'échantillon
+    # audio de référence pour une voix CLONED.
+    reference_audio_path: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -24,6 +24,11 @@ os.environ.update({
 })
 os.environ.pop("EDGETTS_LOCALE", None)
 
+# Fichier DB réel sur disque (pas in-memory) -- supprimé avant chaque run pour
+# que les sections qui asserent un état global (ex. Voice.is_favorite par
+# défaut) ne voient pas de mutation laissée par un run précédent.
+(ROOT / "scriptvox_test_p9.db").unlink(missing_ok=True)
+
 PASS = "\033[32mOK\033[0m"
 FAIL = "\033[31mFAIL\033[0m"
 _errors: list[str] = []
@@ -796,6 +801,80 @@ with TestClient(app) as tc:
           f"got {by_id.get(_silent_id)}")
 
 app.dependency_overrides.clear()
+
+
+# ══════════════════════════════════════════════════════
+# Phase 18 — Voice en base (catalogue figé en source de vérité, favoris)
+# ══════════════════════════════════════════════════════
+
+from app.models.entities import Voice  # noqa: E402
+
+# ── Section 32: GET /voices expose name + is_favorite (seed via lifespan) ───
+
+section("GET /voices: chaque voix a un name + is_favorite=False par défaut")
+
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app) as tc:
+    resp = tc.get("/voices")
+    check("status 200", resp.status_code == 200, f"got {resp.status_code}")
+    data = resp.json()
+    check("9 voix avec name non vide", all(v.get("name") for v in data),
+          f"got {[v.get('name') for v in data]}")
+    check("toutes is_favorite=False par défaut", all(v.get("is_favorite") is False for v in data),
+          f"got {[v.get('is_favorite') for v in data]}")
+    check("male_0 -> name 'Male 0'", next(v for v in data if v["id"] == "male_0")["name"] == "Male 0",
+          f"got {next(v for v in data if v['id'] == 'male_0')['name']!r}")
+
+app.dependency_overrides.clear()
+
+# ── Section 33: PATCH /voices/{id} -> 200, is_favorite persisté ─────────────
+
+section("PATCH /voices/{id}: is_favorite=true -> 200, persisté au prochain GET")
+
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app) as tc:
+    r1 = tc.patch("/voices/male_0", json={"is_favorite": True})
+    check("status 200", r1.status_code == 200, f"got {r1.status_code}")
+    check("is_favorite == True dans la réponse", r1.json().get("is_favorite") is True,
+          f"got {r1.json()}")
+
+    r2 = tc.get("/voices")
+    male_0 = next(v for v in r2.json() if v["id"] == "male_0")
+    check("is_favorite == True persisté au GET suivant", male_0.get("is_favorite") is True,
+          f"got {male_0}")
+
+app.dependency_overrides.clear()
+
+# ── Section 34: PATCH /voices/{id} -> 404 si voice_id inconnu ───────────────
+
+section("PATCH /voices/{id}: voice_id inconnu -> 404")
+
+app.dependency_overrides[get_settings] = lambda: mock_edge
+
+with TestClient(app, raise_server_exceptions=False) as tc:
+    r3 = tc.patch("/voices/ghost_voice", json={"is_favorite": True})
+    check("status 404", r3.status_code == 404, f"got {r3.status_code}")
+
+app.dependency_overrides.clear()
+
+# ── Section 35: seed_catalogue_voices est idempotent (pas de doublon au 2e appel) ──
+
+section("seed_catalogue_voices: idempotent, pas de doublon en base au 2e appel")
+
+from app.services.voice_assignment import seed_catalogue_voices  # noqa: E402
+from sqlmodel import create_engine, SQLModel as _SQLModel, Session as _Session  # noqa: E402
+from sqlalchemy.pool import StaticPool as _StaticPool  # noqa: E402
+
+_eng35 = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=_StaticPool)
+_SQLModel.metadata.create_all(_eng35)
+
+with _Session(_eng35) as _s35:
+    seed_catalogue_voices(_s35)
+    seed_catalogue_voices(_s35)  # 2e appel : ne doit rien dupliquer
+    count = len(_s35.exec(select(Voice)).all())
+check("9 voix après 2 appels (pas de doublon)", count == 9, f"got {count}")
 
 
 # ── Rapport ───────────────────────────────────────────────────────────────────

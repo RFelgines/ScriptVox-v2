@@ -93,28 +93,30 @@ get_settings.cache_clear()  # recharge Settings avec FRONTEND_ORIGINS courant
 from app.main import app  # noqa: E402  (appelle get_settings() → CORSMiddleware cable)
 from fastapi.testclient import TestClient  # noqa: E402
 
-client = TestClient(app, raise_server_exceptions=False)
+# Context manager obligatoire : déclenche le lifespan (init_db -> tables créées
+# + voix seedées). Sans lui, GET /voices (lecture en base depuis le seed Voice,
+# voir [[ui_ux_plan]] Phase 3a) plante avec "no such table" -- /voices n'a plus
+# zéro dépendance DB comme avant cette phase.
+with TestClient(app, raise_server_exceptions=False) as client:
+    resp = client.get("/voices", headers={"Origin": "http://localhost:3000"})
+    acao = resp.headers.get("access-control-allow-origin", "")
+    check("reponse HTTP 2xx ou autre (pas d'erreur reseau)", resp.status_code < 500, str(resp.status_code))
+    check(
+        "Access-Control-Allow-Origin = http://localhost:3000",
+        acao == "http://localhost:3000",
+        f"got: {acao!r}",
+    )
 
-resp = client.get("/voices", headers={"Origin": "http://localhost:3000"})
-acao = resp.headers.get("access-control-allow-origin", "")
-check("reponse HTTP 2xx ou autre (pas d'erreur reseau)", resp.status_code < 500, str(resp.status_code))
-check(
-    "Access-Control-Allow-Origin = http://localhost:3000",
-    acao == "http://localhost:3000",
-    f"got: {acao!r}",
-)
+    # ── 4. CORS failure -- Origin non autorisee => header absent ──────────────
+    section("CORS -- Origin: http://evil.com => Access-Control-Allow-Origin absent")
 
-
-# ── 4. CORS failure -- Origin non autorisee => header absent ──────────────────
-section("CORS -- Origin: http://evil.com => Access-Control-Allow-Origin absent")
-
-resp2 = client.get("/voices", headers={"Origin": "http://evil.com"})
-acao2 = resp2.headers.get("access-control-allow-origin", "")
-check(
-    "Access-Control-Allow-Origin absent pour origine non autorisee",
-    acao2 != "http://evil.com",
-    f"got: {acao2!r}",
-)
+    resp2 = client.get("/voices", headers={"Origin": "http://evil.com"})
+    acao2 = resp2.headers.get("access-control-allow-origin", "")
+    check(
+        "Access-Control-Allow-Origin absent pour origine non autorisee",
+        acao2 != "http://evil.com",
+        f"got: {acao2!r}",
+    )
 
 
 # ── Resume ────────────────────────────────────────────────────────────────────

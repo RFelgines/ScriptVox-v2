@@ -41,3 +41,8 @@ class MergeSuggestionStatus(str, Enum):
     PENDING  = "PENDING"
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
+
+
+class VoiceKind(str, Enum):
+    CATALOGUE = "CATALOGUE"  # voix figée fournie par le provider TTS
+    CLONED    = "CLONED"     # voix clonée à partir d'un échantillon audio (différé, Phase 3b)

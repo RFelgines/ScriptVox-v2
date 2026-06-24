@@ -2,10 +2,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from sqlmodel import Session, select
 
 from app.config import Settings, get_settings
+from app.core.db import get_session
 from app.core.exceptions import TTSError
-from app.schemas.voice import VoiceResponse
+from app.models.entities import Voice
+from app.schemas.voice import VoiceResponse, VoiceUpdate
 from app.services.tts.base import BaseTTSProvider
 from app.services.tts.factory import get_tts_provider
 from app.services.voice_assignment import list_catalogue_voices
@@ -21,14 +24,50 @@ def get_tts_provider_dep(settings: Settings = Depends(get_settings)) -> BaseTTSP
 
 
 @router.get("", response_model=list[VoiceResponse])
-def get_voices(settings: Settings = Depends(get_settings)) -> list[VoiceResponse]:
+def get_voices(
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> list[VoiceResponse]:
     # Only edgetts carries an intrinsic locale; piper/elevenlabs resolve voices
     # from on-disk models / remote UUIDs, so locale stays None there.
     locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
+    voices = session.exec(select(Voice).order_by(Voice.id)).all()
     return [
-        VoiceResponse(id=voice_id, gender=gender, locale=locale)
-        for voice_id, gender in list_catalogue_voices()
+        VoiceResponse(
+            id=v.voice_id,
+            name=v.name,
+            kind=v.kind,
+            gender=v.gender,
+            locale=locale,
+            is_favorite=v.is_favorite,
+        )
+        for v in voices
     ]
+
+
+@router.patch("/{voice_id}", response_model=VoiceResponse)
+def patch_voice(
+    voice_id: str,
+    body: VoiceUpdate,
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> VoiceResponse:
+    voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
+    if voice is None:
+        raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
+    voice.is_favorite = body.is_favorite
+    session.add(voice)
+    session.commit()
+    session.refresh(voice)
+    locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
+    return VoiceResponse(
+        id=voice.voice_id,
+        name=voice.name,
+        kind=voice.kind,
+        gender=voice.gender,
+        locale=locale,
+        is_favorite=voice.is_favorite,
+    )
 
 
 @router.get("/{voice_id}/sample")

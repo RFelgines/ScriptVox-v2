@@ -39,10 +39,15 @@ export interface ChapterSummary {
 
 export type Gender = "MALE" | "FEMALE" | "NEUTRAL" | "UNKNOWN";
 
+export type VoiceKind = "CATALOGUE" | "CLONED";
+
 export interface VoiceSummary {
   id: string;
+  name: string;
+  kind: VoiceKind;
   gender: Gender | null;
   locale: string | null;
+  is_favorite: boolean;
 }
 
 export type MergeSuggestionStatus = "PENDING" | "ACCEPTED" | "REJECTED";
@@ -142,6 +147,19 @@ export async function listCharacters(bookId: number): Promise<CharacterSummary[]
 export async function listVoices(): Promise<VoiceSummary[]> {
   const res = await fetch(`${API_URL}/voices`);
   if (!res.ok) throw new Error(`GET /voices failed: ${res.status}`);
+  return res.json();
+}
+
+export async function patchVoiceFavorite(
+  voiceId: string,
+  isFavorite: boolean,
+): Promise<VoiceSummary> {
+  const res = await fetch(`${API_URL}/voices/${voiceId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_favorite: isFavorite }),
+  });
+  if (!res.ok) throw new Error(`PATCH /voices/${voiceId} failed: ${res.status}`);
   return res.json();
 }
 
