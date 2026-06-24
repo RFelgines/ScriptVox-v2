@@ -2,17 +2,30 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
+  AppSettings,
   BookSummary,
+  CharacterSummary,
   ChapterSummary,
-  getBook,
-  listChapters,
-  coverUrl,
+  MergeSuggestion,
+  VoiceSummary,
+  acceptMergeSuggestion,
   bookMp3Url,
   chapterAudioUrl,
-  generateChapter,
+  coverUrl,
   generateAllChapters,
+  generateBook,
+  generateChapter,
+  getAppSettings,
+  getBook,
+  listCharacters,
+  listChapters,
+  listMergeSuggestions,
+  listVoices,
+  patchBookProvider,
+  patchCharacterVoice,
+  rejectMergeSuggestion,
+  voiceSampleUrl,
 } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -36,7 +49,7 @@ export default function BookDetailPage({
 }) {
   const { id } = use(params);
   const bookId = Number(id);
-  const router = useRouter();
+  const { play } = usePlayer();
 
   const [book, setBook] = useState<BookSummary | null>(null);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -44,13 +57,30 @@ export default function BookDetailPage({
   const [loading, setLoading] = useState(true);
   const [generatingPos, setGeneratingPos] = useState<number | null>(null);
   const [generatingAll, setGeneratingAll] = useState(false);
-  const { play } = usePlayer();
   // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
 
-  // ?casting=auto (posé par la bibliothèque après upload) : redirige vers la page
-  // de casting dédiée dès que l'analyse atteint ANALYZED, servant de confirmation
+  // ── Casting (fusionné dans la page livre — plus de page dédiée) ────────────
+  const [castingExpanded, setCastingExpanded] = useState(false);
+  const [castingLoaded, setCastingLoaded] = useState(false);
+  const [castingLoading, setCastingLoading] = useState(false);
+  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
+  const [voices, setVoices] = useState<VoiceSummary[]>([]);
+  const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [resolvingId, setResolvingId] = useState<number | null>(null);
+  const [acceptingAll, setAcceptingAll] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [savingProvider, setSavingProvider] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showSecondary, setShowSecondary] = useState(false);
+  // Bumpé après une action de fusion pour relancer le fetch (personnages + suggestions).
+  const [mergeReloadNonce, setMergeReloadNonce] = useState(0);
+
+  // ?casting=auto (posé par la bibliothèque après upload) : déplie la section
+  // casting dès que l'analyse atteint ANALYZED, servant de confirmation
   // "tout valider ou ajuster" sans action de l'utilisateur. Lu manuellement via
   // window.location plutôt que useSearchParams pour éviter le besoin d'un
   // Suspense boundary (cf. doc Next : useSearchParams force le CSR jusqu'au
@@ -62,9 +92,114 @@ export default function BookDetailPage({
   );
 
   useEffect(() => {
-    if (!(autoFlag && book?.status === "ANALYZED")) return;
-    router.push(`/casting/${bookId}`);
-  }, [autoFlag, book?.status, bookId, router]);
+    if (!(autoFlag && book?.status === "ANALYZED" && !castingExpanded)) return;
+    // setState différé en microtâche pour rester hors du corps synchrone de
+    // l'effet (règle react-hooks/set-state-in-effect, même convention qu'ailleurs
+    // dans ce projet).
+    Promise.resolve().then(() => setCastingExpanded(true));
+  }, [autoFlag, book?.status, castingExpanded]);
+
+  useEffect(() => {
+    if (!castingExpanded) return;
+    let active = true;
+    Promise.resolve().then(() => {
+      if (active) setCastingLoading(true);
+    });
+    Promise.all([
+      listCharacters(bookId),
+      listVoices(),
+      listMergeSuggestions(bookId),
+      getAppSettings(),
+    ])
+      .then(([chars, vs, merges, settings]) => {
+        if (!active) return;
+        setCharacters(chars);
+        setVoices(vs);
+        setMergeSuggestions(merges);
+        setAppSettings(settings);
+        setCastingLoaded(true);
+        setError(null);
+      })
+      .catch((e) => {
+        if (active) setError(String(e));
+      })
+      .finally(() => {
+        if (active) setCastingLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [castingExpanded, bookId, mergeReloadNonce]);
+
+  function handleProviderChange(value: string) {
+    setSavingProvider(true);
+    setError(null);
+    patchBookProvider(bookId, value || null)
+      .then((updated) => setBook(updated))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSavingProvider(false));
+  }
+
+  function handleVoiceChange(characterId: number, voiceId: string) {
+    setSavingId(characterId);
+    setError(null);
+    patchCharacterVoice(characterId, voiceId)
+      .then((updated) => {
+        // Fusionne uniquement voice_id : la réponse de PATCH ne recalcule pas
+        // segment_count (calculé seulement par GET /characters), remplacer tout
+        // l'objet écraserait ce champ à 0 et ferait basculer le personnage à
+        // tort dans "personnages secondaires sans réplique".
+        setCharacters((prev) =>
+          prev.map((c) => (c.id === updated.id ? { ...c, voice_id: updated.voice_id } : c)),
+        );
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSavingId(null));
+  }
+
+  function characterName(charId: number): string {
+    return characters.find((c) => c.id === charId)?.name ?? `#${charId}`;
+  }
+
+  function handleResolveMerge(suggestionId: number, action: "accept" | "reject") {
+    setResolvingId(suggestionId);
+    setError(null);
+    const resolve = action === "accept" ? acceptMergeSuggestion : rejectMergeSuggestion;
+    resolve(suggestionId)
+      .then(() => setMergeReloadNonce((n) => n + 1))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setResolvingId(null));
+  }
+
+  function handleAcceptAllMerges() {
+    setAcceptingAll(true);
+    setError(null);
+    // Séquentiel : accepter une suggestion peut en rejeter automatiquement une autre du
+    // même groupe côté backend (doublon 3+) — un 409 sur une suggestion déjà résolue par
+    // ce mécanisme est attendu, pas une vraie erreur, donc ignoré silencieusement ici.
+    mergeSuggestions
+      .reduce<Promise<void>>(
+        (chain, s) =>
+          chain.then(() => acceptMergeSuggestion(s.id).then(
+            () => undefined,
+            () => undefined,
+          )),
+        Promise.resolve(),
+      )
+      .then(() => setMergeReloadNonce((n) => n + 1))
+      .finally(() => setAcceptingAll(false));
+  }
+
+  function handleGenerateBook() {
+    setGenerating(true);
+    setError(null);
+    generateBook(bookId)
+      .then(() => setReloadNonce((n) => n + 1))
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setGenerating(false);
+      });
+  }
 
   function handleGenerateChapter(position: number) {
     setGeneratingPos(position);
@@ -113,8 +248,77 @@ export default function BookDetailPage({
     };
   }, [bookId, reloadNonce]);
 
+  const assignable = voices.filter((v) => v.id !== "narrator");
+  const canGenerate = book?.status === "ANALYZED" && !generating;
+
+  const needle = search.trim().toLowerCase();
+  const filtered = needle
+    ? characters.filter((c) => c.name.toLowerCase().includes(needle))
+    : characters;
+  // Tri par importance narrative (nb de répliques) plutôt que l'ordre DB arbitraire.
+  const mainCharacters = filtered
+    .filter((c) => c.segment_count > 0)
+    .sort((a, b) => b.segment_count - a.segment_count);
+  // "Bruit" : personnages détectés sans aucune réplique (ex. dédicace) — repliés par
+  // défaut plutôt que masqués, l'utilisateur peut vouloir leur assigner une voix.
+  const secondaryCharacters = filtered.filter((c) => c.segment_count === 0);
+
+  function renderCharacterRow(c: CharacterSummary) {
+    return (
+      <li
+        key={c.id}
+        className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900 p-3"
+      >
+        <div className="flex-1">
+          <p className="font-medium">{c.name}</p>
+          <p className="text-xs text-gray-500">
+            {c.gender}
+            {c.age_category && c.age_category !== "UNKNOWN" ? ` · ${c.age_category}` : ""}
+            {c.segment_count > 0
+              ? ` · ${c.segment_count} réplique${c.segment_count > 1 ? "s" : ""}`
+              : ""}
+          </p>
+          {c.description && (
+            <p className="mt-1 line-clamp-2 text-xs text-gray-600">{c.description}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={c.voice_id ?? ""}
+            disabled={savingId === c.id}
+            onChange={(e) => handleVoiceChange(c.id, e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm disabled:opacity-50"
+          >
+            <option value="" disabled>
+              Choisir…
+            </option>
+            {assignable.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.id}
+                {v.gender ? ` — ${v.gender}` : ""}
+              </option>
+            ))}
+          </select>
+          {c.voice_id && (
+            <button
+              onClick={() =>
+                play({ title: `Aperçu — ${c.voice_id}`, src: voiceSampleUrl(c.voice_id!) })
+              }
+              title="Écouter un aperçu de cette voix"
+              aria-label="Écouter un aperçu de cette voix"
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+            >
+              ▶
+            </button>
+          )}
+          {savingId === c.id && <span className="text-xs text-gray-500">…</span>}
+        </div>
+      </li>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
+    <main className="mx-auto max-w-4xl px-6 py-8">
       <Link href="/" className="text-sm text-gray-400 hover:text-gray-200">
         ← Bibliothèque
       </Link>
@@ -168,9 +372,9 @@ export default function BookDetailPage({
               {(book.status === "ANALYZED" ||
                 book.status === "GENERATING" ||
                 book.status === "DONE") && (
-                <Link href={`/casting/${book.id}`}>
-                  <Button className="mt-3">Casting</Button>
-                </Link>
+                <Button onClick={() => setCastingExpanded((v) => !v)} className="mt-3">
+                  {castingExpanded ? "▾" : "▸"} Casting
+                </Button>
               )}
               {book.status === "DONE" && book.mp3_path && (
                 <Button
@@ -191,6 +395,156 @@ export default function BookDetailPage({
               )}
             </div>
           </header>
+
+          {castingExpanded && (
+            <section className="mt-6 rounded border border-gray-800 bg-gray-950 p-4">
+              {castingLoading && !castingLoaded && (
+                <p className="text-gray-500">Chargement du casting…</p>
+              )}
+
+              {castingLoaded && book.status !== "ANALYZED" && book.status !== "GENERATING" && book.status !== "DONE" && (
+                <Alert title="Casting indisponible">
+                  <p className="text-sm text-gray-400">
+                    Le casting n&apos;est disponible qu&apos;une fois le livre analysé (statut
+                    actuel : {book.status}).
+                  </p>
+                </Alert>
+              )}
+
+              {mergeSuggestions.length > 0 && (
+                <div className="mb-4 rounded border border-amber-700 bg-amber-900/20 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-amber-300">
+                      Fusions de personnages suggérées
+                    </p>
+                    <Button
+                      variant="warning"
+                      size="sm"
+                      onClick={handleAcceptAllMerges}
+                      disabled={acceptingAll}
+                    >
+                      {acceptingAll ? "…" : "Tout accepter"}
+                    </Button>
+                  </div>
+                  <ul className="space-y-2">
+                    {mergeSuggestions.map((s) => (
+                      <li key={s.id} className="flex items-center gap-3 rounded bg-gray-950 p-2">
+                        <div className="flex-1 text-sm">
+                          <span className="font-medium">
+                            {characterName(s.survivor_character_id)}
+                          </span>
+                          <span className="text-gray-500"> ← </span>
+                          <span className="text-gray-400">
+                            {characterName(s.merged_character_id)}
+                          </span>
+                          {s.reason && <p className="text-xs text-gray-500">{s.reason}</p>}
+                        </div>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleResolveMerge(s.id, "accept")}
+                          disabled={resolvingId === s.id || acceptingAll}
+                        >
+                          Accepter
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleResolveMerge(s.id, "reject")}
+                          disabled={resolvingId === s.id || acceptingAll}
+                          className="bg-gray-700 hover:bg-gray-600"
+                        >
+                          Rejeter
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {castingLoaded && characters.length === 0 && (
+                <p className="text-gray-500">Aucun personnage détecté.</p>
+              )}
+
+              {characters.length > 0 && (
+                <>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Rechercher un personnage…"
+                    className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm placeholder:text-gray-500"
+                  />
+
+                  {mainCharacters.length > 0 ? (
+                    <ul className="mt-4 space-y-3">{mainCharacters.map(renderCharacterRow)}</ul>
+                  ) : (
+                    <p className="mt-4 text-sm text-gray-500">Aucun personnage ne correspond.</p>
+                  )}
+
+                  {secondaryCharacters.length > 0 && (
+                    <div className="mt-6">
+                      <button
+                        onClick={() => setShowSecondary((v) => !v)}
+                        className="text-sm text-gray-500 hover:text-gray-300"
+                      >
+                        {showSecondary ? "▾" : "▸"} Personnages secondaires sans réplique (
+                        {secondaryCharacters.length})
+                      </button>
+                      {showSecondary && (
+                        <ul className="mt-3 space-y-3">
+                          {secondaryCharacters.map(renderCharacterRow)}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {castingLoaded && (
+                <div className="mt-6 flex items-center justify-between gap-3 border-t border-gray-800 pt-4">
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-gray-500">
+                      {voices[0]?.locale
+                        ? `Langue : ${voices[0].locale}`
+                        : "Langue : selon le provider TTS"}
+                    </p>
+                    {appSettings && (
+                      <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                        Moteur :
+                        <select
+                          value={book.tts_provider ?? ""}
+                          disabled={savingProvider}
+                          onChange={(e) => handleProviderChange(e.target.value)}
+                          className="rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-xs text-gray-200 disabled:opacity-50"
+                        >
+                          <option value="">Par défaut ({appSettings.default_tts_provider})</option>
+                          {appSettings.available_tts_providers.map((p) => (
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    onClick={handleGenerateBook}
+                    disabled={!canGenerate}
+                    title={
+                      book.status === "ANALYZED"
+                        ? undefined
+                        : "Génération possible uniquement quand le livre est ANALYZED"
+                    }
+                    className="disabled:opacity-40!"
+                  >
+                    {generating ? "Lancement…" : "Générer l'audio"}
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="mt-8">
             <div className="mb-3 flex items-center justify-between">
