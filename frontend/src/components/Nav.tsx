@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import ThemeToggle from "./ThemeToggle";
 
 type Tab = { href: string; label: string };
 
@@ -23,15 +24,12 @@ export default function Nav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-gray-800 bg-gray-900/80 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
-        <Link href="/" className="text-lg font-bold tracking-tight text-gray-100">
-          Script
-          <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
-            Vox
-          </span>
+        <Link href="/" className="text-lg font-bold tracking-tight text-foreground">
+          ScriptVox
         </Link>
-        <nav className="flex items-center gap-1">
+        <nav className="flex flex-1 items-center gap-1">
           {TABS.map((tab) => {
             const active = isActive(pathname, tab.href);
             return (
@@ -39,10 +37,10 @@ export default function Nav() {
                 key={tab.href}
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`rounded-control px-3 py-1.5 text-sm font-medium transition-colors ${
                   active
-                    ? "bg-gray-800 text-violet-400"
-                    : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-100"
+                    ? "bg-surface-2 text-foreground"
+                    : "text-muted hover:bg-surface-2/60 hover:text-foreground"
                 }`}
               >
                 {tab.label}
@@ -50,6 +48,7 @@ export default function Nav() {
             );
           })}
         </nav>
+        <ThemeToggle />
       </div>
     </header>
   );

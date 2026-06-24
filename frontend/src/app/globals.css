@@ -2,6 +2,54 @@
 
 @theme inline {
   --font-sans: var(--font-outfit);
+  --font-mono: var(--font-geist-mono);
+
+  /* Tokens sémantiques -- la VALEUR référencée (--background, --foreground...)
+     change selon [data-theme], la classe utilitaire générée (bg-background,
+     text-foreground...) reste la même partout dans l'app. */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+}
+
+@theme {
+  --radius-card: 20px;
+  --radius-control: 12px;
+}
+
+/* Neutres CHAUDS (proche stone, pas le gris froid par défaut de Tailwind) --
+   référence DA ElevenLabs : #FDFCFC / #F5F3F1 en clair, jamais de gris bleuté.
+   Sombre = défaut implicite sur :root (PAS de [data-theme="dark"]) : le JSX
+   serveur ne pose jamais l'attribut data-theme, pour qu'il n'y ait aucun
+   littéral pour React à "réparer" pendant l'hydratation -- [data-theme="light"]
+   est une simple ADDITION du script anti-flash, jamais une correction d'un
+   attribut déjà présent. Bascule clair->sombre = removeAttribute, pas un 2e
+   set explicite à "dark" (même logique, retour au défaut implicite). */
+:root {
+  --background: #1a1917;
+  --surface: #232220;
+  --surface-2: #2e2c29;
+  --border: #3a3835;
+  --foreground: #f5f3f1;
+  --muted: #a8a29e;
+  --primary: #f5f3f1;
+  --primary-foreground: #1c1917;
+}
+
+[data-theme="light"] {
+  --background: #fdfcfc;
+  --surface: #ffffff;
+  --surface-2: #f5f3f1;
+  --border: #e7e3df;
+  --foreground: #1c1917;
+  --muted: #57534e;
+  --primary: #1c1917;
+  --primary-foreground: #fdfcfc;
 }
 
 /* Cercle de voix animé (onglet Voix, façon ElevenLabs) -- dégradé qui se
