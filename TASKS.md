@@ -1108,10 +1108,42 @@ Fichiers (9) : `frontend/src/lib/status.ts`, `frontend/src/components/ui/StatusB
   `frontend/src/app/voix/page.tsx`, `frontend/src/app/parametres/page.tsx`,
   `frontend/src/components/BookCard.tsx`.
 
+### Phase B — Correctifs tactiques
+
+- **B1 ✅ (2026-06-25, commit `36600c6`)** — Badges drapeau+langue + symbole sexe (♂/♀) sur le
+  catalogue de voix. `localeToFlag()` (emoji depuis le code pays BCP 47, inline car seul
+  consommateur) + `GENDER_SYMBOL` (MALE/FEMALE seulement, rien pour NEUTRAL/UNKNOWN/null). Pas de
+  badge "ton" — décision actée avec l'utilisateur (aurait demandé une nouvelle métadonnée sur
+  l'entité `Voice`, hors périmètre). 100% frontend, 0 contrat. Vérifié lint + build + capture réelle
+  2 thèmes + 15/15 suites backend.
+  Fichier (1) : `frontend/src/app/voix/page.tsx`.
+
+- **B-play ✅ (2026-06-25, commit `854c458`)** — Bouton play/pause du player remodernisé.
+  `frontend/src/components/player/PlayerBar.tsx` : 36px→44px, `shadow-md`, `hover:scale-105` —
+  aligne sur le même langage visuel que l'orbe Voix. 100% frontend, 0 contrat. Vérifié via
+  `preview_inspect` (taille/ombre/couleur) dans les 2 thèmes + lint/build verts.
+  Fichier (1) : `frontend/src/components/player/PlayerBar.tsx`.
+
+- **B-orbes ✅ (2026-06-25, commit `0952468`)** — Couleur unique par voix + grain SVG sur le
+  catalogue Voix. **Déviation du plan initial** : un hash déterministe brut de `voice_id` (DJB2,
+  puis DJB2+constante de Knuth, puis finalizer Murmur-style) retombait systématiquement sur des
+  paires de voix à 0-9° d'écart de teinte (quasi indiscernables à l'œil) sur ce catalogue de 9 ids
+  très proches (`male_0`/`male_1`/`male_2`…) — testé et confirmé en plusieurs itérations via
+  `preview_eval` avant d'abandonner l'approche hash pur. **Solution retenue** : assignation par
+  angle d'or (`137.5077° × rang`) sur le tri alphabétique des `voice_id` — garantit ~20°+ d'écart
+  minimum pour les 9 voix actuelles, se rééquilibre automatiquement si le catalogue grossit
+  (clonage futur) plutôt que de risquer une collision figée. Calculé sur le catalogue complet (pas
+  le sous-ensemble filtré par "Favoris"), donc une couleur de voix ne change pas selon le filtre.
+  Grain : SVG `feTurbulence` statique (pas d'animation du bruit, perf), `mix-blend-mode: overlay`,
+  opacité 0.35, partagé par toutes les orbes (même data URI). 100% frontend, 0 contrat.
+  Fichiers (2) : `frontend/src/app/globals.css`, `frontend/src/app/voix/page.tsx`.
+
+**Vérification (B-play + B-orbes).** `npm run lint` + `npm run build` verts après chaque étape.
+Capture réelle navigateur (via `preview_*`) dans les 2 thèmes après chaque étape. 15/15 suites
+backend sans régression (changement 100% frontend).
+
 ### À venir
 
-- **Phase B** — Correctifs tactiques : bouton play à remoderniser ; badges voix (drapeau/langue/
-  sexe) ; orbes à couleur unique par voix (hash déterministe de `voice_id`) + grain SVG.
 - **Phase C** — Player redesign (replié façon capture 3, déplié façon capture 5 — restyle des 2
   états existants, pas une nouvelle archi).
 - **Phase D** — Polish écran par écran (cartes Biblio, page livre, grille Voix, Paramètres).
