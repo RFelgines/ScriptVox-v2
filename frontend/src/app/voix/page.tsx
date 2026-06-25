@@ -1,9 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { VoiceSummary, listVoices, patchVoiceFavorite, voiceSampleUrl } from "@/lib/api";
+import { Gender, VoiceSummary, listVoices, patchVoiceFavorite, voiceSampleUrl } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import Alert from "@/components/ui/Alert";
+
+// Emoji drapeau à partir du code pays d'un BCP 47 (ex. "fr-FR" -> 🇫🇷) : deux
+// indicateurs régionaux Unicode décalés depuis "A" (0x1F1E6 = 🇦).
+function localeToFlag(locale: string): string | null {
+  const region = locale.split("-")[1];
+  if (!region || region.length !== 2) return null;
+  const codePoints = [...region.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65);
+  return String.fromCodePoint(...codePoints);
+}
+
+const GENDER_SYMBOL: Partial<Record<Gender, string>> = {
+  MALE: "♂",
+  FEMALE: "♀",
+};
 
 export default function VoixPage() {
   const { play } = usePlayer();
@@ -96,7 +110,20 @@ export default function VoixPage() {
               <p className="truncate text-sm font-medium" title={v.name}>
                 {v.name}
               </p>
-              {v.gender && <p className="text-xs text-muted">{v.gender}</p>}
+              {(v.locale || (v.gender && GENDER_SYMBOL[v.gender])) && (
+                <div className="flex items-center gap-1">
+                  {v.locale && (
+                    <span className="flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
+                      {localeToFlag(v.locale) ?? ""} {v.locale.split("-")[1] ?? v.locale}
+                    </span>
+                  )}
+                  {v.gender && GENDER_SYMBOL[v.gender] && (
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-2 text-xs text-muted">
+                      {GENDER_SYMBOL[v.gender]}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
