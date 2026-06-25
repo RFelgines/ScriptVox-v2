@@ -123,15 +123,15 @@ export default function PlayerBar() {
         <button
           onClick={toggle}
           aria-label={isPlaying ? "Pause" : "Lire"}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 hover:opacity-90"
         >
           {isPlaying ? (
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-              <rect x="4" y="3" width="4" height="14" rx="1" />
-              <rect x="12" y="3" width="4" height="14" rx="1" />
+              <rect x="4" y="3" width="4" height="14" rx="1.5" />
+              <rect x="12" y="3" width="4" height="14" rx="1.5" />
             </svg>
           ) : (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+            <svg viewBox="0 0 20 20" fill="currentColor" className="ml-0.5 h-4 w-4">
               <path d="M6 3.5l11 6.5-11 6.5V3.5z" />
             </svg>
           )}
