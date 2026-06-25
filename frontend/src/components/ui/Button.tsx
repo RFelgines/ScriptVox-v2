@@ -4,8 +4,10 @@ type ButtonVariant = "primary" | "secondary" | "warning";
 type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: "bg-violet-600 hover:bg-violet-500 text-white",
-  secondary: "bg-gray-800 hover:bg-gray-700",
+  // Neutre, pas d'accent de marque : la couleur vit dans les orbes de voix,
+  // pas dans le chrome (décision DA, voir ui_modernization_plan).
+  primary: "bg-primary text-primary-foreground hover:opacity-90",
+  secondary: "border border-border bg-surface-2 text-foreground hover:bg-surface-2/70",
   warning: "bg-amber-600 hover:bg-amber-500 text-white",
 };
 
@@ -29,7 +31,7 @@ export default function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`rounded font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
+      className={`rounded-control font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
       {...rest}
     />
   );

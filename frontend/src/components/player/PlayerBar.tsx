@@ -56,26 +56,26 @@ export default function PlayerBar() {
     currentIndex < playable.length - 1;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-800 bg-gray-900">
+    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-surface">
       {expanded && (
-        <div className="flex max-h-80 flex-col gap-3 border-b border-gray-800 p-4 sm:flex-row">
+        <div className="flex max-h-80 flex-col gap-3 border-b border-border p-4 sm:flex-row">
           <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-start">
             {track.coverUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={track.coverUrl}
                 alt=""
-                className="h-20 w-14 shrink-0 rounded object-cover sm:h-32 sm:w-20"
+                className="h-20 w-14 shrink-0 rounded-control object-cover sm:h-32 sm:w-20"
               />
             ) : (
-              <div className="h-20 w-14 shrink-0 rounded bg-gray-800 sm:h-32 sm:w-20" />
+              <div className="h-20 w-14 shrink-0 rounded-control bg-surface-2 sm:h-32 sm:w-20" />
             )}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => hasPrev && playChapter(playable[currentIndex - 1])}
                 disabled={!hasPrev}
                 aria-label="Chapitre précédent"
-                className="rounded px-2 py-1 text-gray-400 hover:bg-gray-800 hover:text-gray-100 disabled:opacity-30"
+                className="rounded-control px-2 py-1 text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
               >
                 ⏮
               </button>
@@ -83,7 +83,7 @@ export default function PlayerBar() {
                 onClick={() => hasNext && playChapter(playable[currentIndex + 1])}
                 disabled={!hasNext}
                 aria-label="Chapitre suivant"
-                className="rounded px-2 py-1 text-gray-400 hover:bg-gray-800 hover:text-gray-100 disabled:opacity-30"
+                className="rounded-control px-2 py-1 text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
               >
                 ⏭
               </button>
@@ -100,10 +100,10 @@ export default function PlayerBar() {
                     <button
                       onClick={() => playableCh && playChapter(ch)}
                       disabled={!playableCh}
-                      className={`w-full rounded px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                      className={`w-full rounded-control px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
                         active
-                          ? "bg-gray-800 text-violet-400"
-                          : "text-gray-300 hover:bg-gray-800/60"
+                          ? "bg-surface-2 font-medium text-foreground"
+                          : "text-foreground/80 hover:bg-surface-2/60"
                       }`}
                     >
                       {ch.title ?? `Chapitre ${ch.position}`}
@@ -113,7 +113,7 @@ export default function PlayerBar() {
               })}
             </ul>
           ) : (
-            <p className="flex-1 text-sm text-gray-500">{track.title}</p>
+            <p className="flex-1 text-sm text-muted">{track.title}</p>
           )}
         </div>
       )}
@@ -123,7 +123,7 @@ export default function PlayerBar() {
         <button
           onClick={toggle}
           aria-label={isPlaying ? "Pause" : "Lire"}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-600 text-white hover:bg-violet-500"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90"
         >
           {isPlaying ? (
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -140,7 +140,7 @@ export default function PlayerBar() {
         {/* Titre — clic = déplie/replie */}
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="w-40 shrink-0 truncate text-left text-sm font-medium hover:text-gray-300"
+          className="w-40 shrink-0 truncate text-left text-sm font-medium hover:text-muted"
           title={track.title}
         >
           {expanded ? "▾ " : "▸ "}
@@ -149,18 +149,18 @@ export default function PlayerBar() {
 
         {/* Scrub */}
         <div className="flex flex-1 items-center gap-2 overflow-hidden">
-          <span className="w-10 shrink-0 text-right text-xs text-gray-400">{fmt(currentTime)}</span>
+          <span className="w-10 shrink-0 text-right text-xs text-muted">{fmt(currentTime)}</span>
           <input
             type="range"
             min={0}
             max={duration || 1}
-            step={1}
+            step="any"
             value={currentTime}
             onChange={(e) => seek(Number(e.target.value))}
-            className="h-1 flex-1 cursor-pointer accent-violet-500"
+            className="h-1 flex-1 cursor-pointer accent-primary"
             aria-label="Progression"
           />
-          <span className="w-10 shrink-0 text-xs text-gray-400">{fmt(duration)}</span>
+          <span className="w-10 shrink-0 text-xs text-muted">{fmt(duration)}</span>
         </div>
 
         {/* Vitesse */}
@@ -168,7 +168,7 @@ export default function PlayerBar() {
           value={rate}
           onChange={(e) => setRate(Number(e.target.value))}
           aria-label="Vitesse de lecture"
-          className="rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-xs"
+          className="rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground"
         >
           {RATES.map((r) => (
             <option key={r} value={r}>
@@ -181,7 +181,7 @@ export default function PlayerBar() {
         <button
           onClick={close}
           aria-label="Fermer le lecteur"
-          className="shrink-0 text-gray-400 hover:text-gray-200"
+          className="shrink-0 text-muted hover:text-foreground"
         >
           ✕
         </button>

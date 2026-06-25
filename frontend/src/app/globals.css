@@ -1,12 +1,19 @@
 @import "tailwindcss";
 
+/* "inline" : nécessaire pour next/font (sa variable n'est posée que sur la
+   classe appliquée à <html>, pas sur :root -- Tailwind doit la référencer
+   telle quelle plutôt que tenter de la résoudre lui-même). */
 @theme inline {
   --font-sans: var(--font-outfit);
   --font-mono: var(--font-geist-mono);
+}
 
-  /* Tokens sémantiques -- la VALEUR référencée (--background, --foreground...)
-     change selon [data-theme], la classe utilitaire générée (bg-background,
-     text-foreground...) reste la même partout dans l'app. */
+/* PAS "inline" ici : "inline" FIGE la valeur résolue au moment de la
+   compilation (vu en conditions réelles -- bg-background etc. gardaient la
+   teinte sombre même après bascule vers data-theme="light", piégé puis
+   corrigé). Un @theme classique crée une vraie variable CSS --color-* dont
+   la valeur reste réévaluée à l'exécution selon [data-theme]. */
+@theme {
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -15,9 +22,7 @@
   --color-muted: var(--muted);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-}
 
-@theme {
   --radius-card: 20px;
   --radius-control: 12px;
 }

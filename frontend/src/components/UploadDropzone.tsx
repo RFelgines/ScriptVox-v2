@@ -47,10 +47,8 @@ export default function UploadDropzone({
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
-          dragging
-            ? "border-violet-500 bg-violet-500/10"
-            : "border-gray-700 hover:border-violet-700/60"
+        className={`cursor-pointer rounded-card border-2 border-dashed p-8 text-center transition-colors ${
+          dragging ? "border-foreground bg-surface-2" : "border-border hover:border-muted"
         } ${uploading ? "pointer-events-none opacity-60" : ""}`}
       >
         <input
@@ -64,14 +62,14 @@ export default function UploadDropzone({
             e.target.value = "";
           }}
         />
-        <p className="font-medium text-gray-200">
+        <p className="font-medium text-foreground">
           {uploading ? "Upload en cours…" : "Glissez un EPUB ici"}
         </p>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-muted">
           ou cliquez pour choisir un fichier .epub
         </p>
       </div>
-      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+      {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
     </div>
   );
 }

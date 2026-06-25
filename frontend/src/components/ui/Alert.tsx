@@ -10,8 +10,8 @@ export default function Alert({
   className?: string;
 }) {
   return (
-    <div className={`rounded border border-red-700 bg-red-900/40 p-4 ${className}`}>
-      {title && <p className="font-semibold text-red-300">{title}</p>}
+    <div className={`rounded-control border border-red-500/30 bg-red-500/10 p-4 ${className}`}>
+      {title && <p className="font-semibold text-red-500">{title}</p>}
       {children}
     </div>
   );
