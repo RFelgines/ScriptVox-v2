@@ -43,18 +43,18 @@ export default function VoixPage() {
           onClick={() => setFavoritesOnly((v) => !v)}
           className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             favoritesOnly
-              ? "bg-gray-800 text-violet-400"
-              : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-100"
+              ? "bg-surface-2 text-foreground"
+              : "text-muted hover:bg-surface-2/60 hover:text-foreground"
           }`}
         >
           ★ Favoris
         </button>
       </div>
-      <p className="mt-2 text-gray-400">
+      <p className="mt-2 text-muted">
         Le catalogue de voix disponibles. Cliquez sur un cercle pour écouter un aperçu.
       </p>
 
-      {loading && <p className="mt-6 text-gray-500">Chargement…</p>}
+      {loading && <p className="mt-6 text-muted">Chargement…</p>}
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
@@ -63,7 +63,7 @@ export default function VoixPage() {
       )}
 
       {!loading && !error && visible.length === 0 && (
-        <p className="mt-6 text-gray-500">
+        <p className="mt-6 text-muted">
           {favoritesOnly ? "Aucune voix en favori pour l'instant." : "Aucune voix disponible."}
         </p>
       )}
@@ -86,8 +86,8 @@ export default function VoixPage() {
                   onClick={() => toggleFavorite(v)}
                   disabled={savingId === v.id}
                   aria-label={v.is_favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
-                  className={`absolute -top-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-gray-900 text-sm shadow disabled:opacity-50 ${
-                    v.is_favorite ? "text-amber-400" : "text-gray-500 hover:text-gray-300"
+                  className={`absolute -top-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-surface text-sm shadow disabled:opacity-50 ${
+                    v.is_favorite ? "text-amber-400" : "text-muted hover:text-foreground"
                   }`}
                 >
                   {v.is_favorite ? "★" : "☆"}
@@ -96,7 +96,7 @@ export default function VoixPage() {
               <p className="truncate text-sm font-medium" title={v.name}>
                 {v.name}
               </p>
-              {v.gender && <p className="text-xs text-gray-500">{v.gender}</p>}
+              {v.gender && <p className="text-xs text-muted">{v.gender}</p>}
             </div>
           ))}
         </div>

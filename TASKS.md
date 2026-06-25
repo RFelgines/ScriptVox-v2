@@ -1072,6 +1072,52 @@ Fichiers (9) : `frontend/src/lib/status.ts`, `frontend/src/components/ui/StatusB
 
 ---
 
+## Phase 17 — Modernisation UI (DA ElevenLabs) — EN COURS
+
+> Après livraison complète de la roadmap fonctionnelle + onglet Voix, l'utilisateur a jugé l'app
+> « encore un peu moche » et a demandé une passe de modernisation visuelle inspirée d'ElevenLabs
+> (tokens chauds, rayons généreux, accent neutre + couleur réservée aux orbes). Détail complet
+> (captures de référence, forks de direction tranchés, séquençage A→D) : mémoire
+> `ui_modernization_plan_2026_06_24`. Tokens d'abord (Phase A), puis correctifs tactiques (B),
+> player redesign (C), polish écran par écran (D).
+
+### Phase A — Tokens de thème clair/sombre + migration
+
+- **A1 ✅ (2026-06-24, commit `be02b3f`)** — Tokens CSS (`--color-background/surface/surface-2/
+  border/foreground/muted/primary/primary-foreground`) + toggle clair/sombre. **Bug Tailwind v4
+  sérieux trouvé+corrigé** : `@theme inline` figeait les couleurs à la compilation (mode correct
+  pour `next/font`, faux pour des couleurs qui changent via `[data-theme]` à l'exécution) → passé
+  en `@theme` classique. **2e bug sérieux** : l'App Router retire l'attribut `data-theme` de
+  `<html>` ~0-500 ms après `window.load` (reproduit en build de production, cause précise non
+  confirmée) → fix par `MutationObserver` auto-réparateur (`localStorage` = seule source de vérité).
+- **A2 ✅ (2026-06-24, commit `17b9690`)** — Primitives partagées (`Button`, `Alert`,
+  `UploadDropzone`, `PlayerBar`) migrées vers les tokens ; accent violet entièrement retiré des
+  boutons. `StatusBadge` confirmé inchangé (couleurs sémantiques par statut, indépendantes du
+  thème). Bug fluidité barre de lecture corrigé au passage (`step={1}` → `step="any"` sur le
+  scrubber, anticipation de B1).
+- **A3 ✅ (2026-06-25)** — Migration des pages restantes vers les tokens (même méthode, aucun
+  nouveau piège technique — A1/A2 avaient déjà découvert/corrigé les 2 bugs sérieux ci-dessus).
+  `bg-gray-*`/`text-gray-*`/`violet-*` → `bg-background`/`bg-surface`/`bg-surface-2`/
+  `text-foreground`/`text-muted`/`border-border`/`bg-primary`. Couleurs sémantiques (erreur rouge,
+  favori amber) laissées intactes. Un override littéral mort (`bg-gray-700 hover:bg-gray-600` sur
+  le bouton "Rejeter", page livre) supprimé plutôt que retraduit — dupliquait déjà le style par
+  défaut du variant `secondary` de `Button`. Vérifié dans les deux thèmes via capture réelle
+  (Bibliothèque, page livre + Casting déplié, Voix, Paramètres). `npm run lint` + `npm run build`
+  verts ; 15/15 suites backend sans régression (changement purement frontend).
+  Fichiers (5) : `frontend/src/app/books/[id]/page.tsx`, `frontend/src/app/page.tsx`,
+  `frontend/src/app/voix/page.tsx`, `frontend/src/app/parametres/page.tsx`,
+  `frontend/src/components/BookCard.tsx`.
+
+### À venir
+
+- **Phase B** — Correctifs tactiques : bouton play à remoderniser ; badges voix (drapeau/langue/
+  sexe) ; orbes à couleur unique par voix (hash déterministe de `voice_id`) + grain SVG.
+- **Phase C** — Player redesign (replié façon capture 3, déplié façon capture 5 — restyle des 2
+  états existants, pas une nouvelle archi).
+- **Phase D** — Polish écran par écran (cartes Biblio, page livre, grille Voix, Paramètres).
+
+---
+
 ## Échantillons d'écoute B3 générés (2026-06-22 soir) — verdict utilisateur en attente
 
 **Pourquoi.** B3 (`QwenTTSProvider`, voir Phase 14 ci-dessus) restait codé mais non clos : aucune

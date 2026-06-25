@@ -267,11 +267,11 @@ export default function BookDetailPage({
     return (
       <li
         key={c.id}
-        className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900 p-3"
+        className="flex items-center gap-3 rounded border border-border bg-surface p-3"
       >
         <div className="flex-1">
           <p className="font-medium">{c.name}</p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-muted">
             {c.gender}
             {c.age_category && c.age_category !== "UNKNOWN" ? ` · ${c.age_category}` : ""}
             {c.segment_count > 0
@@ -279,7 +279,7 @@ export default function BookDetailPage({
               : ""}
           </p>
           {c.description && (
-            <p className="mt-1 line-clamp-2 text-xs text-gray-600">{c.description}</p>
+            <p className="mt-1 line-clamp-2 text-xs text-muted">{c.description}</p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -287,7 +287,7 @@ export default function BookDetailPage({
             value={c.voice_id ?? ""}
             disabled={savingId === c.id}
             onChange={(e) => handleVoiceChange(c.id, e.target.value)}
-            className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm disabled:opacity-50"
+            className="rounded border border-border bg-surface-2 px-2 py-1 text-sm disabled:opacity-50"
           >
             <option value="" disabled>
               Choisir…
@@ -306,12 +306,12 @@ export default function BookDetailPage({
               }
               title="Écouter un aperçu de cette voix"
               aria-label="Écouter un aperçu de cette voix"
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+              className="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
             >
               ▶
             </button>
           )}
-          {savingId === c.id && <span className="text-xs text-gray-500">…</span>}
+          {savingId === c.id && <span className="text-xs text-muted">…</span>}
         </div>
       </li>
     );
@@ -319,11 +319,11 @@ export default function BookDetailPage({
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
-      <Link href="/" className="text-sm text-gray-400 hover:text-gray-200">
+      <Link href="/" className="text-sm text-muted hover:text-foreground">
         ← Bibliothèque
       </Link>
 
-      {loading && !book && <p className="mt-6 text-gray-500">Chargement…</p>}
+      {loading && !book && <p className="mt-6 text-muted">Chargement…</p>}
 
       {error && (
         <Alert title="Erreur" className="mt-6">
@@ -334,7 +334,7 @@ export default function BookDetailPage({
       {book && (
         <>
           <header className="mt-6 flex gap-6">
-            <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded bg-gray-800">
+            <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded bg-surface-2">
               {book.cover_path ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -343,7 +343,7 @@ export default function BookDetailPage({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-gray-600">
+                <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted">
                   {book.title}
                 </div>
               )}
@@ -351,12 +351,12 @@ export default function BookDetailPage({
 
             <div className="flex-1">
               <h1 className="text-2xl font-bold">{book.title}</h1>
-              {book.author && <p className="text-gray-400">{book.author}</p>}
+              {book.author && <p className="text-muted">{book.author}</p>}
               <StatusBadge status={book.status} className="mt-2" />
               {book.progress > 0 && book.progress < 100 && (
-                <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded bg-gray-800">
+                <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded bg-surface-2">
                   <div
-                    className="h-full bg-violet-500"
+                    className="h-full bg-primary"
                     style={{ width: `${book.progress}%` }}
                   />
                 </div>
@@ -365,7 +365,7 @@ export default function BookDetailPage({
                 <p className="mt-2 text-sm text-red-400">{book.error_message}</p>
               )}
               {autoFlag && (book.status === "PENDING" || book.status === "PROCESSING") && (
-                <p className="mt-2 text-sm text-gray-500">
+                <p className="mt-2 text-sm text-muted">
                   Analyse en cours — le casting s&apos;ouvrira automatiquement.
                 </p>
               )}
@@ -397,14 +397,14 @@ export default function BookDetailPage({
           </header>
 
           {castingExpanded && (
-            <section className="mt-6 rounded border border-gray-800 bg-gray-950 p-4">
+            <section className="mt-6 rounded border border-border bg-surface p-4">
               {castingLoading && !castingLoaded && (
-                <p className="text-gray-500">Chargement du casting…</p>
+                <p className="text-muted">Chargement du casting…</p>
               )}
 
               {castingLoaded && book.status !== "ANALYZED" && book.status !== "GENERATING" && book.status !== "DONE" && (
                 <Alert title="Casting indisponible">
-                  <p className="text-sm text-gray-400">
+                  <p className="text-sm text-muted">
                     Le casting n&apos;est disponible qu&apos;une fois le livre analysé (statut
                     actuel : {book.status}).
                   </p>
@@ -428,16 +428,16 @@ export default function BookDetailPage({
                   </div>
                   <ul className="space-y-2">
                     {mergeSuggestions.map((s) => (
-                      <li key={s.id} className="flex items-center gap-3 rounded bg-gray-950 p-2">
+                      <li key={s.id} className="flex items-center gap-3 rounded bg-surface-2 p-2">
                         <div className="flex-1 text-sm">
                           <span className="font-medium">
                             {characterName(s.survivor_character_id)}
                           </span>
-                          <span className="text-gray-500"> ← </span>
-                          <span className="text-gray-400">
+                          <span className="text-muted"> ← </span>
+                          <span className="text-muted">
                             {characterName(s.merged_character_id)}
                           </span>
-                          {s.reason && <p className="text-xs text-gray-500">{s.reason}</p>}
+                          {s.reason && <p className="text-xs text-muted">{s.reason}</p>}
                         </div>
                         <Button
                           variant="primary"
@@ -451,7 +451,6 @@ export default function BookDetailPage({
                           size="sm"
                           onClick={() => handleResolveMerge(s.id, "reject")}
                           disabled={resolvingId === s.id || acceptingAll}
-                          className="bg-gray-700 hover:bg-gray-600"
                         >
                           Rejeter
                         </Button>
@@ -462,7 +461,7 @@ export default function BookDetailPage({
               )}
 
               {castingLoaded && characters.length === 0 && (
-                <p className="text-gray-500">Aucun personnage détecté.</p>
+                <p className="text-muted">Aucun personnage détecté.</p>
               )}
 
               {characters.length > 0 && (
@@ -472,20 +471,20 @@ export default function BookDetailPage({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Rechercher un personnage…"
-                    className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm placeholder:text-gray-500"
+                    className="w-full rounded border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted"
                   />
 
                   {mainCharacters.length > 0 ? (
                     <ul className="mt-4 space-y-3">{mainCharacters.map(renderCharacterRow)}</ul>
                   ) : (
-                    <p className="mt-4 text-sm text-gray-500">Aucun personnage ne correspond.</p>
+                    <p className="mt-4 text-sm text-muted">Aucun personnage ne correspond.</p>
                   )}
 
                   {secondaryCharacters.length > 0 && (
                     <div className="mt-6">
                       <button
                         onClick={() => setShowSecondary((v) => !v)}
-                        className="text-sm text-gray-500 hover:text-gray-300"
+                        className="text-sm text-muted hover:text-foreground"
                       >
                         {showSecondary ? "▾" : "▸"} Personnages secondaires sans réplique (
                         {secondaryCharacters.length})
@@ -501,21 +500,21 @@ export default function BookDetailPage({
               )}
 
               {castingLoaded && (
-                <div className="mt-6 flex items-center justify-between gap-3 border-t border-gray-800 pt-4">
+                <div className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
                   <div className="flex items-center gap-3">
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-muted">
                       {voices[0]?.locale
                         ? `Langue : ${voices[0].locale}`
                         : "Langue : selon le provider TTS"}
                     </p>
                     {appSettings && (
-                      <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <label className="flex items-center gap-1.5 text-xs text-muted">
                         Moteur :
                         <select
                           value={book.tts_provider ?? ""}
                           disabled={savingProvider}
                           onChange={(e) => handleProviderChange(e.target.value)}
-                          className="rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-xs text-gray-200 disabled:opacity-50"
+                          className="rounded border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground disabled:opacity-50"
                         >
                           <option value="">Par défaut ({appSettings.default_tts_provider})</option>
                           {appSettings.available_tts_providers.map((p) => (
@@ -563,15 +562,15 @@ export default function BookDetailPage({
                 )}
             </div>
             {chapters.length === 0 ? (
-              <p className="text-gray-500">Aucun chapitre pour l&apos;instant.</p>
+              <p className="text-muted">Aucun chapitre pour l&apos;instant.</p>
             ) : (
               <ul className="space-y-2">
                 {chapters.map((ch) => (
                   <li
                     key={ch.id}
-                    className="flex items-center gap-3 rounded border border-gray-800 bg-gray-900 p-3"
+                    className="flex items-center gap-3 rounded border border-border bg-surface p-3"
                   >
-                    <span className="w-8 text-right text-xs text-gray-500">
+                    <span className="w-8 text-right text-xs text-muted">
                       {ch.position}
                     </span>
                     <div className="flex-1">

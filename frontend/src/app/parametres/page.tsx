@@ -28,13 +28,13 @@ export default function ParametresPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <h1 className="text-2xl font-bold text-gray-100">Paramètres</h1>
-      <p className="mt-2 text-gray-400">
+      <h1 className="text-2xl font-bold text-foreground">Paramètres</h1>
+      <p className="mt-2 text-muted">
         Réglages globaux de l&apos;application. Le choix du moteur de synthèse pour un
         livre donné se fait sur sa page de Casting.
       </p>
 
-      {loading && <p className="mt-6 text-gray-500">Chargement…</p>}
+      {loading && <p className="mt-6 text-muted">Chargement…</p>}
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
@@ -43,13 +43,13 @@ export default function ParametresPage() {
       )}
 
       {settings && (
-        <div className="mt-6 rounded border border-gray-800 bg-gray-900 p-4">
-          <p className="text-sm text-gray-500">Moteur de synthèse par défaut</p>
+        <div className="mt-6 rounded-card border border-border bg-surface p-4">
+          <p className="text-sm text-muted">Moteur de synthèse par défaut</p>
           <p className="mt-1 font-medium">
             {PROVIDER_LABELS[settings.default_tts_provider] ?? settings.default_tts_provider}
           </p>
 
-          <p className="mt-4 text-sm text-gray-500">Moteurs disponibles</p>
+          <p className="mt-4 text-sm text-muted">Moteurs disponibles</p>
           <ul className="mt-1 space-y-1">
             {settings.available_tts_providers.map((p) => (
               <li key={p} className="text-sm">
