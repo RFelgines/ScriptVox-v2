@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { Gender, VoiceSummary, listVoices, patchVoiceFavorite, voiceSampleUrl } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import Alert from "@/components/ui/Alert";
@@ -18,6 +19,35 @@ const GENDER_SYMBOL: Partial<Record<Gender, string>> = {
   MALE: "♂",
   FEMALE: "♀",
 };
+
+// Angle d'or (137.5077...°) : assigner la N-ième teinte = N x angle d'or
+// répartit n'importe quel nombre de couleurs sur le cercle chromatique de
+// façon maximalement distincte, bien mieux qu'un hash brut de voice_id (testé
+// : DJB2 seul ou mixé par une constante multiplicative de Knuth/Murmur
+// retombait sur des paires de voix à 0-9° d'écart -- quasi identiques à
+// l'œil -- pour ce catalogue de 9 ids). Le rang vient d'un tri stable des
+// voice_id : déterministe (même catalogue -> mêmes couleurs), mais se
+// rééquilibre automatiquement si une voix est ajoutée (clonage futur)
+// plutôt que de risquer une collision figée.
+const GOLDEN_ANGLE = 137.5077;
+
+function buildOrbHueMap(voices: VoiceSummary[]): Map<string, number> {
+  const sortedIds = voices.map((v) => v.id).sort();
+  const map = new Map<string, number>();
+  sortedIds.forEach((id, i) => map.set(id, (i * GOLDEN_ANGLE) % 360));
+  return map;
+}
+
+// 3 stops dérivés de la teinte de base, mêmes écarts (+59/-13) et mêmes
+// saturation/luminosité que le dégradé violet/rose d'origine -- seule la
+// teinte change par voix.
+function orbStyle(hue: number): CSSProperties {
+  return {
+    "--orb-c1": `hsl(${hue} 91% 65%)`,
+    "--orb-c2": `hsl(${(hue + 59) % 360} 81% 60%)`,
+    "--orb-c3": `hsl(${(hue + 347) % 360} 90% 66%)`,
+  } as CSSProperties;
+}
 
 export default function VoixPage() {
   const { play } = usePlayer();
@@ -48,6 +78,9 @@ export default function VoixPage() {
   }
 
   const visible = favoritesOnly ? voices.filter((v) => v.is_favorite) : voices;
+  // Calculé sur le catalogue complet (pas `visible`) : la couleur d'une voix
+  // ne doit pas changer selon que le filtre "Favoris" est actif ou non.
+  const orbHues = buildOrbHueMap(voices);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
@@ -90,6 +123,7 @@ export default function VoixPage() {
                 <button
                   onClick={() => play({ title: `Aperçu — ${v.name}`, src: voiceSampleUrl(v.id) })}
                   aria-label={`Écouter un aperçu de ${v.name}`}
+                  style={orbStyle(orbHues.get(v.id) ?? 0)}
                   className="voice-orb group flex h-24 w-24 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
                 >
                   <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
