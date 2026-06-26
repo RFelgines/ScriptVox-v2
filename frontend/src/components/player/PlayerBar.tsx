@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { ChapterSummary, chapterAudioUrl, listChapters } from "@/lib/api";
 import { usePlayer } from "./PlayerProvider";
 
@@ -48,8 +48,21 @@ export default function PlayerBar() {
   const [expanded, setExpanded] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const bookId = track?.bookId;
+
+  // Clic en dehors du bandeau (déplié) = replie le player.
+  useEffect(() => {
+    if (!expanded) return;
+    function onMouseDown(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setExpanded(false);
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [expanded]);
 
   useEffect(() => {
     if (!expanded || !bookId) return;
@@ -104,7 +117,7 @@ export default function PlayerBar() {
       : null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-surface">
+    <div ref={rootRef} className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-surface">
       {expanded && (
         <div className="flex max-h-[70vh] flex-col items-center gap-4 overflow-y-auto border-b border-border p-6">
           {track.coverUrl ? (

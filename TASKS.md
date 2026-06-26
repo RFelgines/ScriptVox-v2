@@ -1223,6 +1223,27 @@ Fichier (1) : `frontend/src/components/player/PlayerBar.tsx`.
 durée totale du livre / temps restant agrégé multi-chapitres (simplifié à la durée de la piste
 courante, cf. décisions ci-dessus).
 
+### Hors-Phase — Clic en dehors du player déplié = repli ✅ (2026-06-26)
+
+**Pourquoi.** Retour utilisateur après livraison de Phase C : aucune affordance évidente pour
+réduire le player une fois déplié — seul un clic sur le petit bouton titre (`▾ {titre}`, barre du
+bas) fonctionnait, mais ce n'était pas l'attendu (clic en dehors du bandeau, comme un panneau/sheet
+classique).
+
+**Livré.** `rootRef` (`useRef<HTMLDivElement>`) sur le conteneur racine `.fixed.bottom-0` +
+`useEffect` (actif seulement si `expanded`) qui écoute `mousedown` sur `document` et appelle
+`setExpanded(false)` si la cible du clic est hors de `rootRef.current` (`Node.contains`). Listener
+retiré au démontage/au repli. Zéro changement de contrat, 100% frontend.
+
+**Vérifié.** `npm run lint` + `npm run build` verts. Comportement testé via `dispatchEvent` réel
+(`mousedown` bulle, pas un simple `.click()` synthétique sur un bouton) : clic en dehors du bandeau
+(`<main>`) → repli confirmé ; clic dedans (sur la couverture) → reste déplié (pas de faux positif).
+15/15 suites backend vertes (changement 100% frontend).
+
+Fichier (1) : `frontend/src/components/player/PlayerBar.tsx`.
+
+---
+
 ### Phase D — Polish écran par écran (à venir, pas encore cadrée)
 
 Cartes Biblio, page livre, grille Voix, Paramètres.
