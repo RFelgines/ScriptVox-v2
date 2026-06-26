@@ -716,7 +716,7 @@ Fichiers (10) : `app/services/tts/base.py`, `piper.py`, `elevenlabs.py`, `edgett
 **Prochaine étape : B3** — `QwenTTSProvider` (4e provider, dépendances lourdes torch/CUDA dans
 `requirements-qwen.txt`, `emotion` → param `instruct`). Nécessite PC + écoute. GO explicite requis.
 
-### Étape B3 ✅ codée (2026-06-22) — `QwenTTSProvider` (4e provider) — ⚠️ NON CLOS (écoute différée)
+### Étape B3 ✅ CLOSE (2026-06-22 codée, écoute finale 2026-06-27) — `QwenTTSProvider` (4e provider)
 
 **Décision actée.** B3 s'écrit et se teste **exclusivement via mocks** — le vrai modèle Qwen3-TTS
 n'est jamais chargé en CI. La vérification audio réelle (qualité FR + effet `instruct` +
@@ -773,9 +773,19 @@ normal) — teste la même propriété (import paresseux) sans aucun risque d'in
 **Pas de changement de schéma DB.** Pas de changement de contrat (signature `synthesise`
 déjà posée en B2).
 
-**Reste à faire avant de clore B3 (TODO permanent) :** écoute réelle de l'audio Qwen3-TTS en
-français (qualité + effet `instruct`) ; vérifier/corriger `_VOICE_MAP` à l'oreille (mapping
-preset→genre non confirmé par la doc Qwen) — tâche utilisateur, pas automatisable.
+**Verdict d'écoute final (2026-06-27, utilisateur).** Les 3 conditions de clôture sont réunies :
+- **Mapping `_VOICE_MAP` (preset→genre) : bon** — aucun remap nécessaire.
+- **Qualité FR globale : variable** — certaines voix bonnes, d'autres avec un accent « british »
+  perceptible (cohérent avec le constat du 2026-06-22 sur `neutral_0`/Aiden). Jugée **limite du
+  catalogue de presets Qwen en français, acceptée** — pas un bug d'intégration/architecture.
+- **Effet de l'`instruct` (émotion) : pas concluant** — pas systématiquement meilleur que sans.
+  Ne bloque pas le clonage (qui utilise `generate_custom_voice` avec un échantillon de référence,
+  pas `instruct`) ; l'émotion par réplique reste un levier incertain, à réévaluer séparément si
+  elle redevient une priorité produit.
+
+**B3 est désormais clos.** Le chantier clonage de voix (point 8 de la roadmap,
+[[feature-roadmap-decisions]]) est débloqué — nécessitera un nouveau contrat (`Voice` entité
+dynamique) à valider avant tout code (CLAUDE.md Niveau 3).
 
 ---
 
@@ -1289,7 +1299,7 @@ Cartes Biblio, page livre, grille Voix, Paramètres.
 
 ---
 
-## Échantillons d'écoute B3 générés (2026-06-22 soir) — verdict utilisateur en attente
+## Échantillons d'écoute B3 générés (2026-06-22 soir) — verdict rendu le 2026-06-27, B3 close
 
 **Pourquoi.** B3 (`QwenTTSProvider`, voir Phase 14 ci-dessus) restait codé mais non clos : aucune
 écoute réelle n'avait validé la qualité FR, l'effet de l'`instruct`, ni le mapping `_VOICE_MAP`
@@ -1308,10 +1318,11 @@ mono/16-bit/22050 Hz, 2,5-4,6 s. Modèle chargé en 89 s puis 8-13 s/réplique (
 précédent). **Envoyés directement à l'utilisateur via `SendUserFile`** pour écoute le soir même,
 sans dépendre d'un nouvel accès à la machine.
 
-**Pas encore fait** : le verdict d'écoute lui-même (tâche utilisateur, pas automatisable). Checklist
-détaillée par fichier + branches d'action selon le verdict (mapping à corriger / instruct
-non-concluant / qualité FR décevante) → mémoire `tts-emotion-qwen3-direction`. Tant que ce verdict
-n'est pas rendu, B3 reste listé NON CLOS et le chantier clonage (point 8 roadmap) reste bloqué.
+**Verdict rendu (2026-06-27)** : mapping `_VOICE_MAP` bon (aucun remap) ; qualité FR variable
+(accent « british » sur certaines voix, acceptée comme limite de catalogue de presets) ; `instruct`
+pas concluant (n'améliore pas systématiquement, ne bloque pas le clonage). Détail → Phase 14 §B3
+ci-dessus et mémoire `tts-emotion-qwen3-direction`. **B3 close** — chantier clonage (point 8
+roadmap) débloqué.
 
 ---
 

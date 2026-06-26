@@ -79,9 +79,12 @@ Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts | qwen
 > factory choosing a different provider) never requires them to be installed. Model loaded once
 > per provider instance (= once per Huey task), reused across `synthesise()` calls. Output is
 > always 24 000 Hz from the model, resampled to 22 050 Hz via stdlib `audioop.ratecv` to match
-> the other providers' WAV format. ⚠️ **B3 stays open**: shipped with mocks-only tests
-> (`tests/check_phase15.py`); the real-audio listening pass (French quality, `instruct` effect,
-> and the speaker-preset→gender mapping in `_VOICE_MAP`, a best-effort guess) is still pending.
+> the other providers' WAV format. **B3 listening verdict (2026-06-27)**: speaker-preset→gender
+> mapping in `_VOICE_MAP` confirmed correct (no remap needed); French quality is variable (some
+> presets carry a perceptible "British" accent — accepted as a Qwen preset limitation, not an
+> integration bug); the `instruct` emotion parameter is inconclusive (not consistently better than
+> without) but does not block voice cloning, which uses `generate_custom_voice` with a reference
+> sample rather than `instruct`.
 
 > `edgetts` is the default (`TTS_PROVIDER=edgetts` in `.env.example`). It requires internet
 > access at synthesis time and no API key. Optional: `EDGETTS_LOCALE` (default `en-US`).
