@@ -1242,6 +1242,45 @@ retiré au démontage/au repli. Zéro changement de contrat, 100% frontend.
 
 Fichier (1) : `frontend/src/components/player/PlayerBar.tsx`.
 
+### Hors-Phase — Fix régression : cluster centré collé à droite en mode replié ✅ (2026-06-27)
+
+**Bug.** Capture utilisateur après livraison de Phase C : le cluster `[signet][-15][play][+15]
+[vitesse]` apparaissait collé contre le bord droit de la barre repliée (juste avant le bouton
+fermer), au lieu d'être centré au milieu de l'écran comme prévu dans le plan initial et la
+référence ElevenLabs. Plus visible avec un titre court (ex. aperçu de voix), où le décalage saute
+aux yeux.
+
+**Cause racine.** La rangée du bas utilisait `flex` avec `flex-1` sur le bouton titre : ce dernier
+grossit pour occuper tout l'espace disponible, ce qui pousse mécaniquement le cluster (qui le suit
+immédiatement dans le flux) contre le bord droit — un `flex-1` centre l'élément suivant *dans
+l'espace restant*, pas sur la largeur totale de la barre. Le centrage visé nécessite que le cluster
+soit centré indépendamment de la largeur du titre à gauche et du bouton fermer à droite.
+
+**Fix.** Rangée du bas passée de `flex` à `grid grid-cols-[1fr_auto_1fr]` : colonne gauche (1fr,
+`justify-self-start`) = couverture+titre ; colonne centrale (`auto`, `justify-self-center`) =
+cluster, garantie centrée sur la largeur totale de la grille quelles que soient les largeurs des
+2 autres colonnes ; colonne droite (1fr, `justify-self-end`) = fermer. **Piège évité** : la colonne
+centrale doit toujours être présente dans le DOM (même vide en mode déplié, où le cluster
+n'existe pas) — sinon le placement automatique de grille décale le bouton fermer en colonne 2 au
+lieu de la colonne 3 quand l'élément central est complètement omis du rendu (`{cond && (...)}` au
+niveau de l'élément racine plutôt qu'à l'intérieur d'un conteneur toujours rendu).
+
+**Vérifié.** `npm run lint` + `npm run build` verts. Centrage confirmé par calcul géométrique réel
+(`getBoundingClientRect`) : centre du cluster = centre exact de la barre (645px/645px sur une
+largeur de 1289px), indépendamment de la longueur du titre. Capture réelle à l'appui. État déplié
+revérifié sans rupture (colonne centrale vide, fermer toujours à droite). 15/15 suites backend
+vertes (changement 100% frontend).
+
+**Découverte annexe pendant le diagnostic initial (pas un bug de ce fix) :** le symptôme rapporté
+en premier lieu ("curseur de progression collé à droite, durée 0:00") était en réalité dû à
+`data/1/ch1.wav` corrompu (144 octets, chunk audio déclaré à 0 — reliquat d'un test antérieur),
+pas à un bug du player. Régénéré via `POST /books/1/chapters/1/generate` (worker Huey démarré pour
+l'occasion) pour confirmer le bon fonctionnement avec un fichier audio réel. Le VRAI bug restant
+(celui corrigé ici) est apparu seulement après, sur une capture où l'utilisateur testait un aperçu
+de voix (titre court, sans rapport avec ce fichier audio).
+
+Fichier (1) : `frontend/src/components/player/PlayerBar.tsx`.
+
 ---
 
 ### Phase D — Polish écran par écran (à venir, pas encore cadrée)

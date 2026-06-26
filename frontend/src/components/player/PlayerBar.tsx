@@ -291,30 +291,45 @@ export default function PlayerBar() {
         </div>
       )}
 
-      <div className="flex items-center gap-3 px-4 py-2.5">
+      {/* Grille à 3 colonnes (1fr/auto/1fr) : le cluster central reste centré sur
+          toute la largeur de la barre, quelle que soit la longueur du titre —
+          un simple flex-1 sur le titre poussait le cluster contre le bord droit
+          au lieu de le centrer. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2.5">
+        {/* Colonne gauche : couverture + titre — clic = déplie/replie */}
         {!expanded ? (
-          <>
-            {/* Couverture + titre — clic = déplie */}
-            <button
-              onClick={() => setExpanded(true)}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-muted"
-              title={track.title}
-            >
-              {track.coverUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={track.coverUrl}
-                  alt=""
-                  className="h-9 w-9 shrink-0 rounded-control object-cover"
-                />
-              ) : (
-                <div className="h-9 w-9 shrink-0 rounded-control bg-surface-2" />
-              )}
-              <span className="truncate text-sm font-medium">▸ {track.title}</span>
-            </button>
+          <button
+            onClick={() => setExpanded(true)}
+            className="flex min-w-0 items-center gap-2 justify-self-start text-left hover:text-muted"
+            title={track.title}
+          >
+            {track.coverUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={track.coverUrl}
+                alt=""
+                className="h-9 w-9 shrink-0 rounded-control object-cover"
+              />
+            ) : (
+              <div className="h-9 w-9 shrink-0 rounded-control bg-surface-2" />
+            )}
+            <span className="truncate text-sm font-medium">▸ {track.title}</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => setExpanded(false)}
+            className="min-w-0 justify-self-start truncate text-left text-sm font-medium hover:text-muted"
+            title={track.title}
+          >
+            ▾ {track.title}
+          </button>
+        )}
 
-            {/* Cluster central */}
-            <div className="flex shrink-0 items-center gap-1.5">
+        {/* Colonne centrale : cluster (replié uniquement — vide en déplié, où
+            ces contrôles sont déjà affichés en plus grand dans le panneau). */}
+        <div className="flex shrink-0 items-center gap-1.5 justify-self-center">
+          {!expanded && (
+            <>
               <button
                 disabled
                 aria-label="Signet (bientôt disponible)"
@@ -379,23 +394,15 @@ export default function PlayerBar() {
                   </option>
                 ))}
               </select>
-            </div>
-          </>
-        ) : (
-          <button
-            onClick={() => setExpanded(false)}
-            className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-muted"
-            title={track.title}
-          >
-            ▾ {track.title}
-          </button>
-        )}
+            </>
+          )}
+        </div>
 
-        {/* Fermer */}
+        {/* Colonne droite : fermer */}
         <button
           onClick={close}
           aria-label="Fermer le lecteur"
-          className="shrink-0 text-muted hover:text-foreground"
+          className="justify-self-end shrink-0 text-muted hover:text-foreground"
         >
           ✕
         </button>
