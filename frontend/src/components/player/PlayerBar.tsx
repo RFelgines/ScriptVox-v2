@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { ChapterSummary, chapterAudioUrl, listChapters } from "@/lib/api";
 import { usePlayer } from "./PlayerProvider";
 
@@ -13,10 +13,40 @@ function fmt(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
+function UtilBlock({
+  onClick,
+  disabled,
+  ariaLabel,
+  title,
+  icon,
+  label,
+}: {
+  onClick?: () => void;
+  disabled?: boolean;
+  ariaLabel: string;
+  title?: string;
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      title={title}
+      className="flex flex-col items-center gap-1 rounded-control px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+    >
+      {icon}
+      <span className="text-[11px]">{label}</span>
+    </button>
+  );
+}
+
 export default function PlayerBar() {
   const { track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close } =
     usePlayer();
   const [expanded, setExpanded] = useState(false);
+  const [chaptersOpen, setChaptersOpen] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
 
   const bookId = track?.bookId;
@@ -55,43 +85,156 @@ export default function PlayerBar() {
     currentIndex >= 0 &&
     currentIndex < playable.length - 1;
 
+  function skip(deltaSeconds: number) {
+    const max = duration || Infinity;
+    seek(Math.max(0, Math.min(currentTime + deltaSeconds, max)));
+  }
+
+  function cycleRate() {
+    const idx = RATES.indexOf(rate as (typeof RATES)[number]);
+    setRate(RATES[(idx + 1) % RATES.length]);
+  }
+
+  const remaining = duration > currentTime ? duration - currentTime : 0;
+
+  const currentChapter = chapters.find((c) => c.position === track.chapterPosition);
+  const chapterLabel =
+    track.chapterPosition !== undefined
+      ? currentChapter?.title ?? `Chapitre ${track.chapterPosition}`
+      : null;
+
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-surface">
       {expanded && (
-        <div className="flex max-h-80 flex-col gap-3 border-b border-border p-4 sm:flex-row">
-          <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-start">
-            {track.coverUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={track.coverUrl}
-                alt=""
-                className="h-20 w-14 shrink-0 rounded-control object-cover sm:h-32 sm:w-20"
-              />
-            ) : (
-              <div className="h-20 w-14 shrink-0 rounded-control bg-surface-2 sm:h-32 sm:w-20" />
+        <div className="flex max-h-[70vh] flex-col items-center gap-4 overflow-y-auto border-b border-border p-6">
+          {track.coverUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={track.coverUrl}
+              alt=""
+              className="h-40 w-40 rounded-control object-cover shadow-lg sm:h-48 sm:w-48"
+            />
+          ) : (
+            <div className="h-40 w-40 rounded-control bg-surface-2 sm:h-48 sm:w-48" />
+          )}
+
+          <div className="flex flex-col items-center gap-0.5 text-center">
+            {chapterLabel && track.bookTitle && (
+              <p className="text-xs text-muted">{track.bookTitle}</p>
             )}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => hasPrev && playChapter(playable[currentIndex - 1])}
-                disabled={!hasPrev}
-                aria-label="Chapitre précédent"
-                className="rounded-control px-2 py-1 text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
-              >
-                ⏮
-              </button>
-              <button
-                onClick={() => hasNext && playChapter(playable[currentIndex + 1])}
-                disabled={!hasNext}
-                aria-label="Chapitre suivant"
-                className="rounded-control px-2 py-1 text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
-              >
-                ⏭
-              </button>
-            </div>
+            <p className="text-base font-semibold">{chapterLabel ?? track.title}</p>
           </div>
 
-          {bookId ? (
-            <ul className="flex-1 space-y-1 overflow-y-auto">
+          {/* Scrub complet */}
+          <div className="flex w-full max-w-md items-center gap-2">
+            <span className="w-10 shrink-0 text-right text-xs text-muted">{fmt(currentTime)}</span>
+            <input
+              type="range"
+              min={0}
+              max={duration || 1}
+              step="any"
+              value={currentTime}
+              onChange={(e) => seek(Number(e.target.value))}
+              className="h-1 flex-1 cursor-pointer accent-primary"
+              aria-label="Progression"
+            />
+            <span className="w-10 shrink-0 text-xs text-muted">{fmt(duration)}</span>
+          </div>
+
+          {/* Transport */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => hasPrev && playChapter(playable[currentIndex - 1])}
+              disabled={!hasPrev}
+              aria-label="Chapitre précédent"
+              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
+            >
+              ⏮
+            </button>
+
+            <button
+              onClick={() => skip(-15)}
+              aria-label="Reculer de 15 secondes"
+              className="relative flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6 -scale-x-100">
+                <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
+                <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="absolute text-[8px] font-bold">15</span>
+            </button>
+
+            <button
+              onClick={toggle}
+              aria-label={isPlaying ? "Pause" : "Lire"}
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 hover:opacity-90"
+            >
+              {isPlaying ? (
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                  <rect x="4" y="3" width="4" height="14" rx="1.5" />
+                  <rect x="12" y="3" width="4" height="14" rx="1.5" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 20 20" fill="currentColor" className="ml-0.5 h-5 w-5">
+                  <path d="M6 3.5l11 6.5-11 6.5V3.5z" />
+                </svg>
+              )}
+            </button>
+
+            <button
+              onClick={() => skip(15)}
+              aria-label="Avancer de 15 secondes"
+              className="relative flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
+                <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
+                <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="absolute text-[8px] font-bold">15</span>
+            </button>
+
+            <button
+              onClick={() => hasNext && playChapter(playable[currentIndex + 1])}
+              disabled={!hasNext}
+              aria-label="Chapitre suivant"
+              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
+            >
+              ⏭
+            </button>
+          </div>
+
+          {/* Rangée utilitaire */}
+          <div className="flex items-center gap-2">
+            <UtilBlock
+              onClick={cycleRate}
+              ariaLabel="Changer la vitesse de lecture"
+              icon={<span className="text-sm font-semibold">{rate}×</span>}
+              label="Vitesse"
+            />
+            {bookId && (
+              <UtilBlock
+                onClick={() => setChaptersOpen((v) => !v)}
+                ariaLabel={chaptersOpen ? "Masquer les chapitres" : "Afficher les chapitres"}
+                icon={<span className="text-base">☰</span>}
+                label="Chapitres"
+              />
+            )}
+            <UtilBlock
+              disabled
+              ariaLabel="Signet (bientôt disponible)"
+              title="Signet — bientôt disponible"
+              icon={
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4">
+                  <path d="M5 3.5h10a.5.5 0 0 1 .5.5v13l-5.5-3.5L4.5 17V4a.5.5 0 0 1 .5-.5z" strokeLinejoin="round" />
+                </svg>
+              }
+              label="Signet"
+            />
+          </div>
+
+          {/* Liste des chapitres — masquée par défaut, dépliée via "Chapitres" */}
+          {bookId && chaptersOpen && (
+            <ul className="w-full max-w-md space-y-1 overflow-y-auto">
               {chapters.map((ch) => {
                 const active = ch.position === track.chapterPosition;
                 const playableCh = ch.status === "DONE";
@@ -112,44 +255,13 @@ export default function PlayerBar() {
                 );
               })}
             </ul>
-          ) : (
-            <p className="flex-1 text-sm text-muted">{track.title}</p>
           )}
         </div>
       )}
 
-      <div className="flex items-center gap-4 px-4 py-3">
-        {/* Play / pause */}
-        <button
-          onClick={toggle}
-          aria-label={isPlaying ? "Pause" : "Lire"}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 hover:opacity-90"
-        >
-          {isPlaying ? (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-              <rect x="4" y="3" width="4" height="14" rx="1.5" />
-              <rect x="12" y="3" width="4" height="14" rx="1.5" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 20 20" fill="currentColor" className="ml-0.5 h-4 w-4">
-              <path d="M6 3.5l11 6.5-11 6.5V3.5z" />
-            </svg>
-          )}
-        </button>
-
-        {/* Titre — clic = déplie/replie */}
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="w-40 shrink-0 truncate text-left text-sm font-medium hover:text-muted"
-          title={track.title}
-        >
-          {expanded ? "▾ " : "▸ "}
-          {track.title}
-        </button>
-
-        {/* Scrub */}
-        <div className="flex flex-1 items-center gap-2 overflow-hidden">
-          <span className="w-10 shrink-0 text-right text-xs text-muted">{fmt(currentTime)}</span>
+      {!expanded && (
+        <div className="flex items-center gap-2 px-4 pt-1.5">
+          <span className="w-9 shrink-0 text-right text-[10px] text-muted">{fmt(currentTime)}</span>
           <input
             type="range"
             min={0}
@@ -160,22 +272,111 @@ export default function PlayerBar() {
             className="h-1 flex-1 cursor-pointer accent-primary"
             aria-label="Progression"
           />
-          <span className="w-10 shrink-0 text-xs text-muted">{fmt(duration)}</span>
+          <span className="w-9 shrink-0 text-[10px] text-muted">
+            {duration ? `-${fmt(remaining)}` : fmt(duration)}
+          </span>
         </div>
+      )}
 
-        {/* Vitesse */}
-        <select
-          value={rate}
-          onChange={(e) => setRate(Number(e.target.value))}
-          aria-label="Vitesse de lecture"
-          className="rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground"
-        >
-          {RATES.map((r) => (
-            <option key={r} value={r}>
-              {r}×
-            </option>
-          ))}
-        </select>
+      <div className="flex items-center gap-3 px-4 py-2.5">
+        {!expanded ? (
+          <>
+            {/* Couverture + titre — clic = déplie */}
+            <button
+              onClick={() => setExpanded(true)}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-muted"
+              title={track.title}
+            >
+              {track.coverUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={track.coverUrl}
+                  alt=""
+                  className="h-9 w-9 shrink-0 rounded-control object-cover"
+                />
+              ) : (
+                <div className="h-9 w-9 shrink-0 rounded-control bg-surface-2" />
+              )}
+              <span className="truncate text-sm font-medium">▸ {track.title}</span>
+            </button>
+
+            {/* Cluster central */}
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                disabled
+                aria-label="Signet (bientôt disponible)"
+                title="Signet — bientôt disponible"
+                className="flex h-8 w-8 items-center justify-center rounded-control text-muted opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4">
+                  <path d="M5 3.5h10a.5.5 0 0 1 .5.5v13l-5.5-3.5L4.5 17V4a.5.5 0 0 1 .5-.5z" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => skip(-15)}
+                aria-label="Reculer de 15 secondes"
+                className="relative flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 -scale-x-100">
+                  <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
+                  <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="absolute text-[7px] font-bold">15</span>
+              </button>
+
+              <button
+                onClick={toggle}
+                aria-label={isPlaying ? "Pause" : "Lire"}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 hover:opacity-90"
+              >
+                {isPlaying ? (
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                    <rect x="4" y="3" width="4" height="14" rx="1.5" />
+                    <rect x="12" y="3" width="4" height="14" rx="1.5" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="ml-0.5 h-4 w-4">
+                    <path d="M6 3.5l11 6.5-11 6.5V3.5z" />
+                  </svg>
+                )}
+              </button>
+
+              <button
+                onClick={() => skip(15)}
+                aria-label="Avancer de 15 secondes"
+                className="relative flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                  <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
+                  <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="absolute text-[7px] font-bold">15</span>
+              </button>
+
+              <select
+                value={rate}
+                onChange={(e) => setRate(Number(e.target.value))}
+                aria-label="Vitesse de lecture"
+                className="rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground"
+              >
+                {RATES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}×
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        ) : (
+          <button
+            onClick={() => setExpanded(false)}
+            className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-muted"
+            title={track.title}
+          >
+            ▾ {track.title}
+          </button>
+        )}
 
         {/* Fermer */}
         <button

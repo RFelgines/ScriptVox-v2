@@ -1142,11 +1142,90 @@ Fichiers (9) : `frontend/src/lib/status.ts`, `frontend/src/components/ui/StatusB
 Capture réelle navigateur (via `preview_*`) dans les 2 thèmes après chaque étape. 15/15 suites
 backend sans régression (changement 100% frontend).
 
-### À venir
+### Phase C — Player redesign ✅ (2026-06-26)
 
-- **Phase C** — Player redesign (replié façon capture 3, déplié façon capture 5 — restyle des 2
-  états existants, pas une nouvelle archi).
-- **Phase D** — Polish écran par écran (cartes Biblio, page livre, grille Voix, Paramètres).
+**Pourquoi.** Restyle du player (replié + déplié) inspiré de 2 captures fournies par l'utilisateur :
+référence prioritaire pour couleurs/icônes = ElevenLabs (bandeau sombre horizontal, ligne de
+progression fine avec labels, cluster signet/±15s/play/±15s/vitesse) ; référence secondaire pour
+layout/disposition = mockup mobile (grande couverture, transport 5 boutons, rangée vitesse/
+chapitres/signet). Restyle des 2 états déjà existants (Phase 11 Étape 5/6), pas une nouvelle
+architecture. 3 étapes (1 GO chacune), 100% frontend, 0 contrat, 0 nouvelle dépendance.
+
+**Décisions actées avant implémentation (clarifications utilisateur) :**
+- Durée du skip : **15 s** (pas 30 s) — la référence prioritaire (ElevenLabs, couleurs/icônes)
+  montre `±15`, la référence secondaire (layout) montre `±30` ; règle de priorité de l'utilisateur
+  tranche en faveur de la première.
+- Barre de progression en mode replié : **ligne fine avec labels temps écoulé/restant** (recommandé
+  parmi 3 options proposées) plutôt qu'aucune barre (fidélité stricte à la capture 1) ou le scrub
+  complet actuel inchangé.
+- "Lu par X" (avatar narrateur, capture ElevenLabs) : **abandonné** — pas de donnée équivalente
+  (livres multi-voix, pas de narrateur unique nommé).
+- Titre incrusté sur la couverture (mockup mobile) : **abandonné** — la couverture est une vraie
+  image d'éditeur, lui superposer du texte l'aurait dégradée ; texte affiché à côté (comme le fait
+  la référence ElevenLabs).
+- Bouton "Chapitres" : **pas un simple placeholder** — contrairement au signet, la donnée (liste +
+  navigation prev/next) existe déjà depuis Phase 11 Étape 6 ; implémenté comme un vrai toggle.
+- Bouton "Ajouter un signet" : **placeholder visuel désactivé** (pas de persistance serveur du tout
+  aujourd'hui) — décision explicite de l'utilisateur, fonctionnalité différée à un chantier séparé.
+- Double affichage temps restant (capture mockup : "1h15m restantes" + "-6:04") : **simplifié** à
+  `temps écoulé | temps total`, déjà disponible — éviter une nouvelle plomberie de durée totale
+  livre pour un gain d'affichage marginal.
+
+**Étape 1 ✅ — Boutons ±15s + restyle de l'état replié.** `seek(currentTime ± 15)` (nouvelle
+fonction `skip`, réutilise `seek` existant, 0 changement de contrat `PlayerProvider`). Layout
+repensé : couverture miniature (36×36) + titre à gauche (clic = déplie) ; cluster centré
+`[signet placeholder] [-15s] [▶/⏸ 44×44] [+15s] [vitesse]` ; fermer à droite. Ligne de progression
+fine (`h-1`) au-dessus de la rangée principale, avec labels `temps écoulé` / `-temps restant` en
+petite taille (`text-[10px]`), remplace le scrub complet en mode replié.
+
+**Étape 2 ✅ — Restyle de l'état déplié.** Grande couverture (192×192, `sm:` 192×192, image propre
+sans texte incrusté) + titre livre/chapitre en dessous (`chapterLabel` calculé depuis
+`chapters.find(...)`, fallback `Chapitre {position}`). Scrub complet (`temps écoulé | curseur |
+temps total`) à la place de la ligne fine quand déplié. Rangée transport 5 boutons alignés
+(`⏮ prev chapitre`, `↺15`, `▶/⏸` agrandi à 56×56, `15↻`, `⏭ next chapitre` — réutilise
+`hasPrev`/`hasNext`/`playChapter` de Phase 11 Étape 6 inchangés). **Déviation pour éviter la
+duplication visuelle** : en mode déplié, la rangée du bas (mini-barre) se réduit à
+titre (replie au clic) + fermer — signet/±15/play/vitesse ne sont affichés qu'une fois, dans le
+panneau déplié (plus grand), pas dupliqués dans la mini-barre en dessous.
+
+**Étape 3 ✅ — Rangée utilitaire + toggle Chapitres.** `UtilBlock` (helper local au composant,
+icône+label, 3 usages réels — pas une abstraction spéculative). `Vitesse` : bouton cyclique
+(`1× → 1.25× → 1.5× → 2× → 0.5× → 1×`, `cycleRate` via `RATES.indexOf`) remplace le `<select>` du
+panneau déplié. `Chapitres` : vrai toggle (`chaptersOpen`, nouvel état) — la liste des chapitres
+(existante depuis Phase 11 Étape 6) est masquée par défaut en mode déplié, apparaît/disparaît au
+clic, aria-label inversé. `Signet` : placeholder désactivé (`opacity-40`, `cursor-not-allowed`),
+comme décidé.
+
+**Test-first.** Pas de harness de test frontend (cf. Phase 11). Vérification : `npm run lint` +
+`npm run build` verts à chaque étape ; structure/tailles/couleurs confirmées via
+`preview_snapshot`/`preview_inspect`/`preview_eval` (play 44×44 replié puis 56×56 déplié, skip
+±15s 32×32 puis 36×36, couverture 36×36 puis 192×192, signet désactivé, toggle chapitres 0→20
+items, cycle vitesse 1.25×→1.5× sur clic isolé) dans les 2 thèmes clair/sombre — couleurs
+cohérentes avec les tokens déjà validés en Phase A/B (`bg-primary`/`text-primary-foreground`/
+`text-muted`/`bg-surface-2`). 15/15 suites backend vertes à chaque étape (changement 100%
+frontend, attendu).
+
+**⚠️ Piège outillage rencontré (pas un bug applicatif).** `preview_screenshot` a systématiquement
+timeout toute la session (y compris après redémarrage du serveur frontend, correctif qui avait
+fonctionné en Phase B) — vérification faite uniquement par inspection DOM/CSS
+(`preview_snapshot`/`preview_inspect`/`preview_eval`), pas de capture visuelle directe. Distinct du
+piège déjà documenté en Phase B (celui-là se corrigeait par un redémarrage du serveur).
+
+**Autre piège outillage (déjà documenté en Phase 16, reconfirmé) :** cliquer plusieurs fois de
+suite sur un bouton dans une boucle JS synchrone (`preview_eval`) ne laisse pas React re-render
+entre les clics → les fermetures (`cycleRate`) restent obsolètes pendant toute la boucle, un seul
+changement d'état net au lieu de N. Confirmé en isolant les clics un par un. Pas un bug du code
+applicatif — un vrai utilisateur cliquant normalement laisse React re-render entre deux clics.
+
+Fichier (1) : `frontend/src/components/player/PlayerBar.tsx`.
+
+**Hors scope (explicite)** : persistance serveur du signet (nouvelle feature, chantier séparé) ;
+durée totale du livre / temps restant agrégé multi-chapitres (simplifié à la durée de la piste
+courante, cf. décisions ci-dessus).
+
+### Phase D — Polish écran par écran (à venir, pas encore cadrée)
+
+Cartes Biblio, page livre, grille Voix, Paramètres.
 
 ---
 
