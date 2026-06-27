@@ -313,15 +313,21 @@ export default function PlayerBar() {
             ) : (
               <div className="h-9 w-9 shrink-0 rounded-control bg-surface-2" />
             )}
-            <span className="truncate text-sm font-medium">▸ {track.title}</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+              <path d="M6 4l4 4-4 4" />
+            </svg>
+            <span className="truncate text-sm font-medium">{track.title}</span>
           </button>
         ) : (
           <button
             onClick={() => setExpanded(false)}
-            className="min-w-0 justify-self-start truncate text-left text-sm font-medium hover:text-muted"
+            className="flex min-w-0 items-center gap-1.5 justify-self-start text-left text-sm font-medium hover:text-muted"
             title={track.title}
           >
-            ▾ {track.title}
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0 rotate-90">
+              <path d="M6 4l4 4-4 4" />
+            </svg>
+            <span className="truncate">{track.title}</span>
           </button>
         )}
 

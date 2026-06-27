@@ -316,7 +316,9 @@ export default function BookDetailPage({
               aria-label="Écouter un aperçu de cette voix"
               className="rounded-control p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
             >
-              ▶
+              <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 ml-0.5">
+                <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+              </svg>
             </button>
           )}
           {savingId === c.id && <span className="text-xs text-muted">…</span>}
@@ -380,8 +382,12 @@ export default function BookDetailPage({
               {(book.status === "ANALYZED" ||
                 book.status === "GENERATING" ||
                 book.status === "DONE") && (
-                <Button onClick={() => setCastingExpanded((v) => !v)} className="mt-3">
-                  {castingExpanded ? "▾" : "▸"} Casting
+                <Button onClick={() => setCastingExpanded((v) => !v)} className="mt-3 inline-flex items-center gap-1.5">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${castingExpanded ? "rotate-90" : ""}`}>
+                    <path d="M6 4l4 4-4 4" />
+                  </svg>
+                  Casting
                 </Button>
               )}
               {book.status === "DONE" && book.mp3_path && (
@@ -396,9 +402,12 @@ export default function BookDetailPage({
                       coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
                     })
                   }
-                  className="mt-3 ml-2"
+                  className="mt-3 ml-2 inline-flex items-center gap-1.5"
                 >
-                  ▶ Écouter
+                  <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
+                    <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+                  </svg>
+                  Écouter
                 </Button>
               )}
             </div>
@@ -492,10 +501,13 @@ export default function BookDetailPage({
                     <div className="mt-6">
                       <button
                         onClick={() => setShowSecondary((v) => !v)}
-                        className="text-sm text-muted hover:text-foreground"
+                        className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground"
                       >
-                        {showSecondary ? "▾" : "▸"} Personnages secondaires sans réplique (
-                        {secondaryCharacters.length})
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                          className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${showSecondary ? "rotate-90" : ""}`}>
+                          <path d="M6 4l4 4-4 4" />
+                        </svg>
+                        Personnages secondaires sans réplique ({secondaryCharacters.length})
                       </button>
                       {showSecondary && (
                         <ul className="mt-3 space-y-3">
@@ -611,8 +623,12 @@ export default function BookDetailPage({
                             chapterPosition: ch.position,
                           })
                         }
+                        className="inline-flex items-center gap-1"
                       >
-                        ▶ Écouter
+                        <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
+                          <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+                        </svg>
+                        Écouter
                       </Button>
                     )}
                   </li>
