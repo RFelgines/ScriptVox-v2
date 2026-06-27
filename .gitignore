@@ -30,6 +30,9 @@ data/*
 # Local test ebooks — copyrighted, never commit
 Ebook/
 
+# Reference audio for voice cloning spikes — user-provided, never commit
+tests/refs/
+
 # Piper local TTS — binary + voice models are large/GPL, downloaded per-machine
 piper/
 piper_*.zip
