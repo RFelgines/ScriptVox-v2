@@ -1,4 +1,4 @@
-import { statusColor } from "@/lib/status";
+import { statusDot, statusLabel } from "@/lib/status";
 
 export default function StatusBadge({
   status,
@@ -8,8 +8,9 @@ export default function StatusBadge({
   className?: string;
 }) {
   return (
-    <p className={`font-semibold ${statusColor(status)} ${className}`}>
-      {status}
+    <p className={`flex items-center gap-1.5 ${className}`}>
+      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDot(status)}`} />
+      <span className="font-medium text-muted">{statusLabel(status)}</span>
     </p>
   );
 }

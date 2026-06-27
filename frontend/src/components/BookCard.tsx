@@ -55,8 +55,12 @@ export default function BookCard({
           <p className="line-clamp-2 text-sm font-medium" title={book.title}>
             {book.title}
           </p>
-          <div className="mt-auto flex items-center justify-between">
-            <span className="text-xs text-muted">#{book.id}</span>
+          {book.author && (
+            <p className="truncate text-xs text-muted" title={book.author}>
+              {book.author}
+            </p>
+          )}
+          <div className="mt-auto">
             <StatusBadge status={book.status} className="text-xs" />
           </div>
           {book.progress > 0 && book.progress < 100 && (
