@@ -64,7 +64,7 @@ export default function BookCard({
             <StatusBadge status={book.status} className="text-xs" />
           </div>
           {book.progress > 0 && book.progress < 100 && (
-            <div className="h-1 w-full overflow-hidden rounded bg-surface-2">
+            <div className="h-1 w-full overflow-hidden rounded-full bg-surface-2">
               <div
                 className="h-full bg-primary"
                 style={{ width: `${book.progress}%` }}

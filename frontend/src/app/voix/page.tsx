@@ -164,7 +164,7 @@ export default function VoixPage() {
                 value={cloneName}
                 onChange={(e) => setCloneName(e.target.value)}
                 placeholder="ex. Patrick Baud"
-                className="rounded border border-border bg-surface-2 px-3 py-1.5 text-sm placeholder:text-muted"
+                className="rounded-control border border-border bg-surface-2 px-3 py-1.5 text-sm placeholder:text-muted"
                 required
               />
             </label>
@@ -186,7 +186,7 @@ export default function VoixPage() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded border border-dashed border-border bg-surface-2 px-4 py-1.5 text-sm text-muted hover:border-muted hover:text-foreground"
+                className="rounded-control border border-dashed border-border bg-surface-2 px-4 py-1.5 text-sm text-muted hover:border-muted hover:text-foreground"
               >
                 {cloneFile ? cloneFile.name : "Choisir un fichier…"}
               </button>

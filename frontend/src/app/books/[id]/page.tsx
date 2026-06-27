@@ -267,7 +267,7 @@ export default function BookDetailPage({
     return (
       <li
         key={c.id}
-        className="flex items-center gap-3 rounded border border-border bg-surface p-3"
+        className="flex items-center gap-3 rounded-control border border-border bg-surface p-3"
       >
         <div className="flex-1">
           <p className="font-medium">{c.name}</p>
@@ -287,7 +287,7 @@ export default function BookDetailPage({
             value={c.voice_id ?? ""}
             disabled={savingId === c.id}
             onChange={(e) => handleVoiceChange(c.id, e.target.value)}
-            className="rounded border border-border bg-surface-2 px-2 py-1 text-sm disabled:opacity-50"
+            className="rounded-control border border-border bg-surface-2 px-2 py-1 text-sm disabled:opacity-50"
           >
             <option value="" disabled>
               Choisir…
@@ -314,7 +314,7 @@ export default function BookDetailPage({
               }
               title="Écouter un aperçu de cette voix"
               aria-label="Écouter un aperçu de cette voix"
-              className="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+              className="rounded-control p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
             >
               ▶
             </button>
@@ -342,7 +342,7 @@ export default function BookDetailPage({
       {book && (
         <>
           <header className="mt-6 flex gap-6">
-            <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded bg-surface-2">
+            <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-control bg-surface-2">
               {book.cover_path ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -362,7 +362,7 @@ export default function BookDetailPage({
               {book.author && <p className="text-muted">{book.author}</p>}
               <StatusBadge status={book.status} className="mt-2" />
               {book.progress > 0 && book.progress < 100 && (
-                <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded bg-surface-2">
+                <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded-full bg-surface-2">
                   <div
                     className="h-full bg-primary"
                     style={{ width: `${book.progress}%` }}
@@ -405,7 +405,7 @@ export default function BookDetailPage({
           </header>
 
           {castingExpanded && (
-            <section className="mt-6 rounded border border-border bg-surface p-4">
+            <section className="mt-6 rounded-card border border-border bg-surface p-4">
               {castingLoading && !castingLoaded && (
                 <p className="text-muted">Chargement du casting…</p>
               )}
@@ -420,7 +420,7 @@ export default function BookDetailPage({
               )}
 
               {mergeSuggestions.length > 0 && (
-                <div className="mb-4 rounded border border-amber-700 bg-amber-900/20 p-3">
+                <div className="mb-4 rounded-control border border-amber-700 bg-amber-900/20 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-sm font-semibold text-amber-300">
                       Fusions de personnages suggérées
@@ -436,7 +436,7 @@ export default function BookDetailPage({
                   </div>
                   <ul className="space-y-2">
                     {mergeSuggestions.map((s) => (
-                      <li key={s.id} className="flex items-center gap-3 rounded bg-surface-2 p-2">
+                      <li key={s.id} className="flex items-center gap-3 rounded-control bg-surface-2 p-2">
                         <div className="flex-1 text-sm">
                           <span className="font-medium">
                             {characterName(s.survivor_character_id)}
@@ -479,7 +479,7 @@ export default function BookDetailPage({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Rechercher un personnage…"
-                    className="w-full rounded border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted"
+                    className="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted"
                   />
 
                   {mainCharacters.length > 0 ? (
@@ -522,7 +522,7 @@ export default function BookDetailPage({
                           value={book.tts_provider ?? ""}
                           disabled={savingProvider}
                           onChange={(e) => handleProviderChange(e.target.value)}
-                          className="rounded border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground disabled:opacity-50"
+                          className="rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground disabled:opacity-50"
                         >
                           <option value="">Par défaut ({appSettings.default_tts_provider})</option>
                           {appSettings.available_tts_providers.map((p) => (
@@ -576,7 +576,7 @@ export default function BookDetailPage({
                 {chapters.map((ch) => (
                   <li
                     key={ch.id}
-                    className="flex items-center gap-3 rounded border border-border bg-surface p-3"
+                    className="flex items-center gap-3 rounded-control border border-border bg-surface p-3"
                   >
                     <span className="w-8 text-right text-xs text-muted">
                       {ch.position}
