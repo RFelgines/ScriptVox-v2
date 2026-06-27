@@ -3,6 +3,7 @@ import asyncio
 import audioop
 import io
 import wave
+from pathlib import Path
 
 from app.config import Settings
 from app.core.exceptions import TTSError
@@ -27,9 +28,17 @@ _VOICE_MAP: dict[str, str] = {
     "neutral_1": "Sohee",
 }
 
+# CustomVoice checkpoint: preset-based synthesis + emotion via instruct.
 _MODEL_IDS: dict[str, str] = {
     "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+}
+
+# Base checkpoint: voice cloning via generate_voice_clone + x_vector_only_mode.
+# Must NOT cohabitate with CustomVoice on a 10 Go GPU — sequential swap strategy.
+_MODEL_IDS_BASE: dict[str, str] = {
+    "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
 }
 
 _MODEL_SAMPLE_RATE = 24000   # what Qwen3-TTS always returns (verified by tests/spike_qwen_tts.py)
@@ -67,13 +76,45 @@ def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
+def _load_ref_audio(path: str):
+    """Load a reference audio file and return (float32_samples, sample_rate).
+
+    Supports .mp3 / .wav / .flac via miniaudio. Called inside run_in_executor.
+    """
+    import miniaudio
+    import numpy as np
+    p = Path(path)
+    ext = p.suffix.lower()
+    try:
+        if ext == ".mp3":
+            native_sr = miniaudio.mp3_get_file_info(path).sample_rate
+        elif ext == ".flac":
+            native_sr = miniaudio.flac_get_file_info(path).sample_rate
+        else:
+            native_sr = miniaudio.wav_get_file_info(path).sample_rate
+        decoded = miniaudio.decode_file(
+            path,
+            output_format=miniaudio.SampleFormat.SIGNED16,
+            nchannels=1,
+            sample_rate=native_sr,
+        )
+    except Exception as exc:
+        raise TTSError(f"qwen_clone:ref_audio:{p.name}", exc)
+    samples_i16 = np.frombuffer(bytes(decoded.samples), dtype=np.int16)
+    samples_f32 = samples_i16.astype(np.float32) / 32768.0
+    return samples_f32, native_sr
+
+
 class QwenTTSProvider(BaseTTSProvider):
     def __init__(self, settings: Settings) -> None:
-        self._model_id = _MODEL_IDS.get(getattr(settings, "qwen_model", "1.7b"), _MODEL_IDS["1.7b"])
+        size = getattr(settings, "qwen_model", "1.7b")
+        self._model_id = _MODEL_IDS.get(size, _MODEL_IDS["1.7b"])
+        self._base_model_id = _MODEL_IDS_BASE.get(size, _MODEL_IDS_BASE["1.7b"])
         self._language = getattr(settings, "qwen_language", "French")
         self._device = getattr(settings, "qwen_device", "cuda:0")
         self._attn = getattr(settings, "qwen_attn", "sdpa")
-        self._model = None  # lazy-loaded once on first synthesise(), reused for this instance's lifetime
+        self._model = None       # CustomVoice — lazy-loaded on first preset call
+        self._base_model = None  # Base — lazy-loaded on first clone call
 
     def resolve_voice(self, voice_id: str) -> str:
         """Return the Qwen3-TTS speaker preset for a logical voice_id."""
@@ -86,7 +127,9 @@ class QwenTTSProvider(BaseTTSProvider):
         return speaker
 
     def _ensure_model(self):
+        """Load the CustomVoice model, unloading the Base model first if needed."""
         if self._model is None:
+            import gc
             try:
                 torch, qwen3_tts_model_cls = _import_qwen_deps()
             except ImportError as exc:
@@ -97,6 +140,10 @@ class QwenTTSProvider(BaseTTSProvider):
                         "Run: pip install -r requirements-qwen.txt"
                     ),
                 ) from exc
+            if self._base_model is not None:
+                self._base_model = None
+                gc.collect()
+                torch.cuda.empty_cache()
             self._model = qwen3_tts_model_cls.from_pretrained(
                 self._model_id,
                 device_map=self._device,
@@ -105,23 +152,78 @@ class QwenTTSProvider(BaseTTSProvider):
             )
         return self._model
 
-    async def synthesise(self, text: str, voice_id: str, emotion: str | None = None) -> bytes:
-        speaker = self.resolve_voice(voice_id)  # raises TTSError before any model load is attempted
+    def _ensure_base_model(self):
+        """Load the Base model, unloading the CustomVoice model first if needed."""
+        if self._base_model is None:
+            import gc
+            try:
+                torch, qwen3_tts_model_cls = _import_qwen_deps()
+            except ImportError as exc:
+                raise TTSError(
+                    "qwen:base_model_load",
+                    ImportError(
+                        "torch/qwen-tts not installed. "
+                        "Run: pip install -r requirements-qwen.txt"
+                    ),
+                ) from exc
+            if self._model is not None:
+                self._model = None
+                gc.collect()
+                torch.cuda.empty_cache()
+            self._base_model = qwen3_tts_model_cls.from_pretrained(
+                self._base_model_id,
+                device_map=self._device,
+                dtype=torch.bfloat16,
+                attn_implementation=self._attn,
+            )
+        return self._base_model
 
-        def _run() -> bytes:
-            model = self._ensure_model()
-            kwargs = dict(text=text, language=self._language, speaker=speaker)
-            if emotion:
-                kwargs["instruct"] = emotion
-            wavs, sample_rate = model.generate_custom_voice(**kwargs)
-            pcm16 = _float_to_pcm16(wavs[0])
-            pcm16 = _resample_to_output(pcm16, sample_rate)
-            return _pcm_to_wav(pcm16, _OUTPUT_SAMPLE_RATE)
+    async def synthesise(
+        self, text: str, voice_id: str,
+        emotion: str | None = None,
+        reference_audio_path: str | None = None,
+    ) -> bytes:
+        if reference_audio_path is not None:
+            # Clone mode — Base checkpoint + generate_voice_clone
+            def _run_clone() -> bytes:
+                model = self._ensure_base_model()
+                samples_f32, ref_sr = _load_ref_audio(reference_audio_path)
+                wavs, sample_rate = model.generate_voice_clone(
+                    text=text,
+                    language=self._language,
+                    ref_audio=(samples_f32, ref_sr),
+                    x_vector_only_mode=True,
+                )
+                pcm16 = _float_to_pcm16(wavs[0])
+                pcm16 = _resample_to_output(pcm16, sample_rate)
+                return _pcm_to_wav(pcm16, _OUTPUT_SAMPLE_RATE)
 
-        loop = asyncio.get_running_loop()
-        try:
-            return await loop.run_in_executor(None, _run)
-        except TTSError:
-            raise
-        except Exception as exc:
-            raise TTSError(f"qwen:{voice_id}", exc)
+            loop = asyncio.get_running_loop()
+            try:
+                return await loop.run_in_executor(None, _run_clone)
+            except TTSError:
+                raise
+            except Exception as exc:
+                raise TTSError(f"qwen_clone:{voice_id}", exc)
+
+        else:
+            # Preset mode — CustomVoice checkpoint + generate_custom_voice
+            speaker = self.resolve_voice(voice_id)  # raises TTSError if unknown
+
+            def _run_preset() -> bytes:
+                model = self._ensure_model()
+                kwargs = dict(text=text, language=self._language, speaker=speaker)
+                if emotion:
+                    kwargs["instruct"] = emotion
+                wavs, sample_rate = model.generate_custom_voice(**kwargs)
+                pcm16 = _float_to_pcm16(wavs[0])
+                pcm16 = _resample_to_output(pcm16, sample_rate)
+                return _pcm_to_wav(pcm16, _OUTPUT_SAMPLE_RATE)
+
+            loop = asyncio.get_running_loop()
+            try:
+                return await loop.run_in_executor(None, _run_preset)
+            except TTSError:
+                raise
+            except Exception as exc:
+                raise TTSError(f"qwen:{voice_id}", exc)

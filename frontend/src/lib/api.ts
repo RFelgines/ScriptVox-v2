@@ -48,6 +48,7 @@ export interface VoiceSummary {
   gender: Gender | null;
   locale: string | null;
   is_favorite: boolean;
+  has_reference_audio: boolean;
 }
 
 export type MergeSuggestionStatus = "PENDING" | "ACCEPTED" | "REJECTED";
@@ -148,6 +149,43 @@ export async function listVoices(): Promise<VoiceSummary[]> {
   const res = await fetch(`${API_URL}/voices`);
   if (!res.ok) throw new Error(`GET /voices failed: ${res.status}`);
   return res.json();
+}
+
+export async function createVoice(
+  name: string,
+  gender: Gender | null,
+  file: File,
+): Promise<VoiceSummary> {
+  const form = new FormData();
+  form.append("name", name);
+  if (gender) form.append("gender", gender);
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/voices`, { method: "POST", body: form });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // non-JSON
+    }
+    throw new Error(`Création de voix échouée : ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteVoice(voiceId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/voices/${voiceId}`, { method: "DELETE" });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // non-JSON
+    }
+    throw new Error(`Suppression de voix échouée : ${detail}`);
+  }
 }
 
 export async function patchVoiceFavorite(

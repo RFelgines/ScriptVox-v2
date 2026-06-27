@@ -12,9 +12,15 @@ class VoiceResponse(BaseModel):
     gender: Optional[Gender] = None  # MALE/FEMALE/NEUTRAL; None for "narrator"
     locale: Optional[str] = None     # provider locale (edgetts) else None
     is_favorite: bool = False
+    has_reference_audio: bool = False
 
     model_config = {"from_attributes": True}
 
 
 class VoiceUpdate(BaseModel):
     is_favorite: bool
+
+
+class VoiceCreate(BaseModel):
+    name: str
+    gender: Optional[Gender] = None

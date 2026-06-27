@@ -15,8 +15,12 @@ class PiperProvider(BaseTTSProvider):
         self._voices_dir = Path(settings.piper_voices_dir).resolve()
         self._binary = Path(settings.piper_binary_path).resolve()
 
-    async def synthesise(self, text: str, voice_id: str, emotion: str | None = None) -> bytes:
-        # emotion is accepted for interface parity but ignored (Piper has no emotion control).
+    async def synthesise(
+        self, text: str, voice_id: str,
+        emotion: str | None = None,
+        reference_audio_path: str | None = None,
+    ) -> bytes:
+        # emotion and reference_audio_path accepted for interface parity but ignored (Piper has no emotion/clone control).
         # Piper reads its config from "<model>.onnx.json" automatically.
         model_path = self._voices_dir / f"{voice_id}.onnx"
 

@@ -72,8 +72,12 @@ class EdgeTTSProvider(BaseTTSProvider):
             )
         return voice
 
-    async def synthesise(self, text: str, voice_id: str, emotion: str | None = None) -> bytes:
-        # emotion accepted for interface parity but ignored (EdgeTTS has no emotion control).
+    async def synthesise(
+        self, text: str, voice_id: str,
+        emotion: str | None = None,
+        reference_audio_path: str | None = None,
+    ) -> bytes:
+        # emotion and reference_audio_path accepted for interface parity but ignored (EdgeTTS has no emotion/clone control).
         edge_voice = self.resolve_voice(voice_id)  # raises TTSError if unknown
 
         mp3_chunks: list[bytes] = []

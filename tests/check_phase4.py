@@ -373,7 +373,7 @@ _s21_engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thre
 SQLModel.metadata.create_all(_s21_engine)
 
 
-async def _s21_fake_tts(text: str, voice_id: str, emotion: str | None = None) -> bytes:
+async def _s21_fake_tts(text: str, voice_id: str, emotion: str | None = None, reference_audio_path: str | None = None) -> bytes:
     return _make_wav_bytes(50)
 
 

@@ -1398,3 +1398,126 @@ décision go/no-go sur le chantier émotion (contrat + dépendances).
 | Contrat | `BaseTTSProvider.synthesise(text, voice_id) -> bytes` WAV |
 | Licence Piper | GPL-3.0 — `OHF-Voice/piper1-gpl` — documentée dans ARCHITECTURE.md |
 | Nommage voix | `VOICE_CATALOGUE` impose les noms `.onnx` ; chaque voix exige un `<voice>.onnx.json` à côté (sinon crash silencieux) |
+
+---
+
+## Phase 18 — Clonage de voix (point 8 roadmap) — EN COURS
+
+> B3 close (2026-06-27) → clonage débloqué. Spike Étape 0 validé : modèle Base = 4.20 Go,
+> x-vector only mode, ~11 s/phrase, 4 voix FR + 1 EN. Contrat `Voice` dynamique approuvé avant
+> implémentation (CLAUDE.md Niveau 3). Détail spike et décisions VRAM : mémoire
+> `tts-emotion-qwen3-direction`.
+
+### Étape 1 ✅ (2026-06-27) — Contrat Voice dynamique (schemas + base TTS)
+
+**Livré.**
+- `app/schemas/voice.py` : `VoiceResponse` + champ `has_reference_audio: bool = False` (calculé
+  depuis `Voice.reference_audio_path is not None`) ; nouvelle classe `VoiceCreate(name, gender?)`.
+- `app/services/tts/base.py` : `BaseTTSProvider.synthesise` += paramètre optionnel
+  `reference_audio_path: str | None = None` — 100% rétrocompatible (les 4 providers existants
+  n'ont pas encore été mis à jour, ils seront ajustés en Étape 2).
+
+**Test-first.** `tests/check_phase17.py` 9/9 sections : imports, VoiceCreate validation,
+`has_reference_audio` défaut/True, `from_attributes` préservé, signature `BaseTTSProvider`,
+rétrocompat call-site sans/avec `reference_audio_path`. 16/16 suites sans régression.
+
+Fichiers (3) : `app/schemas/voice.py`, `app/services/tts/base.py`,
+`tests/check_phase17.py`.
+
+### Étape 2 ✅ (2026-06-27) — Mise à jour des 4 providers TTS
+
+**Livré.**
+- `edgetts.py`, `piper.py`, `elevenlabs.py` : `reference_audio_path: str | None = None` ajouté,
+  no-op (ces providers n'ont pas de levier clone).
+- `qwen.py` : logique complète de clonage. Nouveau `_MODEL_IDS_BASE` (Base checkpoints) ;
+  `_load_ref_audio(path)` charge MP3/WAV/FLAC via miniaudio + numpy → float32 ; `_ensure_base_model()`
+  charge le checkpoint Base en déchargeant d'abord le CustomVoice (swap séquentiel VRAM) ;
+  `synthesise` dispatche sur `reference_audio_path` : clone → `generate_voice_clone(...,
+  x_vector_only_mode=True)` ; preset → `generate_custom_voice(...)` inchangé.
+  `self._base_model` ajouté à l'état de l'instance (jamais chargé si voix catalogue uniquement).
+
+**Test-first.** `tests/check_phase17.py` étendu à 12 sections (+3) : signature des 4 providers
+(section 10) ; chemin clone WAV valide + `generate_voice_clone` appelé (section 11) ; swap
+CustomVoice→Base vérifié (section 12). 16/16 suites sans régression.
+
+Fichiers (5) : `app/services/tts/edgetts.py`, `piper.py`, `elevenlabs.py`, `qwen.py`,
+`tests/check_phase17.py`.
+
+### Étape 3 ✅ (2026-06-27) — Pipeline (call-sites)
+
+**Livré.**
+- `app/services/audio/chapter.py` : import `Voice` ajouté ; avant la boucle de synthèse, une
+  requête par `voice_id` unique (`Voice.voice_id == vid`) construit `ref_path: dict[str, str | None]` ;
+  `tts.synthesise` reçoit `reference_audio_path=ref_path.get(voice_id)`.
+- `app/workers/tasks.py` (`_synthesise_book`) : même pattern à l'intérieur du bloc session existant ;
+  `Voice` ajouté à l'import local ; `provider.synthesise` reçoit `reference_audio_path=…`.
+- `tests/check_phase4.py` : `_s21_fake_tts` mis à niveau (`reference_audio_path=None`) — c'était le
+  seul mock à signature fixe du repo (piège B2 déjà documenté).
+
+**Test-first.** `tests/check_phase17.py` étendu à 14 sections (+2) : lookup réel en DB in-memory
+avec `Voice.reference_audio_path` set (section 13) et absent (section 14). 16/16 suites vertes.
+
+Fichiers (4) : `app/services/audio/chapter.py`, `app/workers/tasks.py`,
+`tests/check_phase17.py`, `tests/check_phase4.py`.
+
+### Étape 4 ✅ (2026-06-27) — API REST voix
+
+**Livré.**
+- `POST /voices` (201) : upload multipart (`file` + `name` + `gender?`) ; slug dérivé du nom via
+  `_name_to_slug` ; fichier sauvé dans `data/voices/{slug}/ref.{ext}` ; `Voice(kind=CLONED,
+  reference_audio_path=…)` persisté. 409 sur slug dupliqué.
+- `DELETE /voices/{voice_id}` (204) : supprime le fichier de référence + dossier parent si vide +
+  la ligne `Voice` en DB. 404 si inconnu, 403 si `kind=CATALOGUE` (on ne peut pas supprimer une
+  voix catalogue).
+- `GET /voices` : `has_reference_audio=voice.reference_audio_path is not None` maintenant peuplé.
+- `GET /{voice_id}/sample` : valide désormais via la DB (plus la liste statique
+  `list_catalogue_voices()`) → supporte les voix CLONED ; passe `reference_audio_path` à
+  `provider.synthesise` (le clonage fonctionne avec `TTS_PROVIDER=qwen`).
+- `PATCH /{voice_id}` : `has_reference_audio` ajouté à la réponse (via `_voice_to_response` helper
+  qui centralise la construction de `VoiceResponse`).
+
+**Limite connue.** L'endpoint sample sur une voix CLONED ne fonctionne que si
+`TTS_PROVIDER=qwen` — les autres providers ignorent `reference_audio_path` et ne savent pas
+résoudre un slug de voix clonée dans leur propre mapping.
+
+**Test-first.** `tests/check_phase17.py` étendu à 19 sections (+5) : POST happy path (section 15) ;
+POST doublon 409 (16) ; DELETE CLONED 204 (17) ; DELETE CATALOGUE 403 (18) ; GET
+`has_reference_audio` (19). 16/16 suites sans régression.
+
+Fichiers (2) : `app/api/routes/voices.py`, `tests/check_phase17.py`.
+
+### Étape 5 ✅ (2026-06-27) — Frontend
+
+**Livré.**
+- `frontend/src/lib/api.ts` : `has_reference_audio: boolean` ajouté à `VoiceSummary` ;
+  `createVoice(name, gender, file)` → `POST /voices` multipart ; `deleteVoice(voiceId)` →
+  `DELETE /voices/{voiceId}`.
+- `frontend/src/app/voix/page.tsx` : bouton "+ Cloner une voix" ouvre un formulaire inline
+  (nom, genre optionnel, sélecteur de fichier MP3/WAV/FLAC) → appelle `createVoice`, ajoute la
+  voix à la liste sans rechargement. Voix CLONED : badge "🎙 cloné" sous l'orbe + bouton ×
+  (coin bas-droit de l'orbe) → `deleteVoice` avec confirmation `window.confirm`. TypeScript
+  `tsc --noEmit` : 0 erreurs, HMR compilé ✓.
+- `frontend/src/app/books/[id]/page.tsx` : le `<select>` de casting sépare désormais les voix
+  catalogue (options plates) des voix clonées (`<optgroup label="— Voix clonées —">`) ; le label
+  affiche désormais `v.name` (vs `v.id` avant, identique pour le catalogue, plus lisible pour les
+  clones).
+
+**Limite connue (inchangée).** La synthèse d'un aperçu de voix clonée n'est opérationnelle
+qu'avec `TTS_PROVIDER=qwen`.
+
+Fichiers (3) : `frontend/src/lib/api.ts`, `frontend/src/app/voix/page.tsx`,
+`frontend/src/app/books/[id]/page.tsx`.
+
+---
+
+## Idée différée — Filtres dans le catalogue de voix
+
+**Idée (2026-06-27).** Ajouter dans la page Voix (`/voix`) des filtres par :
+- genre (`MALE` / `FEMALE` / `NEUTRAL`)
+- langue / locale (ex. `fr-FR`, `en-GB`)
+- type de voix (`CATALOGUE` / `CLONED`)
+- éventuellement : modèle TTS (`edgetts`, `piper`, `qwen`, …)
+
+Les données sont déjà présentes en base (`Voice.gender`, `Voice.locale`, `Voice.kind`).
+À cadrer après livraison complète de Phase 18 (les voix clonées + la locale EN de David
+Attenborough rendent les filtres immédiatement utiles).

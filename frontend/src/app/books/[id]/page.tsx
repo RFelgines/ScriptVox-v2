@@ -292,12 +292,20 @@ export default function BookDetailPage({
             <option value="" disabled>
               Choisir…
             </option>
-            {assignable.map((v) => (
+            {assignable.filter((v) => v.kind === "CATALOGUE").map((v) => (
               <option key={v.id} value={v.id}>
-                {v.id}
-                {v.gender ? ` — ${v.gender}` : ""}
+                {v.name}{v.gender ? ` — ${v.gender}` : ""}
               </option>
             ))}
+            {assignable.some((v) => v.kind === "CLONED") && (
+              <optgroup label="— Voix clonées —">
+                {assignable.filter((v) => v.kind === "CLONED").map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}{v.gender ? ` — ${v.gender}` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           {c.voice_id && (
             <button

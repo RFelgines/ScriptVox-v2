@@ -134,7 +134,7 @@ async def _synthesise_book(
     from pathlib import Path as _Path
 
     from app.core.enums import SegmentType
-    from app.models import Book, Chapter, Character, Segment
+    from app.models import Book, Chapter, Character, Segment, Voice
     from app.services.audio.assembler import assemble_wav
     from app.services.tts import factory as tts_factory
     from app.services.voice_assignment import NARRATOR_VOICE_ID
@@ -160,6 +160,13 @@ async def _synthesise_book(
                 if char and char.voice_id:
                     char_voice[seg.character_id] = char.voice_id
 
+        # Look up reference_audio_path once per unique voice_id (one query per voice, not per segment)
+        all_voice_ids: set[str] = set(char_voice.values()) | {NARRATOR_VOICE_ID}
+        ref_path: dict[str, str | None] = {}
+        for vid in all_voice_ids:
+            v = session.exec(select(Voice).where(Voice.voice_id == vid)).first()
+            ref_path[vid] = v.reference_audio_path if v else None
+
     if not all_segments:
         return ""
 
@@ -173,7 +180,11 @@ async def _synthesise_book(
             if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
             else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
         )
-        wav_chunks.append(await provider.synthesise(seg.text, voice_id, emotion=seg.emotion))
+        wav_chunks.append(await provider.synthesise(
+            seg.text, voice_id,
+            emotion=seg.emotion,
+            reference_audio_path=ref_path.get(voice_id),
+        ))
 
         with Session(engine) as session:
             book = session.get(Book, book_id)
