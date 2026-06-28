@@ -266,7 +266,7 @@ def _analyze_book_impl(book_id: int) -> None:
 
         # ── Voice assignment ───────────────────────────────────────────────────
         with Session(engine) as session:
-            assign_voices(book_id, session)
+            assign_voices(book_id, session, tts_provider=get_settings().tts_provider)
 
         with Session(engine) as session:
             book = session.get(Book, book_id)

@@ -99,18 +99,32 @@ def seed_catalogue_voices(session: Session) -> None:
     session.commit()
 
 
-def assign_voices(book_id: int, session: Session) -> None:
+def assign_voices(
+    book_id: int,
+    session: Session,
+    tts_provider: str | None = None,
+) -> None:
     """Populate Character.voice_id using trait-based scoring (idempotent).
 
-    Characters are processed alphabetically for determinism. Each character
-    receives the highest-scoring unused voice; if all voices are taken the
-    best overall voice is reused (wrap-around).
+    When tts_provider="qwen", cloned voices (kind=CLONED) are tried first for
+    each character's gender pool before falling back to the catalogue.
+    Characters are processed alphabetically for determinism.
     """
     characters = session.exec(
         select(Character)
         .where(Character.book_id == book_id)
         .order_by(Character.name)
     ).all()
+
+    # Build cloned-voice pools per gender (qwen only).
+    cloned_by_gender: dict[Gender, list[str]] = {}
+    if tts_provider == "qwen":
+        cloned_voices = session.exec(
+            select(Voice).where(Voice.kind == VoiceKind.CLONED)
+        ).all()
+        for v in cloned_voices:
+            if v.gender is not None:
+                cloned_by_gender.setdefault(v.gender, []).append(v.voice_id)
 
     candidate_ids = [vid for vid in _CATALOGUE_META if vid != NARRATOR_VOICE_ID]
     used: set[str] = {
@@ -122,13 +136,25 @@ def assign_voices(book_id: int, session: Session) -> None:
         if char.voice_id is not None:
             continue
 
+        effective_gender = char.gender if char.gender != Gender.UNKNOWN else Gender.NEUTRAL
+
+        # ── Cloned voices (qwen only) — preferred over catalogue ──────────────
+        if tts_provider == "qwen":
+            clone_pool = cloned_by_gender.get(effective_gender, [])
+            chosen = next((vid for vid in clone_pool if vid not in used), None)
+            if chosen:
+                char.voice_id = chosen
+                used.add(chosen)
+                session.add(char)
+                continue
+
+        # ── Catalogue fallback (always, or primary when not qwen) ─────────────
         # Restrict candidates to the character's gender pool so a MALE char
         # never falls back to a FEMALE/NEUTRAL voice. Rank by fit (DESC score,
         # ASC voice_id tie-break) and take the best UNUSED one — falling
         # through to the next-best free voice of the same gender instead of
         # collapsing onto the single top pick when it's already taken. Only
         # reuse (ranked[0]) once the whole gender pool is exhausted.
-        effective_gender = char.gender if char.gender != Gender.UNKNOWN else Gender.NEUTRAL
         pool = VOICE_CATALOGUE.get(effective_gender) or candidate_ids
         ranked = sorted(pool, key=lambda vid: (-_score_voice(char, vid), vid))
         chosen = next((vid for vid in ranked if vid not in used), ranked[0])

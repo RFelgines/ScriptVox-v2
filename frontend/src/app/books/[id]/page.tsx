@@ -79,6 +79,8 @@ export default function BookDetailPage({
   const [showSecondary, setShowSecondary] = useState(false);
   // Bumpé après une action de fusion pour relancer le fetch (personnages + suggestions).
   const [mergeReloadNonce, setMergeReloadNonce] = useState(0);
+  // Voix sélectionnée dans le UI mais pas encore committée (pré-écoute).
+  const [pendingVoices, setPendingVoices] = useState<Map<number, string>>(new Map());
 
   // ?casting=auto (posé par la bibliothèque après upload) : déplie la section
   // casting dès que l'analyse atteint ANALYZED, servant de confirmation
@@ -153,6 +155,7 @@ export default function BookDetailPage({
         setCharacters((prev) =>
           prev.map((c) => (c.id === updated.id ? { ...c, voice_id: updated.voice_id } : c)),
         );
+        setPendingVoices((prev) => { const m = new Map(prev); m.delete(characterId); return m; });
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSavingId(null));
@@ -249,7 +252,16 @@ export default function BookDetailPage({
     };
   }, [bookId, reloadNonce]);
 
-  const assignable = voices.filter((v) => v.id !== "narrator");
+  const effectiveProvider = book?.tts_provider ?? appSettings?.default_tts_provider ?? "edgetts";
+  const voiceMap = new Map(voices.map((v) => [v.id, v]));
+  function isProviderCompatible(voiceId: string): boolean {
+    const v = voiceMap.get(voiceId);
+    if (!v) return true;
+    return v.kind === "CATALOGUE" || effectiveProvider === "qwen";
+  }
+  const assignable = voices.filter(
+    (v) => v.id !== "narrator" && (v.kind === "CATALOGUE" || effectiveProvider === "qwen"),
+  );
   const canGenerate = book?.status === "ANALYZED" && !generating;
 
   const needle = search.trim().toLowerCase();
@@ -284,10 +296,22 @@ export default function BookDetailPage({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {c.voice_id && !isProviderCompatible(c.voice_id) && (
+            <span
+              title={`Voix clonée incompatible avec le provider "${effectiveProvider}" — passer sur Qwen ou changer la voix.`}
+              className="text-amber-600"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                <path d="M8 1.5L1 14h14L8 1.5zM8 6v4M8 11.5v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+              </svg>
+            </span>
+          )}
           <select
-            value={c.voice_id ?? ""}
+            value={pendingVoices.get(c.id) ?? c.voice_id ?? ""}
             disabled={savingId === c.id}
-            onChange={(e) => handleVoiceChange(c.id, e.target.value)}
+            onChange={(e) =>
+              setPendingVoices((prev) => new Map(prev).set(c.id, e.target.value))
+            }
             className="rounded-control border border-border bg-surface-2 px-2 py-1 text-sm disabled:opacity-50"
           >
             <option value="" disabled>
@@ -308,17 +332,31 @@ export default function BookDetailPage({
               </optgroup>
             )}
           </select>
-          {c.voice_id && (
+          {(pendingVoices.get(c.id) ?? c.voice_id) && (
             <button
-              onClick={() =>
-                play({ title: `Aperçu — ${c.voice_id}`, src: voiceSampleUrl(c.voice_id!) })
-              }
+              onClick={() => {
+                const id = pendingVoices.get(c.id) ?? c.voice_id!;
+                play({ title: `Aperçu — ${id}`, src: voiceSampleUrl(id) });
+              }}
               title="Écouter un aperçu de cette voix"
               aria-label="Écouter un aperçu de cette voix"
               className="rounded-control p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
             >
               <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 ml-0.5">
                 <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+              </svg>
+            </button>
+          )}
+          {pendingVoices.has(c.id) && pendingVoices.get(c.id) !== c.voice_id && (
+            <button
+              onClick={() => handleVoiceChange(c.id, pendingVoices.get(c.id)!)}
+              disabled={savingId === c.id}
+              title="Confirmer cette voix"
+              aria-label="Confirmer cette voix"
+              className="rounded-control p-1.5 text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                <path d="M2.5 8.5l4 4 7-8" />
               </svg>
             </button>
           )}
