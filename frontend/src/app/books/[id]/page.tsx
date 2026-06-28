@@ -652,32 +652,44 @@ export default function BookDetailPage({
                       <Button
                         size="sm"
                         onClick={() => handleGenerateChapter(ch.position)}
-                        disabled={generatingPos === ch.position || chapterActive(ch.status)}
+                        disabled={generatingPos === ch.position || ch.status === "GENERATING"}
                       >
                         {generatingPos === ch.position ? "…" : "Générer"}
                       </Button>
                     )}
                     {ch.status === "DONE" && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() =>
-                          play({
-                            title: `${book.title} — ${ch.title ?? `Chapitre ${ch.position}`}`,
-                            src: chapterAudioUrl(book.id, ch.position),
-                            bookId: book.id,
-                            bookTitle: book.title,
-                            coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
-                            chapterPosition: ch.position,
-                          })
-                        }
-                        className="inline-flex items-center gap-1"
-                      >
-                        <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
-                          <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
-                        </svg>
-                        Écouter
-                      </Button>
+                      <>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() =>
+                            play({
+                              title: `${book.title} — ${ch.title ?? `Chapitre ${ch.position}`}`,
+                              src: chapterAudioUrl(book.id, ch.position),
+                              bookId: book.id,
+                              bookTitle: book.title,
+                              coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
+                              chapterPosition: ch.position,
+                            })
+                          }
+                          className="inline-flex items-center gap-1"
+                        >
+                          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
+                            <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+                          </svg>
+                          Écouter
+                        </Button>
+                        {book.status === "ANALYZED" && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleGenerateChapter(ch.position)}
+                            disabled={generatingPos === ch.position}
+                            title="Regénérer ce chapitre"
+                          >
+                            {generatingPos === ch.position ? "…" : "↺"}
+                          </Button>
+                        )}
+                      </>
                     )}
                   </li>
                 ))}
