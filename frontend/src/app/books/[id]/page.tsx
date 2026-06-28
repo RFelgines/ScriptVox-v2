@@ -31,6 +31,7 @@ import { usePlayer } from "@/components/player/PlayerProvider";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Button from "@/components/ui/Button";
 import Alert from "@/components/ui/Alert";
+import Skeleton from "@/components/ui/Skeleton";
 
 const POLL_MS = 3000;
 
@@ -333,11 +334,20 @@ export default function BookDetailPage({
         ← Bibliothèque
       </Link>
 
-      {loading && !book && <p className="mt-6 text-muted">Chargement…</p>}
+      {loading && !book && (
+        <div className="mt-6 flex gap-6">
+          <Skeleton className="aspect-[2/3] w-32 shrink-0 rounded-control" />
+          <div className="flex flex-1 flex-col gap-3 pt-1">
+            <Skeleton className="h-7 w-3/4 rounded" />
+            <Skeleton className="h-4 w-1/3 rounded" />
+            <Skeleton className="mt-1 h-6 w-20 rounded-full" />
+          </div>
+        </div>
+      )}
 
       {error && (
         <Alert title="Erreur" className="mt-6">
-          <p className="mt-1 text-sm text-red-400">{error}</p>
+          <p className="mt-1 text-sm text-red-500">{error}</p>
         </Alert>
       )}
 
@@ -372,7 +382,7 @@ export default function BookDetailPage({
                 </div>
               )}
               {book.status === "FAILED" && book.error_message && (
-                <p className="mt-2 text-sm text-red-400">{book.error_message}</p>
+                <p className="mt-2 text-sm text-red-500">{book.error_message}</p>
               )}
               {autoFlag && (book.status === "PENDING" || book.status === "PROCESSING") && (
                 <p className="mt-2 text-sm text-muted">
@@ -429,9 +439,9 @@ export default function BookDetailPage({
               )}
 
               {mergeSuggestions.length > 0 && (
-                <div className="mb-4 rounded-control border border-amber-700 bg-amber-900/20 p-3">
+                <div className="mb-4 rounded-control border border-amber-500/40 bg-amber-500/10 p-3">
                   <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-amber-300">
+                    <p className="text-sm font-semibold text-amber-600">
                       Fusions de personnages suggérées
                     </p>
                     <Button
@@ -596,7 +606,7 @@ export default function BookDetailPage({
                     <div className="flex-1">
                       <p className="text-sm">{ch.title ?? `Chapitre ${ch.position}`}</p>
                       {ch.status === "FAILED" && ch.error_message && (
-                        <p className="text-xs text-red-400">{ch.error_message}</p>
+                        <p className="text-xs text-red-500">{ch.error_message}</p>
                       )}
                     </div>
                     <StatusBadge status={ch.status} className="text-xs" />

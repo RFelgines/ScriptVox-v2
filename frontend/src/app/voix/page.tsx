@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import Alert from "@/components/ui/Alert";
+import Skeleton from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
 
 function localeToFlag(locale: string): string | null {
@@ -203,7 +204,7 @@ export default function VoixPage() {
               />
             </label>
           </div>
-          {cloneError && <p className="mt-3 text-sm text-red-400">{cloneError}</p>}
+          {cloneError && <p className="mt-3 text-sm text-red-500">{cloneError}</p>}
           <div className="mt-4 flex justify-end">
             <Button type="submit" variant="primary" disabled={cloning}>
               {cloning ? "Création en cours…" : "Créer la voix clonée"}
@@ -212,18 +213,47 @@ export default function VoixPage() {
         </form>
       )}
 
-      {loading && <p className="mt-6 text-muted">Chargement…</p>}
+      {loading && (
+        <div className="mt-8 flex flex-wrap gap-x-6 gap-y-8">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="flex w-28 flex-col items-center gap-2">
+              <Skeleton className="h-24 w-24 rounded-full" />
+              <Skeleton className="h-3 w-16 rounded" />
+              <Skeleton className="h-5 w-10 rounded-full" />
+            </div>
+          ))}
+        </div>
+      )}
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
-          <p className="text-sm text-red-400">{error}</p>
+          <p className="text-sm text-red-500">{error}</p>
         </Alert>
       )}
 
       {!loading && !error && visible.length === 0 && (
-        <p className="mt-6 text-muted">
-          {favoritesOnly ? "Aucune voix en favori pour l'instant." : "Aucune voix disponible."}
-        </p>
+        <div className="mt-16 flex flex-col items-center gap-3 text-center text-muted">
+          {favoritesOnly ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          )}
+          <p className="text-base font-medium text-foreground">
+            {favoritesOnly ? "Aucun favori" : "Aucune voix disponible"}
+          </p>
+          <p className="text-sm">
+            {favoritesOnly
+              ? "Cliquez l'étoile sur une voix pour la mettre en favori."
+              : "Le catalogue de voix est vide."}
+          </p>
+        </div>
       )}
 
       {visible.length > 0 && (

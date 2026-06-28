@@ -6,6 +6,7 @@ import { listBooks, BookSummary } from "@/lib/api";
 import UploadDropzone from "@/components/UploadDropzone";
 import BookCard from "@/components/BookCard";
 import Alert from "@/components/ui/Alert";
+import Skeleton from "@/components/ui/Skeleton";
 
 export default function Home() {
   const router = useRouter();
@@ -47,11 +48,24 @@ export default function Home() {
 
       <UploadDropzone onUploaded={handleUploaded} />
 
-      {loading && <p className="mt-6 text-muted">Connexion à l&apos;API…</p>}
+      {loading && (
+        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex flex-col overflow-hidden rounded-card border border-border bg-surface">
+              <Skeleton className="aspect-[2/3] rounded-none" />
+              <div className="flex flex-col gap-2 p-3">
+                <Skeleton className="h-3 w-full rounded" />
+                <Skeleton className="h-3 w-2/3 rounded" />
+                <Skeleton className="mt-2 h-5 w-16 rounded-full" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
-          <p className="text-sm text-red-400 mt-1">{error}</p>
+          <p className="text-sm text-red-500 mt-1">{error}</p>
           <p className="text-sm text-muted mt-2">
             Vérifiez que l&apos;API tourne sur{" "}
             <code className="bg-surface-2 px-1 rounded">
@@ -62,7 +76,14 @@ export default function Home() {
       )}
 
       {!loading && !error && books.length === 0 && (
-        <p className="mt-6 text-muted">Aucun livre. Glissez un EPUB ci-dessus.</p>
+        <div className="mt-16 flex flex-col items-center gap-3 text-center text-muted">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+          <p className="text-base font-medium text-foreground">Bibliothèque vide</p>
+          <p className="text-sm">Glissez un fichier EPUB ci-dessus pour commencer.</p>
+        </div>
       )}
 
       {books.length > 0 && (
