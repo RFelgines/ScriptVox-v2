@@ -27,6 +27,20 @@ export interface AppSettings {
   available_tts_providers: string[];
 }
 
+export type ProviderStatusLevel = "ok" | "warning" | "error";
+
+export interface ProviderStatus {
+  name: string;
+  status: ProviderStatusLevel;
+  detail: string | null;
+}
+
+export interface AppStatus {
+  llm: ProviderStatus;
+  tts: ProviderStatus;
+  cloned_voices_count: number;
+}
+
 export type ChapterStatus = "PENDING" | "GENERATING" | "DONE" | "FAILED";
 
 export interface ChapterSummary {
@@ -130,6 +144,12 @@ export async function patchBookProvider(
 export async function getAppSettings(): Promise<AppSettings> {
   const res = await fetch(`${API_URL}/settings`);
   if (!res.ok) throw new Error(`GET /settings failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getAppStatus(): Promise<AppStatus> {
+  const res = await fetch(`${API_URL}/settings/status`);
+  if (!res.ok) throw new Error(`GET /settings/status failed: ${res.status}`);
   return res.json();
 }
 
