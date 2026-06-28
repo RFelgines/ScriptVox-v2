@@ -427,6 +427,53 @@ def _process_book_impl(book_id: int) -> None:
     _generate_book_impl(book_id)
 
 
+_VOICE_SAMPLE_TEXT = "Bonjour, voici un aperçu de cette voix clonée par ScriptVox."
+
+
+def _generate_voice_sample_impl(voice_id: str) -> None:
+    from pathlib import Path
+
+    from app.core.db import get_engine
+    from app.core.enums import VoiceKind
+    from app.models.entities import Voice
+
+    settings = get_settings()
+    if settings.tts_provider != "qwen":
+        logger.info("generate_voice_sample: skipped (TTS_PROVIDER=%s)", settings.tts_provider)
+        return
+
+    engine = get_engine()
+    with Session(engine) as session:
+        voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
+        if voice is None or voice.kind != VoiceKind.CLONED or voice.reference_audio_path is None:
+            logger.warning("generate_voice_sample: voice %r not found or no ref audio", voice_id)
+            return
+        ref_path = voice.reference_audio_path
+
+    from app.services.tts.qwen import QwenTTSProvider
+    provider = QwenTTSProvider(settings)
+
+    out_dir = Path("data") / "voice_samples"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"qwen_{voice_id}.wav"
+
+    try:
+        wav_bytes = asyncio.run(provider.synthesise(
+            _VOICE_SAMPLE_TEXT,
+            voice_id,
+            reference_audio_path=ref_path,
+        ))
+        out_path.write_bytes(wav_bytes)
+        logger.info("generate_voice_sample: saved %s", out_path)
+    except Exception:
+        logger.exception("generate_voice_sample failed for voice_id=%r", voice_id)
+
+
+@huey.task()
+def generate_voice_sample(voice_id: str) -> None:
+    _generate_voice_sample_impl(voice_id)
+
+
 @huey.task()
 def analyze_book(book_id: int) -> None:
     _analyze_book_impl(book_id)

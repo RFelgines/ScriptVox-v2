@@ -18,6 +18,7 @@ from app.services.tts.factory import get_tts_provider
 router = APIRouter()
 
 DATA_DIR = Path("data")
+SAMPLES_DIR = DATA_DIR / "voice_samples"
 _SAMPLE_TEXT = "Bonjour, ceci est un aperçu de cette voix."
 
 
@@ -31,6 +32,12 @@ def _name_to_slug(name: str) -> str:
     return slug or "voice"
 
 
+def _has_sample(voice: Voice) -> bool:
+    if voice.kind != VoiceKind.CLONED:
+        return True
+    return (SAMPLES_DIR / f"qwen_{voice.voice_id}.wav").exists()
+
+
 def _voice_to_response(voice: Voice, locale: str | None) -> VoiceResponse:
     return VoiceResponse(
         id=voice.voice_id,
@@ -40,6 +47,7 @@ def _voice_to_response(voice: Voice, locale: str | None) -> VoiceResponse:
         locale=locale,
         is_favorite=voice.is_favorite,
         has_reference_audio=voice.reference_audio_path is not None,
+        has_sample=_has_sample(voice),
     )
 
 
@@ -85,6 +93,10 @@ async def create_voice(
     session.add(voice)
     session.commit()
     session.refresh(voice)
+
+    # Queue sample generation — no-op if TTS_PROVIDER != "qwen"
+    from app.workers.tasks import generate_voice_sample as _gen_sample
+    _gen_sample(slug)
 
     locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
     return _voice_to_response(voice, locale)
@@ -141,10 +153,18 @@ async def get_voice_sample(
     if voice is None:
         raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
 
-    cache_dir = DATA_DIR / "voice_samples"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{settings.tts_provider}_{voice_id}.wav"
+    SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 
+    if voice.kind == VoiceKind.CLONED:
+        # Cloned voices: serve pre-generated sample only — never synthesize on demand
+        # (synthesis requires GPU + reference audio; on-demand would give misleading results)
+        sample = SAMPLES_DIR / f"qwen_{voice_id}.wav"
+        if sample.exists():
+            return FileResponse(str(sample), media_type="audio/wav", filename=sample.name)
+        raise HTTPException(status_code=404, detail="Sample not yet generated — trigger via POST /voices/{voice_id}/sample")
+
+    # Catalogue voices: synthesize on demand with per-provider cache
+    cache_path = SAMPLES_DIR / f"{settings.tts_provider}_{voice_id}.wav"
     if not cache_path.exists():
         try:
             audio_bytes = await provider.synthesise(
@@ -156,3 +176,18 @@ async def get_voice_sample(
         cache_path.write_bytes(audio_bytes)
 
     return FileResponse(str(cache_path), media_type="audio/wav", filename=cache_path.name)
+
+
+@router.post("/{voice_id}/sample", status_code=202)
+def request_voice_sample(
+    voice_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
+    if voice is None:
+        raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
+    if voice.kind != VoiceKind.CLONED:
+        raise HTTPException(status_code=400, detail="Only cloned voices need sample generation.")
+    from app.workers.tasks import generate_voice_sample as _gen_sample
+    _gen_sample(voice_id)
+    return {"status": "queued"}

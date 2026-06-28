@@ -9,6 +9,7 @@ import {
   deleteVoice,
   listVoices,
   patchVoiceFavorite,
+  requestVoiceSample,
   voiceSampleUrl,
 } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
@@ -58,6 +59,8 @@ export default function VoixPage() {
   const [favoritesOnly, setFavoritesOnly] = useState(false);
 
   // ── Formulaire de clonage ──────────────────────────────────────────────────
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneName, setCloneName] = useState("");
   const [cloneGender, setCloneGender] = useState<Gender | "">("");
@@ -261,16 +264,39 @@ export default function VoixPage() {
           {visible.map((v) => (
             <div key={v.id} className="flex w-28 flex-col items-center gap-2">
               <div className="relative">
-                <button
-                  onClick={() => play({ title: `Aperçu — ${v.name}`, src: voiceSampleUrl(v.id) })}
-                  aria-label={`Écouter un aperçu de ${v.name}`}
-                  style={orbStyle(orbHues.get(v.id) ?? 0)}
-                  className="voice-orb group flex h-24 w-24 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
-                    ▶
-                  </span>
-                </button>
+                {v.kind === "CLONED" && !v.has_sample ? (
+                  <button
+                    onClick={() => {
+                      if (requestingId === v.id) return;
+                      setRequestingId(v.id);
+                      requestVoiceSample(v.id)
+                        .then(() => setVoices((prev) =>
+                          prev.map((x) => x.id === v.id ? { ...x } : x)
+                        ))
+                        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                        .finally(() => setRequestingId(null));
+                    }}
+                    aria-label={`Générer un aperçu pour ${v.name}`}
+                    title="Sample non disponible — cliquer pour générer"
+                    style={orbStyle(orbHues.get(v.id) ?? 0)}
+                    className="voice-orb group flex h-24 w-24 items-center justify-center rounded-full shadow-lg grayscale opacity-50 transition-all hover:opacity-70"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100 text-lg">
+                      {requestingId === v.id ? "…" : "↺"}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => play({ title: `Aperçu — ${v.name}`, src: voiceSampleUrl(v.id) })}
+                    aria-label={`Écouter un aperçu de ${v.name}`}
+                    style={orbStyle(orbHues.get(v.id) ?? 0)}
+                    className="voice-orb group flex h-24 w-24 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                      ▶
+                    </span>
+                  </button>
+                )}
                 <button
                   onClick={() => toggleFavorite(v)}
                   disabled={savingId === v.id}

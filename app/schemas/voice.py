@@ -13,6 +13,7 @@ class VoiceResponse(BaseModel):
     locale: Optional[str] = None     # provider locale (edgetts) else None
     is_favorite: bool = False
     has_reference_audio: bool = False
+    has_sample: bool = True
 
     model_config = {"from_attributes": True}
 

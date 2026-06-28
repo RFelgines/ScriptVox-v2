@@ -63,6 +63,7 @@ export interface VoiceSummary {
   locale: string | null;
   is_favorite: boolean;
   has_reference_audio: boolean;
+  has_sample: boolean;
 }
 
 export type MergeSuggestionStatus = "PENDING" | "ACCEPTED" | "REJECTED";
@@ -151,6 +152,11 @@ export async function getAppStatus(): Promise<AppStatus> {
   const res = await fetch(`${API_URL}/settings/status`);
   if (!res.ok) throw new Error(`GET /settings/status failed: ${res.status}`);
   return res.json();
+}
+
+export async function requestVoiceSample(voiceId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/voices/${voiceId}/sample`, { method: "POST" });
+  if (!res.ok) throw new Error(`POST /voices/${voiceId}/sample failed: ${res.status}`);
 }
 
 export async function listChapters(id: number): Promise<ChapterSummary[]> {
