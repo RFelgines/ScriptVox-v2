@@ -24,6 +24,7 @@ env/
 *.db-wal
 
 # Data directory — uploads and audio output (keep the placeholder)
+# ⚠️ Never delete data/voice_uploads/ or data/voices/ during resets — they contain reference audio
 data/*
 !data/.gitkeep
 

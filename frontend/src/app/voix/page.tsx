@@ -90,8 +90,11 @@ export default function VoixPage() {
   }
 
   function handleDeleteVoice(voice: VoiceSummary) {
-    if (!window.confirm(`Supprimer la voix « ${voice.name} » ? Cette action est irréversible.`))
-      return;
+    const msg =
+      voice.kind === "CLONED"
+        ? `Supprimer la voix « ${voice.name} » ? Cette action est irréversible.`
+        : `Retirer « ${voice.name} » du catalogue ? Elle sera restaurée au prochain redémarrage du serveur.`;
+    if (!window.confirm(msg)) return;
     setDeletingId(voice.id);
     deleteVoice(voice.id)
       .then(() => setVoices((prev) => prev.filter((v) => v.id !== voice.id)))
@@ -112,6 +115,16 @@ export default function VoixPage() {
       setCloneName("");
       setCloneGender("");
       setCloneFile(null);
+      // Auto-génère le sample si pas encore disponible (TTS_PROVIDER=qwen)
+      if (!created.has_sample && created.kind === "CLONED") {
+        setRequestingId(created.id);
+        requestVoiceSample(created.id)
+          .then((updated) =>
+            setVoices((prev) => prev.map((x) => (x.id === updated.id ? updated : x))),
+          )
+          .catch(() => {})
+          .finally(() => setRequestingId(null));
+      }
     } catch (err) {
       setCloneError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -270,9 +283,11 @@ export default function VoixPage() {
                       if (requestingId === v.id) return;
                       setRequestingId(v.id);
                       requestVoiceSample(v.id)
-                        .then(() => setVoices((prev) =>
-                          prev.map((x) => x.id === v.id ? { ...x } : x)
-                        ))
+                        .then((updated) =>
+                          setVoices((prev) =>
+                            prev.map((x) => (x.id === updated.id ? updated : x)),
+                          ),
+                        )
                         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
                         .finally(() => setRequestingId(null));
                     }}
@@ -307,17 +322,15 @@ export default function VoixPage() {
                 >
                   {v.is_favorite ? "★" : "☆"}
                 </button>
-                {v.kind === "CLONED" && (
-                  <button
-                    onClick={() => handleDeleteVoice(v)}
-                    disabled={deletingId === v.id}
-                    aria-label={`Supprimer la voix ${v.name}`}
-                    title="Supprimer cette voix clonée"
-                    className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-xs text-muted shadow hover:bg-red-900/60 hover:text-red-300 disabled:opacity-50"
-                  >
-                    {deletingId === v.id ? "…" : "×"}
-                  </button>
-                )}
+                <button
+                  onClick={() => handleDeleteVoice(v)}
+                  disabled={deletingId === v.id}
+                  aria-label={`Supprimer la voix ${v.name}`}
+                  title={v.kind === "CLONED" ? "Supprimer cette voix clonée" : "Retirer du catalogue"}
+                  className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-xs text-muted shadow hover:bg-red-900/60 hover:text-red-300 disabled:opacity-50"
+                >
+                  {deletingId === v.id ? "…" : "×"}
+                </button>
               </div>
               <p className="truncate text-sm font-medium" title={v.name}>
                 {v.name}

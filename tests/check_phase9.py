@@ -7,7 +7,7 @@ Run: .venv/Scripts/python tests/check_phase9.py
 import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -696,45 +696,46 @@ check("toutes des voix MALE (male_0/1/2)",
 # Phase 17 — GET /voices/{voice_id}/sample (aperçu audio)
 # ══════════════════════════════════════════════════════
 
-from app.api.routes.voices import get_tts_provider_dep  # noqa: E402
+from app.services.tts.edgetts import EdgeTTSProvider  # noqa: E402
 
 _sample_dir = ROOT / "data" / "voice_samples"
 _sample_cache_file = _sample_dir / "edgetts_female_0.wav"
 if _sample_cache_file.exists():
     _sample_cache_file.unlink()
 
-# ── Section 29: 200, audio/wav, contenu = sortie du provider ─────────────────
+# ── Section 29: 200, audio/wav, contenu = sortie d'EdgeTTS ──────────────────
+# Le sample catalogue est toujours généré via EdgeTTS (indépendamment de TTS_PROVIDER).
 
-section("GET /voices/{id}/sample: 200, audio/wav, synthèse via le provider TTS")
-
-_mock_provider = MagicMock()
-_mock_provider.synthesise = AsyncMock(return_value=b"FAKE_WAV_BYTES")
+section("GET /voices/{id}/sample: 200, audio/wav, synthèse via EdgeTTS")
 
 app.dependency_overrides[get_settings] = lambda: mock_edge
-app.dependency_overrides[get_tts_provider_dep] = lambda: _mock_provider
 
-with TestClient(app) as tc:
-    resp = tc.get("/voices/female_0/sample")
-    check("status 200", resp.status_code == 200, f"got {resp.status_code}")
-    check("content-type audio/wav", resp.headers.get("content-type") == "audio/wav",
-          f"got {resp.headers.get('content-type')!r}")
-    check("contenu == sortie du provider", resp.content == b"FAKE_WAV_BYTES",
-          f"got {resp.content!r}")
-    check("synthesise appelé une fois", _mock_provider.synthesise.call_count == 1,
-          f"got {_mock_provider.synthesise.call_count}")
+with patch.object(EdgeTTSProvider, "synthesise", new_callable=AsyncMock,
+                  return_value=b"FAKE_WAV_BYTES") as _mock_synth:
+    with TestClient(app) as tc:
+        resp = tc.get("/voices/female_0/sample")
+        check("status 200", resp.status_code == 200, f"got {resp.status_code}")
+        check("content-type audio/wav", resp.headers.get("content-type") == "audio/wav",
+              f"got {resp.headers.get('content-type')!r}")
+        check("contenu == sortie du provider", resp.content == b"FAKE_WAV_BYTES",
+              f"got {resp.content!r}")
+        check("synthesise appelé une fois", _mock_synth.call_count == 1,
+              f"got {_mock_synth.call_count}")
 
-# ── Section 30: 2e appel -> cache disque, provider PAS rappelé ───────────────
+# ── Section 30: 2e appel -> cache disque, EdgeTTS PAS rappelé ────────────────
 
 section("GET /voices/{id}/sample: 2e appel -> servi depuis le cache, pas de resynthèse")
 
-with TestClient(app) as tc:
-    resp2 = tc.get("/voices/female_0/sample")
-    check("status 200", resp2.status_code == 200, f"got {resp2.status_code}")
-    check("synthesise TOUJOURS appelé une seule fois (cache)",
-          _mock_provider.synthesise.call_count == 1,
-          f"got {_mock_provider.synthesise.call_count}")
+with patch.object(EdgeTTSProvider, "synthesise", new_callable=AsyncMock,
+                  return_value=b"SHOULD_NOT_CALL") as _mock_synth2:
+    with TestClient(app) as tc:
+        resp2 = tc.get("/voices/female_0/sample")
+        check("status 200", resp2.status_code == 200, f"got {resp2.status_code}")
+        check("EdgeTTS NON rappelé (cache)",
+              _mock_synth2.call_count == 0,
+              f"got {_mock_synth2.call_count}")
 
-# ── Section 31: voice_id inconnu -> 404, provider jamais appelé ──────────────
+# ── Section 31: voice_id inconnu -> 404 ──────────────────────────────────────
 
 section("GET /voices/{id}/sample: voice_id inconnu -> 404")
 
@@ -877,6 +878,111 @@ with _Session(_eng35) as _s35:
 check("9 voix après 2 appels (pas de doublon)", count == 9, f"got {count}")
 
 
+# ══════════════════════════════════════════════════════
+# Phase 18 — assign_voices avec voix clonées (tts_provider=qwen)
+# ══════════════════════════════════════════════════════
+
+from app.core.enums import VoiceKind  # noqa: E402
+
+# ── Section 36: qwen + clone MALE -> clone choisi avant catalogue ─────────────
+
+section("assign_voices qwen: voix clonee MALE choisie avant catalogue")
+
+_eng36 = _make_engine()
+with Session(_eng36) as _s36:
+    _bid36 = _make_book(_s36)
+    _clone36 = Voice(voice_id="jean-dupont", name="Jean Dupont", kind=VoiceKind.CLONED, gender=Gender.MALE)
+    _s36.add(_clone36)
+    _s36.add(_char(_bid36, "Hero", Gender.MALE, AgeCategory.ADULT))
+    _s36.commit()
+    assign_voices(_bid36, _s36, tts_provider="qwen")
+
+with Session(_eng36) as _s36b:
+    _hero36 = _s36b.exec(select(Character).where(Character.book_id == _bid36)).first()
+check("Hero (MALE) -> voix clonee 'jean-dupont'",
+      _hero36.voice_id == "jean-dupont",
+      f"got {_hero36.voice_id!r}")
+
+
+# ── Section 37: edgetts + clone en base -> clone ignore, catalogue utilise ────
+
+section("assign_voices edgetts: clones en base ignores, catalogue utilise")
+
+_eng37 = _make_engine()
+with Session(_eng37) as _s37:
+    _bid37 = _make_book(_s37)
+    _clone37 = Voice(voice_id="jean-dupont", name="Jean Dupont", kind=VoiceKind.CLONED, gender=Gender.MALE)
+    _s37.add(_clone37)
+    _s37.add(_char(_bid37, "Hero", Gender.MALE, AgeCategory.ADULT))
+    _s37.commit()
+    assign_voices(_bid37, _s37, tts_provider="edgetts")
+
+with Session(_eng37) as _s37b:
+    _hero37 = _s37b.exec(select(Character).where(Character.book_id == _bid37)).first()
+check("Hero (MALE) -> voix catalogue (pas le clone)",
+      _hero37.voice_id in ("male_0", "male_1", "male_2"),
+      f"got {_hero37.voice_id!r}")
+check("voix clonee PAS utilisee (mauvais provider)",
+      _hero37.voice_id != "jean-dupont",
+      f"got {_hero37.voice_id!r}")
+
+
+# ── Section 38: qwen + 2 persos MALE, 1 clone -> clone pour le 1er, catalogue pour le 2e ──
+
+section("assign_voices qwen: 2 persos MALE, 1 clone -> clone 1er, catalogue 2e")
+
+_eng38 = _make_engine()
+with Session(_eng38) as _s38:
+    _bid38 = _make_book(_s38)
+    _clone38 = Voice(voice_id="jean-dupont", name="Jean Dupont", kind=VoiceKind.CLONED, gender=Gender.MALE)
+    _s38.add(_clone38)
+    _s38.add_all([
+        _char(_bid38, "Alpha", Gender.MALE, AgeCategory.ADULT),
+        _char(_bid38, "Beta",  Gender.MALE, AgeCategory.ADULT),
+    ])
+    _s38.commit()
+    assign_voices(_bid38, _s38, tts_provider="qwen")
+
+with Session(_eng38) as _s38b:
+    _chars38 = {
+        c.name: c.voice_id
+        for c in _s38b.exec(select(Character).where(Character.book_id == _bid38)).all()
+    }
+_vids38 = set(_chars38.values())
+check("Alpha -> clone 'jean-dupont' (1er par ordre alphabetique)",
+      _chars38.get("Alpha") == "jean-dupont",
+      f"got {_chars38.get('Alpha')!r}")
+check("Beta -> voix catalogue (clone deja pris)",
+      _chars38.get("Beta") in ("male_0", "male_1", "male_2"),
+      f"got {_chars38.get('Beta')!r}")
+check("les 2 voix sont distinctes",
+      len(_vids38) == 2,
+      f"got {_chars38}")
+
+
+# ── Section 39: qwen + clone du mauvais genre -> fallback catalogue genre correct ──
+
+section("assign_voices qwen: clone genre incompatible -> fallback catalogue")
+
+_eng39 = _make_engine()
+with Session(_eng39) as _s39:
+    _bid39 = _make_book(_s39)
+    _clone39 = Voice(voice_id="marie-dupont", name="Marie Dupont", kind=VoiceKind.CLONED, gender=Gender.FEMALE)
+    _s39.add(_clone39)
+    _s39.add(_char(_bid39, "Hero", Gender.MALE, AgeCategory.ADULT))
+    _s39.commit()
+    assign_voices(_bid39, _s39, tts_provider="qwen")
+
+with Session(_eng39) as _s39b:
+    _hero39 = _s39b.exec(select(Character).where(Character.book_id == _bid39)).first()
+check("Hero (MALE) -> catalogue MALE (pas le clone FEMALE)",
+      _hero39.voice_id in ("male_0", "male_1", "male_2"),
+      f"got {_hero39.voice_id!r}")
+check("clone FEMALE non utilise pour un perso MALE",
+      _hero39.voice_id != "marie-dupont",
+      f"got {_hero39.voice_id!r}")
+
+
 # ── Rapport ───────────────────────────────────────────────────────────────────
 
 print(f"\n{'='*52}")
@@ -886,4 +992,4 @@ if _errors:
         print(f"  {e}")
     sys.exit(1)
 else:
-    print("OK — Toutes les sections passent (Phase 8 Étapes 1 + 2 + 3).")
+    print("OK — Toutes les sections passent (Phase 8 Etapes 1 + 2 + 3 + clones qwen).")

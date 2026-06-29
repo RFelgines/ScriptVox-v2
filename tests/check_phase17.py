@@ -416,9 +416,10 @@ def _v_session():
 
 _app.dependency_overrides[_get_session] = _v_session
 
-# Seed a CATALOGUE voice for the delete-catalogue-forbidden test
+# Seed CATALOGUE voices: narrator pour §19 (inspecté), male_0 pour §18 (supprimé)
 with _Sess(_v_engine) as _s:
     _s.add(_Voice(voice_id="narrator", name="Narrator", kind=_VoiceKind.CATALOGUE))
+    _s.add(_Voice(voice_id="male_0", name="Male 0", kind=_VoiceKind.CATALOGUE))
     _s.commit()
 
 
@@ -492,14 +493,19 @@ with _tempfile.TemporaryDirectory() as _tmp17:
 ok("204 + fichier supprime + Voice retiree de la DB")
 
 
-# ── 18. DELETE /voices/{id} — voix CATALOGUE -> 403 ──────────────────────────
-section("DELETE /voices/{id} -- voix CATALOGUE -> 403")
+# ── 18. DELETE /voices/{id} — voix CATALOGUE -> 204 (autorisé, re-seedé au restart) ───
+# N.B. On utilise male_0 (pas narrator) pour ne pas casser le §19 qui l'inspecte.
+section("DELETE /voices/{id} -- voix CATALOGUE -> 204 (autorise, re-seede au restart)")
 
 with _TC(_app, raise_server_exceptions=False) as _tc18:
-    _r18 = _tc18.delete("/voices/narrator")
-if _r18.status_code != 403:
-    die(f"Expected 403 for CATALOGUE voice, got {_r18.status_code}: {_r18.text}")
-ok("403 sur suppression d'une voix catalogue")
+    _r18 = _tc18.delete("/voices/male_0")
+if _r18.status_code != 204:
+    die(f"Expected 204 for CATALOGUE voice delete, got {_r18.status_code}: {_r18.text}")
+with _Sess(_v_engine) as _s18:
+    _gone18 = _s18.exec(_sel(_Voice).where(_Voice.voice_id == "male_0")).first()
+    if _gone18 is not None:
+        die("CATALOGUE voice male_0 should have been removed from DB")
+ok("204 + retiree de la DB (re-seedee au prochain demarrage)")
 
 
 # ── 19. GET /voices — has_reference_audio correct ────────────────────────────

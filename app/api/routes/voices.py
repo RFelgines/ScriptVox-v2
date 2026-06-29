@@ -13,6 +13,7 @@ from app.core.exceptions import TTSError
 from app.models.entities import Voice
 from app.schemas.voice import VoiceResponse, VoiceUpdate
 from app.services.tts.base import BaseTTSProvider
+from app.services.tts.edgetts import EdgeTTSProvider
 from app.services.tts.factory import get_tts_provider
 
 router = APIRouter()
@@ -94,10 +95,7 @@ async def create_voice(
     session.commit()
     session.refresh(voice)
 
-    # Queue sample generation — no-op if TTS_PROVIDER != "qwen"
-    from app.workers.tasks import generate_voice_sample as _gen_sample
-    _gen_sample(slug)
-
+    # Sample generation is triggered by the frontend via POST /voices/{id}/sample
     locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
     return _voice_to_response(voice, locale)
 
@@ -128,8 +126,6 @@ def delete_voice(
     voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
     if voice is None:
         raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
-    if voice.kind == VoiceKind.CATALOGUE:
-        raise HTTPException(status_code=403, detail="Cannot delete a catalogue voice.")
     if voice.reference_audio_path:
         ref = Path(voice.reference_audio_path)
         if ref.exists():
@@ -138,6 +134,11 @@ def delete_voice(
             ref.parent.rmdir()
         except OSError:
             pass
+    # Clean up any cached preview
+    for prefix in ("qwen", "edgetts"):
+        sample = SAMPLES_DIR / f"{prefix}_{voice_id}.wav"
+        if sample.exists():
+            sample.unlink()
     session.delete(voice)
     session.commit()
 
@@ -147,7 +148,6 @@ async def get_voice_sample(
     voice_id: str,
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
-    provider: BaseTTSProvider = Depends(get_tts_provider_dep),
 ) -> FileResponse:
     voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
     if voice is None:
@@ -156,21 +156,20 @@ async def get_voice_sample(
     SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 
     if voice.kind == VoiceKind.CLONED:
-        # Cloned voices: serve pre-generated sample only — never synthesize on demand
-        # (synthesis requires GPU + reference audio; on-demand would give misleading results)
         sample = SAMPLES_DIR / f"qwen_{voice_id}.wav"
         if sample.exists():
             return FileResponse(str(sample), media_type="audio/wav", filename=sample.name)
-        raise HTTPException(status_code=404, detail="Sample not yet generated — trigger via POST /voices/{voice_id}/sample")
+        raise HTTPException(
+            status_code=404,
+            detail="Sample not yet generated — trigger via POST /voices/{voice_id}/sample",
+        )
 
-    # Catalogue voices: synthesize on demand with per-provider cache
-    cache_path = SAMPLES_DIR / f"{settings.tts_provider}_{voice_id}.wav"
+    # Catalogue voices: always use EdgeTTS (stable, no GPU, works regardless of TTS_PROVIDER)
+    cache_path = SAMPLES_DIR / f"edgetts_{voice_id}.wav"
     if not cache_path.exists():
+        edgetts = EdgeTTSProvider(settings)
         try:
-            audio_bytes = await provider.synthesise(
-                _SAMPLE_TEXT, voice_id,
-                reference_audio_path=voice.reference_audio_path,
-            )
+            audio_bytes = await edgetts.synthesise(_SAMPLE_TEXT, voice_id)
         except TTSError as exc:
             raise HTTPException(status_code=502, detail=f"TTS sample failed: {exc}") from exc
         cache_path.write_bytes(audio_bytes)
@@ -178,16 +177,19 @@ async def get_voice_sample(
     return FileResponse(str(cache_path), media_type="audio/wav", filename=cache_path.name)
 
 
-@router.post("/{voice_id}/sample", status_code=202)
-def request_voice_sample(
+@router.post("/{voice_id}/sample", response_model=VoiceResponse, status_code=200)
+async def request_voice_sample(
     voice_id: str,
+    settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
-) -> dict:
+) -> VoiceResponse:
     voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
     if voice is None:
         raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
     if voice.kind != VoiceKind.CLONED:
         raise HTTPException(status_code=400, detail="Only cloned voices need sample generation.")
-    from app.workers.tasks import generate_voice_sample as _gen_sample
-    _gen_sample(voice_id)
-    return {"status": "queued"}
+    from app.workers.tasks import _generate_voice_sample_async
+    await _generate_voice_sample_async(voice_id)
+    session.refresh(voice)
+    locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
+    return _voice_to_response(voice, locale)

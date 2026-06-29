@@ -430,10 +430,10 @@ with TestClient(app, raise_server_exceptions=False) as _tc:
 books_module.generate_book = _generate_book_task  # restore
 ok("404 for non-existent book")
 
-# Section 13: 409 for status != ANALYZED
-section("POST /books/{id}/generate — 409 for PENDING, DONE, PROCESSING")
+# Section 13: 409 for status != ANALYZED/DONE (DONE autorisé depuis la régénération)
+section("POST /books/{id}/generate — 409 for PENDING, PROCESSING")
 
-_g13_status_cases = [BookStatus.PENDING, BookStatus.DONE, BookStatus.PROCESSING]
+_g13_status_cases = [BookStatus.PENDING, BookStatus.PROCESSING]
 _g13_ids: dict = {}
 
 with Session(_gen_engine) as _s:

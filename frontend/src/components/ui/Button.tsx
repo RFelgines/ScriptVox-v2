@@ -1,6 +1,6 @@
 import { ButtonHTMLAttributes } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "warning";
+type ButtonVariant = "primary" | "secondary" | "warning" | "danger";
 type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
@@ -9,6 +9,7 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: "bg-primary text-primary-foreground hover:opacity-90",
   secondary: "border border-border bg-surface-2 text-foreground hover:bg-surface-2/70",
   warning: "bg-amber-600 hover:bg-amber-500 text-white",
+  danger: "bg-red-700 hover:bg-red-600 text-white",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

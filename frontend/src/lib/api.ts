@@ -154,9 +154,10 @@ export async function getAppStatus(): Promise<AppStatus> {
   return res.json();
 }
 
-export async function requestVoiceSample(voiceId: string): Promise<void> {
+export async function requestVoiceSample(voiceId: string): Promise<VoiceSummary> {
   const res = await fetch(`${API_URL}/voices/${voiceId}/sample`, { method: "POST" });
   if (!res.ok) throw new Error(`POST /voices/${voiceId}/sample failed: ${res.status}`);
+  return res.json();
 }
 
 export async function listChapters(id: number): Promise<ChapterSummary[]> {
@@ -251,19 +252,26 @@ export async function patchCharacterVoice(
   return res.json();
 }
 
-export async function generateBook(bookId: number): Promise<BookSummary> {
-  const res = await fetch(`${API_URL}/books/${bookId}/generate`, { method: "POST" });
+async function _postBook(bookId: number, action: string, errorLabel: string): Promise<BookSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}/${action}`, { method: "POST" });
   if (!res.ok) {
     let detail = String(res.status);
-    try {
-      const body = await res.json();
-      if (body?.detail) detail = body.detail;
-    } catch {
-      // réponse non-JSON : on garde le code HTTP
-    }
-    throw new Error(`Génération échouée : ${detail}`);
+    try { const b = await res.json(); if (b?.detail) detail = b.detail; } catch { /* ignore */ }
+    throw new Error(`${errorLabel} : ${detail}`);
   }
   return res.json();
+}
+
+export function analyzeBook(bookId: number): Promise<BookSummary> {
+  return _postBook(bookId, "analyze", "Analyse échouée");
+}
+
+export function generateBook(bookId: number): Promise<BookSummary> {
+  return _postBook(bookId, "generate", "Génération échouée");
+}
+
+export function stopBook(bookId: number): Promise<BookSummary> {
+  return _postBook(bookId, "stop", "Arrêt échoué");
 }
 
 export async function deleteBook(id: number): Promise<void> {

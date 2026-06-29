@@ -97,15 +97,49 @@ def patch_book(
     return BookResponse.model_validate(book)
 
 
+@router.post("/{book_id}/analyze", response_model=BookResponse, status_code=202)
+def trigger_analyze(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if book.status in (BookStatus.PROCESSING, BookStatus.GENERATING):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Book {book_id} is already in progress (status={book.status.value}). Stop it first.",
+        )
+    analyze_book(book.id)
+    return BookResponse.model_validate(book)
+
+
+@router.post("/{book_id}/stop", response_model=BookResponse)
+def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if book.status not in (BookStatus.PROCESSING, BookStatus.GENERATING):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Book {book_id} is not in progress (status={book.status.value}).",
+        )
+    book.status = BookStatus.FAILED
+    book.error_message = "Arrêté par l'utilisateur."
+    from datetime import datetime, timezone
+    book.updated_at = datetime.now(timezone.utc)
+    session.add(book)
+    session.commit()
+    session.refresh(book)
+    return BookResponse.model_validate(book)
+
+
 @router.post("/{book_id}/generate", response_model=BookResponse, status_code=202)
 def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status != BookStatus.ANALYZED:
+    if book.status not in (BookStatus.ANALYZED, BookStatus.DONE):
         raise HTTPException(
             status_code=409,
-            detail=f"Book {book_id} cannot be generated (status={book.status.value}). Expected ANALYZED.",
+            detail=f"Book {book_id} cannot be generated (status={book.status.value}). Expected ANALYZED or DONE.",
         )
     generate_book(book.id)
     return BookResponse.model_validate(book)

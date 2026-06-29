@@ -54,7 +54,9 @@ def _del_env(*keys: str) -> None:
 
 # ─── 1. Config — nominal ──────────────────────────────────────────────────────
 section("Config — nominal (ollama)")
-_set_env()
+# OLLAMA_CHUNK_TOKENS explicitement passé pour éviter que load_dotenv() ne charge
+# la valeur du .env (qui peut diverger du défaut code lors du développement).
+_set_env(OLLAMA_CHUNK_TOKENS="4000")
 
 from app.config import Settings, get_settings  # noqa: E402
 

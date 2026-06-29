@@ -10,6 +10,7 @@ import {
   MergeSuggestion,
   VoiceSummary,
   acceptMergeSuggestion,
+  analyzeBook,
   bookMp3Url,
   chapterAudioUrl,
   coverUrl,
@@ -25,6 +26,7 @@ import {
   patchBookProvider,
   patchCharacterVoice,
   rejectMergeSuggestion,
+  stopBook,
   voiceSampleUrl,
 } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
@@ -74,6 +76,8 @@ export default function BookDetailPage({
   const [resolvingId, setResolvingId] = useState<number | null>(null);
   const [acceptingAll, setAcceptingAll] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [analyzingBook, setAnalyzingBook] = useState(false);
+  const [stoppingBook, setStoppingBook] = useState(false);
   const [savingProvider, setSavingProvider] = useState(false);
   const [search, setSearch] = useState("");
   const [showSecondary, setShowSecondary] = useState(false);
@@ -194,7 +198,34 @@ export default function BookDetailPage({
       .finally(() => setAcceptingAll(false));
   }
 
+  function handleAnalyzeBook() {
+    const destructive = book?.status === "ANALYZED" || book?.status === "DONE";
+    if (destructive && !window.confirm(
+      "Ré-analyser ce livre effacera les personnages, segments et suggestions de fusion existants. Continuer ?"
+    )) return;
+    setAnalyzingBook(true);
+    setError(null);
+    analyzeBook(bookId)
+      .then(() => setReloadNonce((n) => n + 1))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setAnalyzingBook(false));
+  }
+
+  function handleStopBook() {
+    if (!window.confirm("Arrêter la tâche en cours ? Le livre passera en échec.")) return;
+    setStoppingBook(true);
+    setError(null);
+    stopBook(bookId)
+      .then((updated) => setBook(updated))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setStoppingBook(false));
+  }
+
   function handleGenerateBook() {
+    const destructive = book?.status === "DONE";
+    if (destructive && !window.confirm(
+      "Regénérer l'audio effacera l'export existant. Continuer ?"
+    )) return;
     setGenerating(true);
     setError(null);
     generateBook(bookId)
@@ -304,6 +335,11 @@ export default function BookDetailPage({
               <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
                 <path d="M8 1.5L1 14h14L8 1.5zM8 6v4M8 11.5v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
               </svg>
+            </span>
+          )}
+          {c.voice_id && voiceMap.get(c.voice_id)?.kind === "CLONED" && (
+            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted whitespace-nowrap">
+              Clone
             </span>
           )}
           <select
@@ -427,37 +463,92 @@ export default function BookDetailPage({
                   Analyse en cours — le casting s&apos;ouvrira automatiquement.
                 </p>
               )}
-              {(book.status === "ANALYZED" ||
-                book.status === "GENERATING" ||
-                book.status === "DONE") && (
-                <Button onClick={() => setCastingExpanded((v) => !v)} className="mt-3 inline-flex items-center gap-1.5">
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${castingExpanded ? "rotate-90" : ""}`}>
-                    <path d="M6 4l4 4-4 4" />
-                  </svg>
-                  Casting
-                </Button>
-              )}
-              {book.status === "DONE" && book.mp3_path && (
-                <Button
-                  variant="primary"
-                  onClick={() =>
-                    play({
-                      title: book.title,
-                      src: bookMp3Url(book.id),
-                      bookId: book.id,
-                      bookTitle: book.title,
-                      coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
-                    })
-                  }
-                  className="mt-3 ml-2 inline-flex items-center gap-1.5"
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
-                    <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
-                  </svg>
-                  Écouter
-                </Button>
-              )}
+
+              {/* ── Barre d'actions ──────────────────────────────────────────── */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {/* Analyser / Ré-analyser */}
+                {(book.status === "FAILED" || book.status === "PENDING") && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={analyzingBook}
+                    onClick={handleAnalyzeBook}
+                  >
+                    {analyzingBook ? "Lancement…" : "Analyser"}
+                  </Button>
+                )}
+                {(book.status === "ANALYZED" || book.status === "DONE") && (
+                  <Button
+                    size="sm"
+                    disabled={analyzingBook}
+                    onClick={handleAnalyzeBook}
+                  >
+                    {analyzingBook ? "Lancement…" : "Ré-analyser"}
+                  </Button>
+                )}
+
+                {/* Générer / Regénérer l'audio */}
+                {(book.status === "ANALYZED" || book.status === "DONE") && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={generating}
+                    onClick={handleGenerateBook}
+                  >
+                    {generating
+                      ? "Lancement…"
+                      : book.status === "DONE"
+                      ? "Regénérer l'audio"
+                      : "Générer l'audio"}
+                  </Button>
+                )}
+
+                {/* Arrêter */}
+                {(book.status === "PROCESSING" || book.status === "GENERATING") && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    disabled={stoppingBook}
+                    onClick={handleStopBook}
+                  >
+                    {stoppingBook ? "Arrêt…" : "Arrêter"}
+                  </Button>
+                )}
+
+                {/* Casting */}
+                {(book.status === "ANALYZED" || book.status === "GENERATING" || book.status === "DONE") && (
+                  <Button size="sm" onClick={() => setCastingExpanded((v) => !v)} className="inline-flex items-center gap-1.5">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${castingExpanded ? "rotate-90" : ""}`}>
+                      <path d="M6 4l4 4-4 4" />
+                    </svg>
+                    Casting
+                  </Button>
+                )}
+
+                {/* Écouter */}
+                {book.status === "DONE" && book.mp3_path && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() =>
+                      play({
+                        title: book.title,
+                        src: bookMp3Url(book.id),
+                        bookId: book.id,
+                        bookTitle: book.title,
+                        coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
+                      <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+                    </svg>
+                    Écouter
+                  </Button>
+                )}
+              </div>
             </div>
           </header>
 
