@@ -19,6 +19,7 @@ async def _analyze_book(
 ) -> None:
     from sqlalchemy import delete as sa_delete
 
+    from app.core.enums import BookStatus
     from app.models import Book, Character, CharacterMergeSuggestion, Segment
     from app.services.llm.base import (
         GEMINI_MAX_TOKENS,
@@ -50,10 +51,50 @@ async def _analyze_book(
     n = len(chapter_data)
 
     for i, (chapter_id, raw_text) in enumerate(chapter_data):
+        # Abort if the user triggered /stop while we were processing a previous chapter
+        if i > 0:
+            with Session(engine) as _s:
+                _b = _s.get(Book, book_id)
+                if _b is None or _b.status == BookStatus.FAILED:
+                    logger.info("analyze_book: stop requested at chapter %d, aborting", i)
+                    return
+
         known = list(char_map.keys())
         chunks = _chunk_text(raw_text, budget)
-        chunk_results = [await provider.analyze(chunk, known) for chunk in chunks]
-        merged = _merge_chunk_results(chunk_results)
+
+        _MAX_RETRIES = 3
+        _RETRY_DELAY = 30  # seconds — gives Ollama time to recover from OOM/timeout
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                chunk_results = [await provider.analyze(chunk, known) for chunk in chunks]
+                merged = _merge_chunk_results(chunk_results)
+                if attempt > 0:
+                    logger.info(
+                        "analyze_book: book_id=%d chapter %d/%d succeeded on attempt %d",
+                        book_id, i + 1, n, attempt + 1,
+                    )
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "analyze_book: book_id=%d chapter %d/%d attempt %d/%d failed: %s",
+                    book_id, i + 1, n, attempt + 1, _MAX_RETRIES, exc,
+                )
+                if attempt < _MAX_RETRIES - 1:
+                    with Session(engine) as _s:
+                        _b = _s.get(Book, book_id)
+                        if _b:
+                            _b.error_message = (
+                                f"[ch {i + 1}/{n} essai {attempt + 1}/{_MAX_RETRIES}] "
+                                f"{type(exc).__name__}: {exc} — nouvel essai dans {_RETRY_DELAY}s"
+                            )
+                            _s.add(_b)
+                            _s.commit()
+                    await asyncio.sleep(_RETRY_DELAY)
+        if last_exc is not None:
+            raise last_exc
 
         with Session(engine) as session:
             for cd in merged.characters:
@@ -221,6 +262,21 @@ def _analyze_book_impl(book_id: int) -> None:
         session.commit()
 
     try:
+        # ── Nettoyage idempotent (re-analyse) ──────────────────────────────────
+        from sqlalchemy import delete as sa_delete
+        from app.models import Character, CharacterMergeSuggestion, Segment
+
+        with Session(engine) as session:
+            existing_ids = list(
+                session.exec(select(Chapter.id).where(Chapter.book_id == book_id)).all()
+            )
+            if existing_ids:
+                session.execute(sa_delete(Segment).where(Segment.chapter_id.in_(existing_ids)))
+                session.execute(sa_delete(Chapter).where(Chapter.book_id == book_id))
+            session.execute(sa_delete(CharacterMergeSuggestion).where(CharacterMergeSuggestion.book_id == book_id))
+            session.execute(sa_delete(Character).where(Character.book_id == book_id))
+            session.commit()
+
         # ── EPUB ingestion ─────────────────────────────────────────────────────
         parsed = EpubParser().parse(source_path)
 
@@ -428,6 +484,58 @@ def _process_book_impl(book_id: int) -> None:
 
 
 _VOICE_SAMPLE_TEXT = "Bonjour, voici un aperçu de cette voix clonée par ScriptVox."
+
+
+async def _generate_voice_sample_async(voice_id: str) -> None:
+    """Async variant for FastAPI BackgroundTasks — no Huey worker required."""
+    from pathlib import Path
+
+    from app.core.db import get_engine
+    from app.core.enums import VoiceKind
+    from app.models.entities import Voice
+
+    settings = get_settings()
+    if settings.tts_provider != "qwen":
+        logger.info("generate_voice_sample_async: skipped (TTS_PROVIDER=%s)", settings.tts_provider)
+        return
+
+    engine = get_engine()
+    with Session(engine) as session:
+        voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
+        if voice is None or voice.kind != VoiceKind.CLONED or voice.reference_audio_path is None:
+            logger.warning("generate_voice_sample_async: voice %r not found or no ref audio", voice_id)
+            return
+        ref_path = voice.reference_audio_path
+
+    from app.services.tts.qwen import QwenTTSProvider
+    provider = QwenTTSProvider(settings)
+
+    out_dir = Path("data") / "voice_samples"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"qwen_{voice_id}.wav"
+
+    try:
+        wav_bytes = await provider.synthesise(
+            _VOICE_SAMPLE_TEXT,
+            voice_id,
+            reference_audio_path=ref_path,
+        )
+        out_path.write_bytes(wav_bytes)
+        logger.info("generate_voice_sample_async: saved %s", out_path)
+    except Exception:
+        logger.exception("generate_voice_sample_async failed for voice_id=%r", voice_id)
+    finally:
+        # Libère le modèle GPU immédiatement après la génération
+        import gc
+        provider._base_model = None
+        provider._model = None
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+            logger.info("generate_voice_sample_async: GPU cache cleared")
+        except Exception:
+            pass
 
 
 def _generate_voice_sample_impl(voice_id: str) -> None:
