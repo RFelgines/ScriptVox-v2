@@ -1521,3 +1521,47 @@ Fichiers (3) : `frontend/src/lib/api.ts`, `frontend/src/app/voix/page.tsx`,
 Les données sont déjà présentes en base (`Voice.gender`, `Voice.locale`, `Voice.kind`).
 À cadrer après livraison complète de Phase 18 (les voix clonées + la locale EN de David
 Attenborough rendent les filtres immédiatement utiles).
+
+---
+
+## Phase 19 — Reprise d'analyse après arrêt/plantage ✅ (2026-06-30, commit `d3a4229`)
+
+**Pourquoi.** Avant cette phase, ré-analyser un livre `FAILED` (arrêté volontairement via
+`/stop` ou planté après les 3 retentatives LLM) effaçait systématiquement tous les chapitres,
+segments et personnages déjà acquis et repartait de zéro. Sur un livre de 21 chapitres
+(~43 min), perdre la progression à chaque interruption était pénalisant.
+
+**Contrat (revue humaine faite avant implémentation, aucune migration DB).**
+- `POST /books/{id}/analyze?force=true` (query param optionnel, défaut `False`).
+- `analyze_book(book_id, force=False)` (tâche Huey), `_analyze_book_impl(book_id, force=False)`.
+- `_analyze_book(book_id, chapter_data, engine, resume=False, already_done=0)`.
+
+**Livré.**
+- `app/workers/tasks.py` : le statut du livre *avant* l'appel (capturé avant l'écrasement en
+  `PROCESSING`) détermine le mode — `FAILED` + `force=False` → **reprise** (pas de re-parse
+  EPUB, saute les chapitres qui ont déjà des `Segment` en base, `char_map` reconstruit depuis
+  les `Character` existants) ; `PENDING`, `ANALYZED`/`DONE`, ou `force=True` → comportement
+  inchangé (purge complète + re-parse EPUB). Le marqueur "chapitre déjà fait" = "a un segment
+  en base", donc **zéro nouvelle colonne**. Progression recalculée sur le total de chapitres
+  (`already_done + i + 1) / total`), pas juste les chapitres restants.
+- `app/api/routes/books.py` : `force: bool = False` sur `trigger_analyze`.
+- `frontend/src/app/books/[id]/page.tsx` : bouton **"Reprendre l'analyse"** (au lieu
+  d'"Analyser") sur un livre `FAILED`, avec icône ⚠️ (tooltip = message d'erreur réel) **sauf**
+  si l'arrêt était volontaire (`error_message === "Arrêté par l'utilisateur."`, comparaison de
+  chaîne — pas de nouvelle colonne booléenne).
+
+**Test-first.** `tests/check_phase19.py` (nouveau, 4 sections) : signatures ; `_analyze_book`
+préserve les `Character` existants en `resume=True` ; pipeline réel `_analyze_book_impl` en
+reprise (saute le chapitre déjà segmenté, `EpubParser.parse` patché pour lever si appelé,
+`known_characters` repris de la DB) ; pipeline réel `force=True` (purge tout malgré `FAILED`,
+re-parse confirmé). **17/17 suites vertes, zéro régression** (fix mineur dans
+`check_phase3.py` : le provider factice de la section 9 ne connaissait pas les nouveaux
+paramètres `resume`/`already_done` de `_analyze_book` — alignement de signature, aucun
+changement de comportement testé).
+
+**Vérifié en conditions réelles** (preview + livre de test temporaire créé/supprimé en base) :
+les deux cas (vrai plantage vs arrêt utilisateur via le vrai endpoint `/stop`) affichent
+correctement le bouton et l'icône conditionnelle. `npm run build` + `npm run lint` verts.
+
+Fichiers (5) : `app/api/routes/books.py`, `app/workers/tasks.py`,
+`frontend/src/app/books/[id]/page.tsx`, `tests/check_phase3.py`, `tests/check_phase19.py`.
