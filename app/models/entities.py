@@ -100,6 +100,9 @@ class Segment(SQLModel, table=True):
     character_id: Optional[int] = Field(default=None, foreign_key="character.id", index=True)
     emotion: Optional[str] = None
 
+    audio_offset_ms: Optional[int] = None  # position dans le WAV chapitre (ms, cumulatif)
+    duration_ms: Optional[int] = None      # durée de ce segment en ms
+
     chapter: Optional["Chapter"] = Relationship(back_populates="segments")
     character: Optional["Character"] = Relationship(back_populates="segments")
 

@@ -3,7 +3,19 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender, MergeSuggestionStatus
+from app.core.enums import AgeCategory, BookStatus, ChapterStatus, Gender, MergeSuggestionStatus, SegmentType
+
+
+class SegmentResponse(BaseModel):
+    id: int
+    position: int
+    text: str
+    segment_type: SegmentType
+    character_id: Optional[int] = None
+    character_name: Optional[str] = None   # dénormalisé depuis Character
+    voice_id: Optional[str] = None         # dénormalisé depuis Character.voice_id
+    audio_offset_ms: Optional[int] = None
+    duration_ms: Optional[int] = None
 
 
 class ChapterResponse(BaseModel):

@@ -18,6 +18,7 @@ from app.schemas.book import (
     ChapterResponse,
     CharacterResponse,
     MergeSuggestionResponse,
+    SegmentResponse,
 )
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
@@ -312,6 +313,47 @@ def get_chapter_audio(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk.")
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
+
+
+@router.get("/{book_id}/chapters/{position}/segments", response_model=list[SegmentResponse])
+def get_chapter_segments(
+    book_id: int,
+    position: int,
+    session: Session = Depends(get_session),
+) -> list[SegmentResponse]:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    segments = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id).order_by(Segment.position)
+    ).all()
+    char_cache: dict[int, Character] = {}
+    results = []
+    for seg in segments:
+        char: Character | None = None
+        if seg.character_id is not None:
+            if seg.character_id not in char_cache:
+                char_cache[seg.character_id] = session.get(Character, seg.character_id)
+            char = char_cache[seg.character_id]
+        results.append(SegmentResponse(
+            id=seg.id,
+            position=seg.position,
+            text=seg.text,
+            segment_type=seg.segment_type,
+            character_id=seg.character_id,
+            character_name=char.name if char else None,
+            voice_id=char.voice_id if char else None,
+            audio_offset_ms=seg.audio_offset_ms,
+            duration_ms=seg.duration_ms,
+        ))
+    return results
 
 
 @router.get("/{book_id}/characters", response_model=list[CharacterResponse])
