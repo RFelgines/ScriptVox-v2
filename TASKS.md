@@ -1565,3 +1565,54 @@ correctement le bouton et l'icône conditionnelle. `npm run build` + `npm run li
 
 Fichiers (5) : `app/api/routes/books.py`, `app/workers/tasks.py`,
 `frontend/src/app/books/[id]/page.tsx`, `tests/check_phase3.py`, `tests/check_phase19.py`.
+
+---
+
+## Phase 20 — Filtres (Voix + Bibliothèque) ✅ (2026-06-30, commits `33332e2`, `595cb55`, `62531c8`)
+
+**Pourquoi.** Lot D de la roadmap 2026-06-30 (quick win) : filtres dans l'onglet Voix, étendu
+par l'utilisateur à un filtre sur la Bibliothèque (statut, modèle TTS, genre).
+
+### D1 — Filtres Voix ✅ (commit `33332e2`)
+`frontend/src/app/voix/page.tsx` : 2 sélecteurs (Genre, Type catalogue/cloné), composables avec
+le filtre Favoris existant. Frontend pur.
+
+### D2 — Champ `Book.genre` + tag manuel ✅ (commit `595cb55`)
+
+**Constat (vérifié, 2026-06-30).** Les EPUB réels (HP T01/T02) n'ont **aucune métadonnée
+`dc:subject`** exploitable (`book.get_metadata('DC', 'subject')` → `[]`) — le genre ne peut pas
+être auto-extrait, seul un tag manuel est honnête.
+
+**Contrat (revue humaine faite avant implémentation).** `Book.genre: Optional[str] = None`
+(texte libre) ; `BookResponse`/`BookUpdate` += `genre`. **Migration réelle** (`ALTER TABLE book
+ADD COLUMN genre VARCHAR` exécuté sur `scriptvox.db` en place) — **pas de wipe**, HP T01/T02
+préservés (le projet a maintenant de vraies données, contrairement aux phases précédentes où
+supprimer la DB était la norme).
+
+**Bug latent corrigé au passage.** `patch_book` faisait `book.tts_provider = body.tts_provider`
+sans distinguer "non fourni" de "explicitement null" — ajouter `genre` au même schéma aurait fait
+qu'un PATCH genre-seul efface silencieusement `tts_provider` (et vice-versa). Fix :
+`body.model_dump(exclude_unset=True)`, ne met à jour que les champs réellement envoyés dans le
+JSON. Test-first : `tests/check_phase7.py` sections 33-35 (genre seul préserve tts_provider,
+tts_provider seul préserve genre, `genre: null` explicite efface bien). 17/17 suites vertes.
+
+Frontend : champ texte éditable inline (`defaultValue` + `onBlur`, pattern non-controlled pour
+survivre au polling 3s sans clobber) à côté du badge de statut sur la page livre.
+
+**Piège de vérification rencontré.** Les événements `blur` synthétiques dispatchés via JS
+(`dispatchEvent(new FocusEvent('blur'))`) ne déclenchent PAS le handler React onBlur sans un
+vrai focus préalable — confirmé par 2 tentatives échouées (fetch jamais envoyé) puis succès avec
+une vraie séquence `preview_click` (focus) → `preview_fill` → `preview_click` ailleurs (blur réel).
+Limite de l'outil de preview, pas un bug applicatif (un direct `fetch()` depuis la page confirmait
+déjà que CORS/réseau n'étaient pas en cause).
+
+### D3 — Filtres Bibliothèque ✅ (commit `62531c8`)
+`frontend/src/app/page.tsx` : 3 sélecteurs composables (Statut — enum fixe ; Modèle TTS — depuis
+`GET /settings` + option "Par défaut" pour `tts_provider=null` ; Genre — construit dynamiquement
+depuis les valeurs `Book.genre` présentes, texte libre donc pas de taxonomie figée). État vide
+distinct si filtres actifs ("Aucun livre ne correspond") vs bibliothèque réellement vide.
+Frontend pur, dépend de D2 pour le champ `genre`.
+
+Vérifié en conditions réelles (preview, backend redémarré pour charger le nouveau schéma,
+2 vrais livres HP taggés "Fantasy jeunesse" via l'UI). `npm run build` + `npm run lint` verts
+sur les 3 sous-étapes.
