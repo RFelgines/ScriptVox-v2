@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Gender,
+  VoiceKind,
   VoiceSummary,
   createVoice,
   deleteVoice,
@@ -57,6 +58,8 @@ export default function VoixPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [genderFilter, setGenderFilter] = useState<Gender | "ALL">("ALL");
+  const [kindFilter, setKindFilter] = useState<VoiceKind | "ALL">("ALL");
 
   // ── Formulaire de clonage ──────────────────────────────────────────────────
   const [requestingId, setRequestingId] = useState<string | null>(null);
@@ -132,7 +135,11 @@ export default function VoixPage() {
     }
   }
 
-  const visible = favoritesOnly ? voices.filter((v) => v.is_favorite) : voices;
+  const visible = voices
+    .filter((v) => !favoritesOnly || v.is_favorite)
+    .filter((v) => genderFilter === "ALL" || v.gender === genderFilter)
+    .filter((v) => kindFilter === "ALL" || v.kind === kindFilter);
+  const filtersActive = favoritesOnly || genderFilter !== "ALL" || kindFilter !== "ALL";
   // Calculé sur le catalogue complet (pas `visible`) : la couleur d'une voix
   // ne doit pas changer selon que le filtre "Favoris" est actif ou non.
   const orbHues = buildOrbHueMap(voices);
@@ -142,6 +149,27 @@ export default function VoixPage() {
       <div className="flex items-baseline justify-between gap-4">
         <h1 className="text-2xl font-bold">Voix</h1>
         <div className="flex items-center gap-2">
+          <select
+            value={genderFilter}
+            onChange={(e) => setGenderFilter(e.target.value as Gender | "ALL")}
+            aria-label="Filtrer par genre"
+            className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
+          >
+            <option value="ALL">Tous genres</option>
+            <option value="MALE">Masculin</option>
+            <option value="FEMALE">Féminin</option>
+            <option value="NEUTRAL">Neutre</option>
+          </select>
+          <select
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as VoiceKind | "ALL")}
+            aria-label="Filtrer par type"
+            className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
+          >
+            <option value="ALL">Tous types</option>
+            <option value="CATALOGUE">Catalogue</option>
+            <option value="CLONED">Clonées</option>
+          </select>
           <button
             onClick={() => setFavoritesOnly((v) => !v)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -249,7 +277,7 @@ export default function VoixPage() {
 
       {!loading && !error && visible.length === 0 && (
         <div className="mt-16 flex flex-col items-center gap-3 text-center text-muted">
-          {favoritesOnly ? (
+          {filtersActive ? (
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
@@ -262,11 +290,11 @@ export default function VoixPage() {
             </svg>
           )}
           <p className="text-base font-medium text-foreground">
-            {favoritesOnly ? "Aucun favori" : "Aucune voix disponible"}
+            {filtersActive ? "Aucune voix ne correspond" : "Aucune voix disponible"}
           </p>
           <p className="text-sm">
-            {favoritesOnly
-              ? "Cliquez l'étoile sur une voix pour la mettre en favori."
+            {filtersActive
+              ? "Essayez d'élargir les filtres ci-dessus."
               : "Le catalogue de voix est vide."}
           </p>
         </div>
