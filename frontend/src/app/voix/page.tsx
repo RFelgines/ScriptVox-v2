@@ -60,6 +60,9 @@ export default function VoixPage() {
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [genderFilter, setGenderFilter] = useState<Gender | "ALL">("ALL");
   const [kindFilter, setKindFilter] = useState<VoiceKind | "ALL">("ALL");
+  const [localeFilter, setLocaleFilter] = useState<string>("ALL");
+  const [sampleFilter, setSampleFilter] = useState<"ALL" | "WITH" | "WITHOUT">("ALL");
+  const [search, setSearch] = useState("");
 
   // ── Formulaire de clonage ──────────────────────────────────────────────────
   const [requestingId, setRequestingId] = useState<string | null>(null);
@@ -135,20 +138,44 @@ export default function VoixPage() {
     }
   }
 
+  const localeOptions = Array.from(
+    new Set(voices.map((v) => v.locale).filter((l): l is string => !!l)),
+  ).sort();
+
+  const searchQuery = search.trim().toLowerCase();
+
   const visible = voices
     .filter((v) => !favoritesOnly || v.is_favorite)
     .filter((v) => genderFilter === "ALL" || v.gender === genderFilter)
-    .filter((v) => kindFilter === "ALL" || v.kind === kindFilter);
-  const filtersActive = favoritesOnly || genderFilter !== "ALL" || kindFilter !== "ALL";
+    .filter((v) => kindFilter === "ALL" || v.kind === kindFilter)
+    .filter((v) => localeFilter === "ALL" || v.locale === localeFilter)
+    .filter((v) => sampleFilter === "ALL" || (sampleFilter === "WITH" ? v.has_sample : !v.has_sample))
+    .filter((v) => !searchQuery || v.name.toLowerCase().includes(searchQuery));
+
+  const filtersActive =
+    favoritesOnly ||
+    genderFilter !== "ALL" ||
+    kindFilter !== "ALL" ||
+    localeFilter !== "ALL" ||
+    sampleFilter !== "ALL" ||
+    searchQuery !== "";
   // Calculé sur le catalogue complet (pas `visible`) : la couleur d'une voix
   // ne doit pas changer selon que le filtre "Favoris" est actif ou non.
   const orbHues = buildOrbHueMap(voices);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-4">
         <h1 className="text-2xl font-bold">Voix</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher par nom…"
+            aria-label="Rechercher une voix"
+            className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm placeholder:text-muted"
+          />
           <select
             value={genderFilter}
             onChange={(e) => setGenderFilter(e.target.value as Gender | "ALL")}
@@ -169,6 +196,31 @@ export default function VoixPage() {
             <option value="ALL">Tous types</option>
             <option value="CATALOGUE">Catalogue</option>
             <option value="CLONED">Clonées</option>
+          </select>
+          {localeOptions.length > 0 && (
+            <select
+              value={localeFilter}
+              onChange={(e) => setLocaleFilter(e.target.value)}
+              aria-label="Filtrer par langue"
+              className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
+            >
+              <option value="ALL">Toutes langues</option>
+              {localeOptions.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            value={sampleFilter}
+            onChange={(e) => setSampleFilter(e.target.value as "ALL" | "WITH" | "WITHOUT")}
+            aria-label="Filtrer par aperçu"
+            className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
+          >
+            <option value="ALL">Tous aperçus</option>
+            <option value="WITH">Aperçu disponible</option>
+            <option value="WITHOUT">Sans aperçu</option>
           </select>
           <button
             onClick={() => setFavoritesOnly((v) => !v)}
