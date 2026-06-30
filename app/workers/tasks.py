@@ -449,9 +449,12 @@ def _generate_book_impl(book_id: int) -> None:
                 session.commit()
 
 
-async def _synthesise_chapter_worker(chapter_id: int, engine) -> bytes:
+async def _synthesise_chapter_worker(
+    chapter_id: int, engine
+) -> tuple[bytes, list[tuple[int, int, int]]]:
+    """Returns (wav_bytes, [(seg_id, offset_ms, duration_ms)])."""
     from app.models import Book, Chapter
-    from app.services.audio.chapter import synthesise_chapter
+    from app.services.audio.chapter import _synthesise_segments
     from app.services.tts import factory as tts_factory
 
     settings = get_settings()
@@ -461,7 +464,7 @@ async def _synthesise_chapter_worker(chapter_id: int, engine) -> bytes:
         provider = tts_factory.get_tts_provider(
             settings, override=book.tts_provider if book else None
         )
-        return await synthesise_chapter(chapter_id, session, provider)
+        return await _synthesise_segments(chapter_id, session, provider)
 
 
 def _generate_chapter_impl(chapter_id: int) -> None:
@@ -486,7 +489,7 @@ def _generate_chapter_impl(chapter_id: int) -> None:
         session.commit()
 
     try:
-        wav_bytes = asyncio.run(_synthesise_chapter_worker(chapter_id, engine))
+        wav_bytes, timing = asyncio.run(_synthesise_chapter_worker(chapter_id, engine))
 
         out_dir = _Path("data") / str(book_id)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -494,6 +497,15 @@ def _generate_chapter_impl(chapter_id: int) -> None:
         _Path(audio_path).write_bytes(wav_bytes)
 
         with Session(engine) as session:
+            # Persiste le timing par segment
+            from app.models import Segment
+            for seg_id, offset_ms, dur_ms in timing:
+                seg = session.get(Segment, seg_id)
+                if seg:
+                    seg.audio_offset_ms = offset_ms
+                    seg.duration_ms = dur_ms
+                    session.add(seg)
+
             chapter = session.get(Chapter, chapter_id)
             chapter.audio_path = audio_path
             chapter.status = ChapterStatus.DONE
