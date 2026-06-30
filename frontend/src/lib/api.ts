@@ -21,6 +21,8 @@ export interface BookSummary {
   cover_path: string | null;
   tts_provider: string | null;
   genre: string | null;
+  language: string | null;
+  published_at: string | null;
 }
 
 export interface AppSettings {
@@ -119,14 +121,16 @@ export async function getBook(id: number): Promise<BookSummary> {
   return res.json();
 }
 
-export async function patchBookProvider(
+async function _patchBookField(
   bookId: number,
-  ttsProvider: string | null,
+  field: string,
+  value: string | null,
+  errorLabel: string,
 ): Promise<BookSummary> {
   const res = await fetch(`${API_URL}/books/${bookId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tts_provider: ttsProvider }),
+    body: JSON.stringify({ [field]: value }),
   });
   if (!res.ok) {
     let detail = String(res.status);
@@ -138,33 +142,28 @@ export async function patchBookProvider(
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Changement de provider échoué : ${detail}`);
+    throw new Error(`${errorLabel} échoué : ${detail}`);
   }
   return res.json();
 }
 
-export async function patchBookGenre(
+export function patchBookProvider(bookId: number, ttsProvider: string | null): Promise<BookSummary> {
+  return _patchBookField(bookId, "tts_provider", ttsProvider, "Changement de provider");
+}
+
+export function patchBookGenre(bookId: number, genre: string | null): Promise<BookSummary> {
+  return _patchBookField(bookId, "genre", genre, "Changement de genre");
+}
+
+export function patchBookLanguage(bookId: number, language: string | null): Promise<BookSummary> {
+  return _patchBookField(bookId, "language", language, "Changement de langue");
+}
+
+export function patchBookPublishedAt(
   bookId: number,
-  genre: string | null,
+  publishedAt: string | null,
 ): Promise<BookSummary> {
-  const res = await fetch(`${API_URL}/books/${bookId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ genre }),
-  });
-  if (!res.ok) {
-    let detail = String(res.status);
-    try {
-      const body = await res.json();
-      if (body?.detail) {
-        detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
-      }
-    } catch {
-      // réponse non-JSON : on garde le code HTTP
-    }
-    throw new Error(`Changement de genre échoué : ${detail}`);
-  }
-  return res.json();
+  return _patchBookField(bookId, "published_at", publishedAt, "Changement de date de publication");
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
