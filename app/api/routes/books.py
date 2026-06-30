@@ -98,7 +98,9 @@ def patch_book(
 
 
 @router.post("/{book_id}/analyze", response_model=BookResponse, status_code=202)
-def trigger_analyze(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
+def trigger_analyze(
+    book_id: int, force: bool = False, session: Session = Depends(get_session)
+) -> BookResponse:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
@@ -107,7 +109,7 @@ def trigger_analyze(book_id: int, session: Session = Depends(get_session)) -> Bo
             status_code=409,
             detail=f"Book {book_id} is already in progress (status={book.status.value}). Stop it first.",
         )
-    analyze_book(book.id)
+    analyze_book(book.id, force)
     return BookResponse.model_validate(book)
 
 

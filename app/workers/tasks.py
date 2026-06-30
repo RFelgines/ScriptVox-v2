@@ -16,6 +16,8 @@ async def _analyze_book(
     book_id: int,
     chapter_data: list[tuple[int, str]],
     engine,
+    resume: bool = False,
+    already_done: int = 0,
 ) -> None:
     from sqlalchemy import delete as sa_delete
 
@@ -40,15 +42,24 @@ async def _analyze_book(
 
     chapter_ids = [cid for cid, _ in chapter_data]
 
-    # Idempotency: wipe any prior LLM results so retries are clean
+    # Idempotency: wipe any prior LLM results for the chapters we're (re)analyzing.
+    # On resume, Characters are preserved (already-known cast from earlier chapters).
     with Session(engine) as session:
         if chapter_ids:
             session.execute(sa_delete(Segment).where(Segment.chapter_id.in_(chapter_ids)))
-        session.execute(sa_delete(Character).where(Character.book_id == book_id))
+        if not resume:
+            session.execute(sa_delete(Character).where(Character.book_id == book_id))
         session.commit()
 
     char_map: dict[str, int] = {}  # character name → Character.id (accumulated across chapters)
-    n = len(chapter_data)
+    if resume:
+        with Session(engine) as session:
+            existing_chars = session.exec(
+                select(Character).where(Character.book_id == book_id)
+            ).all()
+            char_map = {c.name: c.id for c in existing_chars}
+
+    total = already_done + len(chapter_data)
 
     for i, (chapter_id, raw_text) in enumerate(chapter_data):
         # Abort if the user triggered /stop while we were processing a previous chapter
@@ -72,7 +83,7 @@ async def _analyze_book(
                 if attempt > 0:
                     logger.info(
                         "analyze_book: book_id=%d chapter %d/%d succeeded on attempt %d",
-                        book_id, i + 1, n, attempt + 1,
+                        book_id, already_done + i + 1, total, attempt + 1,
                     )
                 last_exc = None
                 break
@@ -80,14 +91,14 @@ async def _analyze_book(
                 last_exc = exc
                 logger.warning(
                     "analyze_book: book_id=%d chapter %d/%d attempt %d/%d failed: %s",
-                    book_id, i + 1, n, attempt + 1, _MAX_RETRIES, exc,
+                    book_id, already_done + i + 1, total, attempt + 1, _MAX_RETRIES, exc,
                 )
                 if attempt < _MAX_RETRIES - 1:
                     with Session(engine) as _s:
                         _b = _s.get(Book, book_id)
                         if _b:
                             _b.error_message = (
-                                f"[ch {i + 1}/{n} essai {attempt + 1}/{_MAX_RETRIES}] "
+                                f"[ch {already_done + i + 1}/{total} essai {attempt + 1}/{_MAX_RETRIES}] "
                                 f"{type(exc).__name__}: {exc} — nouvel essai dans {_RETRY_DELAY}s"
                             )
                             _s.add(_b)
@@ -125,7 +136,7 @@ async def _analyze_book(
                 ))
 
             book = session.get(Book, book_id)
-            book.progress = 10.0 + (i + 1) / n * 50.0
+            book.progress = 10.0 + (already_done + i + 1) / total * 50.0
             book.updated_at = datetime.now(timezone.utc)
             session.add(book)
             session.commit()
@@ -239,7 +250,7 @@ async def _synthesise_book(
     return audio_path
 
 
-def _analyze_book_impl(book_id: int) -> None:
+def _analyze_book_impl(book_id: int, force: bool = False) -> None:
     from app.core.db import get_engine
     from app.core.enums import BookStatus
     from app.models import Book, Chapter
@@ -254,6 +265,7 @@ def _analyze_book_impl(book_id: int) -> None:
             logger.error("analyze_book called with unknown book_id=%d", book_id)
             return
         source_path = book.source_path
+        previous_status = book.status
         book.status = BookStatus.PROCESSING
         book.progress = 0.0
         book.error_message = None
@@ -261,64 +273,95 @@ def _analyze_book_impl(book_id: int) -> None:
         session.add(book)
         session.commit()
 
+    resume_requested = previous_status == BookStatus.FAILED and not force
+
     try:
-        # ── Nettoyage idempotent (re-analyse) ──────────────────────────────────
         from sqlalchemy import delete as sa_delete
         from app.models import Character, CharacterMergeSuggestion, Segment
 
         with Session(engine) as session:
-            existing_ids = list(
-                session.exec(select(Chapter.id).where(Chapter.book_id == book_id)).all()
-            )
-            if existing_ids:
-                session.execute(sa_delete(Segment).where(Segment.chapter_id.in_(existing_ids)))
-                session.execute(sa_delete(Chapter).where(Chapter.book_id == book_id))
-            session.execute(sa_delete(CharacterMergeSuggestion).where(CharacterMergeSuggestion.book_id == book_id))
-            session.execute(sa_delete(Character).where(Character.book_id == book_id))
-            session.commit()
-
-        # ── EPUB ingestion ─────────────────────────────────────────────────────
-        parsed = EpubParser().parse(source_path)
-
-        with Session(engine) as session:
-            from pathlib import Path as _Path
-            book = session.get(Book, book_id)
-            book.title = parsed.title
-            if parsed.author:
-                book.author = parsed.author
-            for pc in parsed.chapters:
-                session.add(Chapter(
-                    book_id=book_id,
-                    position=pc.position,
-                    title=pc.title,
-                    raw_text=pc.raw_text,
-                ))
-            if parsed.cover_image:
-                _COVER_EXT = {
-                    "image/jpeg": ".jpg",
-                    "image/png": ".png",
-                    "image/gif": ".gif",
-                    "image/webp": ".webp",
-                }
-                ext = _COVER_EXT.get(parsed.cover_media_type or "", ".jpg")
-                cover_dir = _Path("data") / str(book_id)
-                cover_dir.mkdir(parents=True, exist_ok=True)
-                cover_file = cover_dir / f"cover{ext}"
-                cover_file.write_bytes(parsed.cover_image)
-                book.cover_path = str(cover_file)
-            book.progress = 10.0
-            book.updated_at = datetime.now(timezone.utc)
-            session.add(book)
-            session.commit()
-            chapters = session.exec(
-                select(Chapter)
-                .where(Chapter.book_id == book_id)
-                .order_by(Chapter.position)
+            existing_chapters = session.exec(
+                select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
             ).all()
-            chapter_data = [(ch.id, ch.raw_text) for ch in chapters]
+
+        do_resume = resume_requested and bool(existing_chapters)
+
+        if do_resume:
+            # ── Reprise : pas de re-parse EPUB, on saute les chapitres déjà analysés ──
+            with Session(engine) as session:
+                chapter_data = []
+                for ch in existing_chapters:
+                    has_segment = session.exec(
+                        select(Segment.id).where(Segment.chapter_id == ch.id).limit(1)
+                    ).first()
+                    if has_segment is None:
+                        chapter_data.append((ch.id, ch.raw_text))
+            already_done = len(existing_chapters) - len(chapter_data)
+            logger.info(
+                "analyze_book: resuming book_id=%d — %d/%d chapters remaining",
+                book_id, len(chapter_data), len(existing_chapters),
+            )
+            with Session(engine) as session:
+                book = session.get(Book, book_id)
+                book.progress = 10.0
+                session.add(book)
+                session.commit()
+        else:
+            # ── Nettoyage idempotent + ré-ingestion EPUB (1er run ou ré-analyse forcée) ──
+            with Session(engine) as session:
+                existing_ids = [ch.id for ch in existing_chapters]
+                if existing_ids:
+                    session.execute(sa_delete(Segment).where(Segment.chapter_id.in_(existing_ids)))
+                    session.execute(sa_delete(Chapter).where(Chapter.book_id == book_id))
+                session.execute(sa_delete(CharacterMergeSuggestion).where(CharacterMergeSuggestion.book_id == book_id))
+                session.execute(sa_delete(Character).where(Character.book_id == book_id))
+                session.commit()
+
+            # ── EPUB ingestion ─────────────────────────────────────────────────
+            parsed = EpubParser().parse(source_path)
+
+            with Session(engine) as session:
+                from pathlib import Path as _Path
+                book = session.get(Book, book_id)
+                book.title = parsed.title
+                if parsed.author:
+                    book.author = parsed.author
+                for pc in parsed.chapters:
+                    session.add(Chapter(
+                        book_id=book_id,
+                        position=pc.position,
+                        title=pc.title,
+                        raw_text=pc.raw_text,
+                    ))
+                if parsed.cover_image:
+                    _COVER_EXT = {
+                        "image/jpeg": ".jpg",
+                        "image/png": ".png",
+                        "image/gif": ".gif",
+                        "image/webp": ".webp",
+                    }
+                    ext = _COVER_EXT.get(parsed.cover_media_type or "", ".jpg")
+                    cover_dir = _Path("data") / str(book_id)
+                    cover_dir.mkdir(parents=True, exist_ok=True)
+                    cover_file = cover_dir / f"cover{ext}"
+                    cover_file.write_bytes(parsed.cover_image)
+                    book.cover_path = str(cover_file)
+                book.progress = 10.0
+                book.updated_at = datetime.now(timezone.utc)
+                session.add(book)
+                session.commit()
+                chapters = session.exec(
+                    select(Chapter)
+                    .where(Chapter.book_id == book_id)
+                    .order_by(Chapter.position)
+                ).all()
+                chapter_data = [(ch.id, ch.raw_text) for ch in chapters]
+            already_done = 0
 
         # ── LLM analysis (progress 10% → 60%) ─────────────────────────────────
-        asyncio.run(_analyze_book(book_id, chapter_data, engine))
+        asyncio.run(_analyze_book(
+            book_id, chapter_data, engine, resume=do_resume, already_done=already_done,
+        ))
 
         # ── Voice assignment ───────────────────────────────────────────────────
         with Session(engine) as session:
@@ -583,8 +626,8 @@ def generate_voice_sample(voice_id: str) -> None:
 
 
 @huey.task()
-def analyze_book(book_id: int) -> None:
-    _analyze_book_impl(book_id)
+def analyze_book(book_id: int, force: bool = False) -> None:
+    _analyze_book_impl(book_id, force)
 
 
 @huey.task()

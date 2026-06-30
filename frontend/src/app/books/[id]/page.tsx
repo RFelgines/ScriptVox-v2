@@ -466,8 +466,8 @@ export default function BookDetailPage({
 
               {/* ── Barre d'actions ──────────────────────────────────────────── */}
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {/* Analyser / Ré-analyser */}
-                {(book.status === "FAILED" || book.status === "PENDING") && (
+                {/* Analyser / Reprendre l'analyse */}
+                {book.status === "PENDING" && (
                   <Button
                     variant="primary"
                     size="sm"
@@ -476,6 +476,27 @@ export default function BookDetailPage({
                   >
                     {analyzingBook ? "Lancement…" : "Analyser"}
                   </Button>
+                )}
+                {book.status === "FAILED" && (
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={analyzingBook}
+                      onClick={handleAnalyzeBook}
+                    >
+                      {analyzingBook ? "Lancement…" : "Reprendre l'analyse"}
+                    </Button>
+                    {book.error_message !== "Arrêté par l'utilisateur." && (
+                      <span
+                        title={`Échec : ${book.error_message ?? "erreur inconnue"}`}
+                        aria-label="L'analyse a échoué suite à une erreur"
+                        className="text-amber-400"
+                      >
+                        ⚠️
+                      </span>
+                    )}
+                  </div>
                 )}
                 {(book.status === "ANALYZED" || book.status === "DONE") && (
                   <Button

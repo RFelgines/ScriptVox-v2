@@ -436,6 +436,8 @@ async def _fake_analyze_book(
     book_id: int,
     chapter_data: list,
     engine,
+    resume: bool = False,
+    already_done: int = 0,
 ) -> None:
     from sqlalchemy import delete as sa_delete
     from datetime import datetime, timezone
