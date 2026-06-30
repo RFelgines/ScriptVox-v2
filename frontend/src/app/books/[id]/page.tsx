@@ -23,6 +23,7 @@ import {
   listChapters,
   listMergeSuggestions,
   listVoices,
+  patchBookGenre,
   patchBookProvider,
   patchCharacterVoice,
   rejectMergeSuggestion,
@@ -79,6 +80,7 @@ export default function BookDetailPage({
   const [analyzingBook, setAnalyzingBook] = useState(false);
   const [stoppingBook, setStoppingBook] = useState(false);
   const [savingProvider, setSavingProvider] = useState(false);
+  const [savingGenre, setSavingGenre] = useState(false);
   const [search, setSearch] = useState("");
   const [showSecondary, setShowSecondary] = useState(false);
   // Bumpé après une action de fusion pour relancer le fetch (personnages + suggestions).
@@ -145,6 +147,18 @@ export default function BookDetailPage({
       .then((updated) => setBook(updated))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSavingProvider(false));
+  }
+
+  function handleGenreBlur(value: string) {
+    if (!book) return;
+    const next = value.trim() || null;
+    if (next === (book.genre ?? null)) return;
+    setSavingGenre(true);
+    setError(null);
+    patchBookGenre(bookId, next)
+      .then((updated) => setBook(updated))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSavingGenre(false));
   }
 
   function handleVoiceChange(characterId: number, voiceId: string) {
@@ -446,7 +460,19 @@ export default function BookDetailPage({
             <div className="flex-1">
               <h1 className="text-2xl font-bold">{book.title}</h1>
               {book.author && <p className="text-muted">{book.author}</p>}
-              <StatusBadge status={book.status} className="mt-2" />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusBadge status={book.status} />
+                <input
+                  key={`genre-${book.genre ?? ""}`}
+                  type="text"
+                  defaultValue={book.genre ?? ""}
+                  onBlur={(e) => handleGenreBlur(e.target.value)}
+                  disabled={savingGenre}
+                  placeholder="Genre (ex. Fantasy)"
+                  aria-label="Genre du livre"
+                  className="rounded-control border border-border bg-surface-2 px-2 py-0.5 text-xs text-muted placeholder:text-muted/60 disabled:opacity-50"
+                />
+              </div>
               {book.progress > 0 && book.progress < 100 && (
                 <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded-full bg-surface-2">
                   <div

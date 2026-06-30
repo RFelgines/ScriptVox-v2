@@ -29,6 +29,7 @@ class Book(SQLModel, table=True):
     mp3_path: Optional[str] = None
     cover_path: Optional[str] = None
     tts_provider: Optional[str] = None  # None = utilise le défaut global (Settings.tts_provider)
+    genre: Optional[str] = None  # texte libre, tag manuel (pas d'extraction EPUB fiable)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

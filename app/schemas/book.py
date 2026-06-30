@@ -56,6 +56,7 @@ class BookResponse(BaseModel):
     mp3_path: Optional[str] = None
     cover_path: Optional[str] = None
     tts_provider: Optional[str] = None
+    genre: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -63,3 +64,4 @@ class BookResponse(BaseModel):
 
 class BookUpdate(BaseModel):
     tts_provider: Optional[str] = None
+    genre: Optional[str] = None

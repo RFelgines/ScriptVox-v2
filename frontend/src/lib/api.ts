@@ -20,6 +20,7 @@ export interface BookSummary {
   mp3_path: string | null;
   cover_path: string | null;
   tts_provider: string | null;
+  genre: string | null;
 }
 
 export interface AppSettings {
@@ -138,6 +139,30 @@ export async function patchBookProvider(
       // réponse non-JSON : on garde le code HTTP
     }
     throw new Error(`Changement de provider échoué : ${detail}`);
+  }
+  return res.json();
+}
+
+export async function patchBookGenre(
+  bookId: number,
+  genre: string | null,
+): Promise<BookSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ genre }),
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) {
+        detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      }
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Changement de genre échoué : ${detail}`);
   }
   return res.json();
 }

@@ -82,15 +82,20 @@ def patch_book(
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if body.tts_provider is not None and body.tts_provider not in VALID_TTS_PROVIDERS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Invalid tts_provider {body.tts_provider!r}. "
-                f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
-            ),
-        )
-    book.tts_provider = body.tts_provider
+    fields = body.model_dump(exclude_unset=True)
+    if "tts_provider" in fields:
+        tts_provider = fields["tts_provider"]
+        if tts_provider is not None and tts_provider not in VALID_TTS_PROVIDERS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Invalid tts_provider {tts_provider!r}. "
+                    f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
+                ),
+            )
+        book.tts_provider = tts_provider
+    if "genre" in fields:
+        book.genre = fields["genre"]
     session.add(book)
     session.commit()
     session.refresh(book)

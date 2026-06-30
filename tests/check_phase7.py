@@ -1005,6 +1005,40 @@ with TestClient(app, raise_server_exceptions=False) as _tc:
     assert _r32.status_code == 404, f"Expected 404, got {_r32.status_code} ({_r32.text})"
 ok("404 si book_id inconnu")
 
+# ── Phase 19 (suite) — PATCH /books/{id}: genre + mise à jour partielle ──────
+
+section("PATCH /books/{id}: genre seul -> persisté, tts_provider inchangé (pas d'effacement croisé)")
+
+with TestClient(app) as _tc:
+    _r34 = _tc.patch(f"/books/{_r30_book_id}", json={"genre": "Fantasy"})
+    assert _r34.status_code == 200, f"Expected 200, got {_r34.status_code} ({_r34.text})"
+    _r34_data = _r34.json()
+    assert _r34_data["genre"] == "Fantasy", f"got {_r34_data}"
+    assert _r34_data["tts_provider"] == "elevenlabs", (
+        f"tts_provider (set in section 30) must survive a genre-only PATCH, got {_r34_data}"
+    )
+ok("genre='Fantasy' persisté, tts_provider='elevenlabs' (section 30) toujours présent")
+
+section("PATCH /books/{id}: tts_provider seul -> persisté, genre inchangé (pas d'effacement croisé)")
+
+with TestClient(app) as _tc:
+    _r35 = _tc.patch(f"/books/{_r30_book_id}", json={"tts_provider": "piper"})
+    assert _r35.status_code == 200, f"Expected 200, got {_r35.status_code} ({_r35.text})"
+    _r35_data = _r35.json()
+    assert _r35_data["tts_provider"] == "piper", f"got {_r35_data}"
+    assert _r35_data["genre"] == "Fantasy", (
+        f"genre (set in section 34) must survive a tts_provider-only PATCH, got {_r35_data}"
+    )
+ok("tts_provider='piper' persisté, genre='Fantasy' (section 34) toujours présent")
+
+section("PATCH /books/{id}: genre=null explicite -> efface le genre")
+
+with TestClient(app) as _tc:
+    _r36 = _tc.patch(f"/books/{_r30_book_id}", json={"genre": None})
+    assert _r36.status_code == 200, f"Expected 200, got {_r36.status_code} ({_r36.text})"
+    assert _r36.json()["genre"] is None, f"got {_r36.json()}"
+ok("genre=None explicite efface bien le champ")
+
 section("GET /settings: provider par défaut + liste des providers disponibles")
 
 with TestClient(app) as _tc:
