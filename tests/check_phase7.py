@@ -792,6 +792,35 @@ assert _c23_calls == [_c23_ch_id], (
 )
 ok(f"202, re-dispatch accepted for DONE chapter (chapter_id={_c23_ch_id})")
 
+# Section 23b (Phase 22) — 409 if chapter already GENERATING (no duplicate Huey dispatch)
+section("POST /books/{id}/chapters/{n}/generate — 409 if chapter already GENERATING")
+
+with Session(_c3c_engine) as _s:
+    _c23b_book = Book(title="AlreadyGenBook", source_path="/tmp/zz.epub", status=BookStatus.ANALYZED)
+    _s.add(_c23b_book)
+    _s.commit()
+    _s.refresh(_c23b_book)
+    _c23b_book_id = _c23b_book.id
+
+    _c23b_ch = Chapter(
+        book_id=_c23b_book_id, position=1, raw_text="x",
+        status=ChapterStatus.GENERATING,
+    )
+    _s.add(_c23b_ch)
+    _s.commit()
+
+_c23b_calls: list = []
+books_module.generate_chapter = lambda chapter_id: _c23b_calls.append(chapter_id)
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r23b = _tc.post(f"/books/{_c23b_book_id}/chapters/1/generate")
+    assert _r23b.status_code == 409, f"Expected 409, got {_r23b.status_code} ({_r23b.text})"
+
+books_module.generate_chapter = _generate_chapter_task  # restore
+
+assert _c23b_calls == [], f"generate_chapter must NOT be dispatched, got {_c23b_calls}"
+ok("409 si chapitre déjà GENERATING, generate_chapter non dispatché (pas de doublon Huey)")
+
 app.dependency_overrides.clear()
 
 
@@ -951,13 +980,16 @@ with Session(_call_engine) as _s:
     _r29_ch1 = Chapter(book_id=_r29_book_id, position=1, raw_text="a", status=ChapterStatus.DONE, audio_path="/data/1/ch1.wav")
     _r29_ch2 = Chapter(book_id=_r29_book_id, position=2, raw_text="b", status=ChapterStatus.PENDING)
     _r29_ch3 = Chapter(book_id=_r29_book_id, position=3, raw_text="c", status=ChapterStatus.FAILED, error_message="boom")
+    _r29_ch4 = Chapter(book_id=_r29_book_id, position=4, raw_text="d", status=ChapterStatus.GENERATING)
     _s.add(_r29_ch1)
     _s.add(_r29_ch2)
     _s.add(_r29_ch3)
+    _s.add(_r29_ch4)
     _s.commit()
     _s.refresh(_r29_ch1)
     _s.refresh(_r29_ch2)
     _s.refresh(_r29_ch3)
+    _s.refresh(_r29_ch4)
     _r29_ch2_id, _r29_ch3_id = _r29_ch2.id, _r29_ch3.id
 
 _r29_calls: list = []
@@ -967,14 +999,15 @@ with TestClient(app) as _tc:
     _r29 = _tc.post(f"/books/{_r29_book_id}/chapters/generate")
     assert _r29.status_code == 202, f"Expected 202, got {_r29.status_code} ({_r29.text})"
     _r29_data = _r29.json()
-    assert len(_r29_data) == 3, f"Expected 3 chapters in response, got {len(_r29_data)}"
+    assert len(_r29_data) == 4, f"Expected 4 chapters in response, got {len(_r29_data)}"
 
 books_module.generate_chapter = _generate_chapter_task  # restore
 
 assert sorted(_r29_calls) == sorted([_r29_ch2_id, _r29_ch3_id]), (
-    f"Expected generate_chapter called for PENDING+FAILED chapters {[_r29_ch2_id, _r29_ch3_id]}, got {_r29_calls}"
+    f"Expected generate_chapter called for PENDING+FAILED chapters only "
+    f"(DONE and GENERATING skipped) {[_r29_ch2_id, _r29_ch3_id]}, got {_r29_calls}"
 )
-ok(f"202, generate_chapter dispatched for 2 non-DONE chapters, DONE chapter skipped (got {_r29_calls})")
+ok(f"202, generate_chapter dispatched for 2 chapters, DONE+GENERATING skipped (got {_r29_calls})")
 
 # ── Phase 17 — PATCH /books/{id}: provider TTS par livre ──────────────────────
 

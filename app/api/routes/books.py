@@ -248,6 +248,11 @@ def trigger_chapter_generate(
         raise HTTPException(
             status_code=404, detail=f"Chapter {position} not found for book {book_id}."
         )
+    if chapter.status == ChapterStatus.GENERATING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chapter {position} is already being generated.",
+        )
     generate_chapter(chapter.id)
     return ChapterResponse.model_validate(chapter)
 
@@ -269,7 +274,7 @@ def trigger_all_chapters_generate(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
     ).all()
     for chapter in chapters:
-        if chapter.status != ChapterStatus.DONE:
+        if chapter.status not in (ChapterStatus.DONE, ChapterStatus.GENERATING):
             generate_chapter(chapter.id)
     return [ChapterResponse.model_validate(c) for c in chapters]
 
