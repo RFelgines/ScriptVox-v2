@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { ChapterSummary, chapterAudioUrl, listChapters } from "@/lib/api";
 import { usePlayer } from "./PlayerProvider";
@@ -43,8 +44,8 @@ function UtilBlock({
 }
 
 export default function PlayerBar() {
-  const { track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close } =
-    usePlayer();
+  const { track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close,
+          currentSegment, voiceHues } = usePlayer();
   const [expanded, setExpanded] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -404,14 +405,37 @@ export default function PlayerBar() {
           )}
         </div>
 
-        {/* Colonne droite : fermer */}
-        <button
-          onClick={close}
-          aria-label="Fermer le lecteur"
-          className="justify-self-end shrink-0 text-muted hover:text-foreground"
-        >
-          ✕
-        </button>
+        {/* Colonne droite : "Lu par" + fermer */}
+        <div className="flex items-center gap-2 justify-self-end overflow-hidden">
+          {currentSegment !== null && (
+            <div className="hidden sm:flex items-center gap-1.5 overflow-hidden">
+              {currentSegment.voice_id && (
+                <div
+                  style={{
+                    "--orb-c1": `hsl(${voiceHues.get(currentSegment.voice_id) ?? 0} 91% 65%)`,
+                    "--orb-c2": `hsl(${((voiceHues.get(currentSegment.voice_id) ?? 0) + 59) % 360} 81% 60%)`,
+                    "--orb-c3": `hsl(${((voiceHues.get(currentSegment.voice_id) ?? 0) + 347) % 360} 90% 66%)`,
+                  } as CSSProperties}
+                  className="voice-orb h-6 w-6 shrink-0 rounded-full shadow"
+                  aria-hidden="true"
+                />
+              )}
+              <div className="flex flex-col leading-tight overflow-hidden">
+                <span className="text-[9px] uppercase tracking-wide text-muted/60">Lu par</span>
+                <span className="truncate text-xs font-medium text-muted max-w-28">
+                  {currentSegment.character_name ?? "Narrateur"}
+                </span>
+              </div>
+            </div>
+          )}
+          <button
+            onClick={close}
+            aria-label="Fermer le lecteur"
+            className="shrink-0 text-muted hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
       </div>
     </div>
   );

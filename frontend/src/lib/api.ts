@@ -184,6 +184,25 @@ export async function requestVoiceSample(voiceId: string): Promise<VoiceSummary>
   return res.json();
 }
 
+export interface SegmentSummary {
+  id: number;
+  position: number;
+  segment_type: string;
+  character_name: string | null;
+  voice_id: string | null;
+  audio_offset_ms: number | null;
+  duration_ms: number | null;
+}
+
+export async function getChapterSegments(
+  bookId: number,
+  position: number,
+): Promise<SegmentSummary[]> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/${position}/segments`);
+  if (!res.ok) throw new Error(`GET segments failed: ${res.status}`);
+  return res.json();
+}
+
 export async function listChapters(id: number): Promise<ChapterSummary[]> {
   const res = await fetch(`${API_URL}/books/${id}/chapters`);
   if (!res.ok) throw new Error(`GET /books/${id}/chapters failed: ${res.status}`);

@@ -5,21 +5,29 @@ import {
   useContext,
   useRef,
   useState,
+  useMemo,
   useCallback,
   useEffect,
   ReactNode,
 } from "react";
+import { SegmentSummary, VoiceSummary, getChapterSegments, listVoices } from "@/lib/api";
 
 export interface Track {
   title: string;
   src: string;
-  // Métadonnées optionnelles : permettent au bandeau déplié d'afficher la
-  // couverture et la liste des chapitres + navigation prev/next. Absentes pour
-  // les pistes hors-contexte livre (ex. aperçu de voix).
   bookId?: number;
   bookTitle?: string;
   coverUrl?: string;
   chapterPosition?: number;
+}
+
+const GOLDEN_ANGLE = 137.5077;
+
+function buildHueMap(voices: VoiceSummary[]): Map<string, number> {
+  const sortedIds = voices.map((v) => v.id).sort();
+  const map = new Map<string, number>();
+  sortedIds.forEach((id, i) => map.set(id, (i * GOLDEN_ANGLE) % 360));
+  return map;
 }
 
 interface PlayerState {
@@ -28,6 +36,8 @@ interface PlayerState {
   currentTime: number;
   duration: number;
   rate: number;
+  currentSegment: SegmentSummary | null;
+  voiceHues: Map<string, number>;
 }
 
 interface PlayerControls {
@@ -53,6 +63,8 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRateState] = useState(1);
+  const [segments, setSegments] = useState<SegmentSummary[]>([]);
+  const [voiceHues, setVoiceHues] = useState<Map<string, number>>(new Map());
 
   // Créer l'élément audio une seule fois côté client.
   useEffect(() => {
@@ -66,6 +78,36 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
       audio.src = "";
     };
   }, []);
+
+  // Charger les couleurs des orbes une seule fois (correspondance exacte avec /voix)
+  useEffect(() => {
+    listVoices()
+      .then((voices) => setVoiceHues(buildHueMap(voices)))
+      .catch(() => {});
+  }, []);
+
+  // Charger la timeline de segments quand le chapitre change
+  useEffect(() => {
+    if (!track?.bookId || track.chapterPosition === undefined) {
+      Promise.resolve().then(() => setSegments([]));
+      return;
+    }
+    let active = true;
+    getChapterSegments(track.bookId, track.chapterPosition)
+      .then((segs) => { if (active) setSegments(segs); })
+      .catch(() => { if (active) setSegments([]); });
+    return () => { active = false; };
+  }, [track?.bookId, track?.chapterPosition]);
+
+  // Segment courant dérivé de currentTime — pas de setState dans un effect
+  const currentSegment = useMemo(() => {
+    const ms = currentTime * 1000;
+    return (
+      segments.findLast(
+        (s) => s.audio_offset_ms !== null && ms >= (s.audio_offset_ms ?? Infinity),
+      ) ?? null
+    );
+  }, [segments, currentTime]);
 
   const play = useCallback((newTrack: Track) => {
     const audio = audioRef.current;
@@ -119,7 +161,11 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlayerContext.Provider
-      value={{ track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close }}
+      value={{
+        track, isPlaying, currentTime, duration, rate,
+        currentSegment, voiceHues,
+        play, toggle, seek, setRate, close,
+      }}
     >
       {children}
     </PlayerContext.Provider>
