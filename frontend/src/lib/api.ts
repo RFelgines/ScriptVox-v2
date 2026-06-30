@@ -187,6 +187,7 @@ export async function requestVoiceSample(voiceId: string): Promise<VoiceSummary>
 export interface SegmentSummary {
   id: number;
   position: number;
+  text: string;
   segment_type: string;
   character_name: string | null;
   voice_id: string | null;
