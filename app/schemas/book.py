@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -57,6 +57,8 @@ class BookResponse(BaseModel):
     cover_path: Optional[str] = None
     tts_provider: Optional[str] = None
     genre: Optional[str] = None
+    language: Optional[str] = None
+    published_at: Optional[date] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -65,3 +67,5 @@ class BookResponse(BaseModel):
 class BookUpdate(BaseModel):
     tts_provider: Optional[str] = None
     genre: Optional[str] = None
+    language: Optional[str] = None
+    published_at: Optional[date] = None

@@ -90,8 +90,9 @@ parsed = EpubParser().parse(epub_path)
 assert isinstance(parsed, ParsedBook)
 assert parsed.title == "Alice in Wonderland", f"title={parsed.title!r}"
 assert parsed.author == "Lewis Carroll", f"author={parsed.author!r}"
+assert parsed.language == "en", f"language={parsed.language!r}"
 assert len(parsed.chapters) >= 2, f"chapters={len(parsed.chapters)}"
-ok(f"title={parsed.title!r}  author={parsed.author!r}  chapters={len(parsed.chapters)}")
+ok(f"title={parsed.title!r}  author={parsed.author!r}  language={parsed.language!r}  chapters={len(parsed.chapters)}")
 for ch in parsed.chapters:
     ok(f"  ch{ch.position}: {ch.title!r}  ({len(ch.raw_text)} chars)")
 

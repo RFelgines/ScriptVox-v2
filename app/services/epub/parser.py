@@ -43,6 +43,7 @@ class ParsedBook:
     chapters: list[ParsedChapter]
     cover_image: bytes | None = None
     cover_media_type: str | None = None
+    language: str | None = None
 
 
 def _extract_cover(book) -> tuple[bytes | None, str | None]:
@@ -100,6 +101,9 @@ class EpubParser:
         creators = book.get_metadata("DC", "creator")
         author = creators[0][0].strip() if creators else None
 
+        languages = book.get_metadata("DC", "language")
+        language = languages[0][0].strip() or None if languages else None
+
         items_by_id = {
             item.get_id(): item
             for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)
@@ -140,4 +144,5 @@ class EpubParser:
             chapters=chapters,
             cover_image=cover_image,
             cover_media_type=cover_media_type,
+            language=language,
         )

@@ -326,6 +326,8 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                 book.title = parsed.title
                 if parsed.author:
                     book.author = parsed.author
+                if parsed.language:
+                    book.language = parsed.language
                 for pc in parsed.chapters:
                     session.add(Chapter(
                         book_id=book_id,

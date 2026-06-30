@@ -96,6 +96,10 @@ def patch_book(
         book.tts_provider = tts_provider
     if "genre" in fields:
         book.genre = fields["genre"]
+    if "language" in fields:
+        book.language = fields["language"]
+    if "published_at" in fields:
+        book.published_at = fields["published_at"]
     session.add(book)
     session.commit()
     session.refresh(book)

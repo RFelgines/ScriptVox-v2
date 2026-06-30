@@ -183,7 +183,10 @@ with tempfile.TemporaryDirectory() as _ha_tmp:
         assert _ha_b.audio_path is None, (
             f"audio_path must be None after analysis, got {_ha_b.audio_path!r}"
         )
-    ok("status=ANALYZED, progress=100.0, audio_path=None")
+        assert _ha_b.language == "en", (
+            f"language must be auto-extracted from dc:language, got {_ha_b.language!r}"
+        )
+    ok("status=ANALYZED, progress=100.0, audio_path=None, language='en' (auto-extrait)")
 
     with Session(_ha_engine) as _s:
         _ha_chars = _s.exec(select(Character).where(Character.book_id == _ha_book_id)).all()
@@ -1038,6 +1041,21 @@ with TestClient(app) as _tc:
     assert _r36.status_code == 200, f"Expected 200, got {_r36.status_code} ({_r36.text})"
     assert _r36.json()["genre"] is None, f"got {_r36.json()}"
 ok("genre=None explicite efface bien le champ")
+
+section("PATCH /books/{id}: language + published_at -> persistés sans effacer tts_provider")
+
+with TestClient(app) as _tc:
+    _r37 = _tc.patch(
+        f"/books/{_r30_book_id}", json={"language": "fr", "published_at": "1997-06-26"}
+    )
+    assert _r37.status_code == 200, f"Expected 200, got {_r37.status_code} ({_r37.text})"
+    _r37_data = _r37.json()
+    assert _r37_data["language"] == "fr", f"got {_r37_data}"
+    assert _r37_data["published_at"] == "1997-06-26", f"got {_r37_data}"
+    assert _r37_data["tts_provider"] == "piper", (
+        f"tts_provider (section 35) must survive, got {_r37_data}"
+    )
+ok("language='fr', published_at='1997-06-26' persistés, tts_provider toujours présent")
 
 section("GET /settings: provider par défaut + liste des providers disponibles")
 

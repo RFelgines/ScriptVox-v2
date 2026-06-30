@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import UniqueConstraint
@@ -30,6 +30,8 @@ class Book(SQLModel, table=True):
     cover_path: Optional[str] = None
     tts_provider: Optional[str] = None  # None = utilise le défaut global (Settings.tts_provider)
     genre: Optional[str] = None  # texte libre, tag manuel (pas d'extraction EPUB fiable)
+    language: Optional[str] = None  # auto-extrait de dc:language à l'analyse, override manuel possible
+    published_at: Optional[date] = None  # tag manuel (dc:date EPUB peu fiable/absent)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
