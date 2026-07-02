@@ -2233,11 +2233,50 @@ Aucune commande Alembic n'a été exécutée contre le vrai `scriptvox.db`/`data
 tâche — uniquement contre des bases jetables en tempdir, nettoyées après chaque test. L'auto-
 tamponnement de la vraie base se déclenchera de lui-même au prochain démarrage du backend.
 
+### Lot F1 ✅ (2026-07-02) — Génération de sample hors du process API (M5)
+
+**Défaut.** `POST /voices/{id}/sample` appelait `_generate_voice_sample_async` **en ligne dans le
+process FastAPI** : chargement du checkpoint Qwen + inférence directement dans le process API,
+alors que la tâche Huey `generate_voice_sample` existait déjà pour ça mais n'était jamais
+dispatchée (code mort). Risque réel : deux process distincts (API + worker) chargeant chacun un
+modèle Qwen sur le même GPU sans coordination — contention/OOM potentiel si une génération de
+livre tourne pendant qu'un utilisateur demande un aperçu de voix clonée.
+
+**Fix.** `POST /voices/{id}/sample` dispatche désormais `generate_voice_sample(voice_id)` (tâche
+Huey déjà existante) et répond **202 Accepted** au lieu de générer puis répondre 200 avec l'état
+final. `_generate_voice_sample_async` (chemin API process) supprimé entièrement — dead code.
+`_generate_voice_sample_impl` (chemin worker, jusque-là jamais exécuté puisque la tâche n'était
+jamais dispatchée) corrigé pour libérer la VRAM via `_release_qwen_gpu` dans un `finally` — cette
+fonction ne libérait jusqu'ici jamais rien, contrairement à la variante API qui le faisait déjà
+(cleanup dupliqué inline). Aucun changement de schéma `VoiceResponse` : le corps de réponse reste
+identique, seul le code HTTP (202) et le moment où il est renvoyé (immédiat, avant la fin de la
+génération) changent.
+
+**Portée volontairement limitée au backend** (décidé avec l'utilisateur avant implémentation) :
+avec la génération devenue asynchrone, la réponse renvoie `has_sample: false` immédiatement — le
+spinner du bouton "générer un aperçu" disparaît sans que l'aperçu soit encore prêt, il faut
+recharger la page plus tard pour le voir apparaître. Un polling frontend corrigerait ça
+proprement, mais `frontend/src/app/voix/page.tsx` était activement édité par une fenêtre parallèle
+(refonte visuelle des orbes) pendant cette tâche — le polling est renvoyé au Lot F3 (déjà scopé
+"quick wins frontend") plutôt que d'être ajouté ici pour éviter tout risque de collision de fichier
+pour un gain marginal dans le même lot.
+
+**Test-first.** `tests/check_phase31.py` (nouveau, 9 sections), confirmé rouge avant / vert après
+(`git stash` ciblé sur `app/workers/tasks.py` + `app/api/routes/voices.py`) : `_generate_voice_
+sample_async` absent du module ; POST sur voix CLONED → 202 + dispatch `generate_voice_sample`
+appelé une fois avec le bon `voice_id` (mocké) ; aucune instanciation de `QwenTTSProvider` dans le
+process API ; régressions inchangées (voix inconnue → 404, voix non-CLONED → 400, aucun dispatch
+dans ces deux cas) ; `_generate_voice_sample_impl` no-op propre si `TTS_PROVIDER != qwen` ; succès
+→ sample écrit sur disque + `_release_qwen_gpu` appelé ; échec de `synthesise()` → exception avalée
+(loggée, ne remonte jamais) **et** VRAM quand même libérée. **27/27 suites vertes.**
+
+Fichiers (3) : `app/workers/tasks.py`, `app/api/routes/voices.py`, `tests/check_phase31.py`.
+
 ### Lot F (restant) — non démarré
 
-Mineurs restants : F1 résiduel (génération d'échantillon de voix hors thread API), F3 (frontend
-quick wins), F4 (hygiène : .gitignore, garde `audioop` Python 3.13, code mort). Follow-up
-frontend : bouton "Reprendre la génération" pour les livres FAILED (capacité livrée au Lot C1
-mais jamais exposée en UI). Détail complet, fichiers concernés et test-first par étape : mémoire
+F3 (frontend quick wins, incluant désormais le polling `has_sample` différé ci-dessus), F4
+(hygiène : .gitignore, garde `audioop` Python 3.13, code mort). Follow-up frontend : bouton
+"Reprendre la génération" pour les livres FAILED (capacité livrée au Lot C1 mais jamais exposée en
+UI). Détail complet, fichiers concernés et test-first par étape : mémoire
 [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux
 sources).

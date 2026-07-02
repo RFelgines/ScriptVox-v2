@@ -177,8 +177,8 @@ async def get_voice_sample(
     return FileResponse(str(cache_path), media_type="audio/wav", filename=cache_path.name)
 
 
-@router.post("/{voice_id}/sample", response_model=VoiceResponse, status_code=200)
-async def request_voice_sample(
+@router.post("/{voice_id}/sample", response_model=VoiceResponse, status_code=202)
+def request_voice_sample(
     voice_id: str,
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
@@ -188,8 +188,7 @@ async def request_voice_sample(
         raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
     if voice.kind != VoiceKind.CLONED:
         raise HTTPException(status_code=400, detail="Only cloned voices need sample generation.")
-    from app.workers.tasks import _generate_voice_sample_async
-    await _generate_voice_sample_async(voice_id)
-    session.refresh(voice)
+    from app.workers.tasks import generate_voice_sample
+    generate_voice_sample(voice_id)
     locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
     return _voice_to_response(voice, locale)

@@ -195,13 +195,13 @@ async def _analyze_book(
 
 def _release_qwen_gpu(provider) -> None:
     """Best-effort VRAM release once a synthesis run ends. Only the internal
-    Base<->CustomVoice swap (qwen.py `_ensure_model`/`_ensure_base_model`) and the
-    voice-sample endpoint (`_generate_voice_sample_async`) ever cleared CUDA memory
-    before -- a normal generate_book/generate_chapter run never did, leaving VRAM
-    reserved by this process for its whole lifetime even after switching to a
-    different TTS provider for the next book (risk of contention with Ollama, see
-    memory tts_emotion_qwen3_direction). No-op for any provider that isn't Qwen,
-    or if nothing was actually loaded during this run."""
+    Base<->CustomVoice swap (qwen.py `_ensure_model`/`_ensure_base_model`) ever
+    cleared CUDA memory before -- a normal generate_book/generate_chapter run
+    never did, leaving VRAM reserved by this process for its whole lifetime
+    even after switching to a different TTS provider for the next book (risk
+    of contention with Ollama, see memory tts_emotion_qwen3_direction). No-op
+    for any provider that isn't Qwen, or if nothing was actually loaded during
+    this run."""
     from app.services.tts.qwen import QwenTTSProvider
     if not isinstance(provider, QwenTTSProvider):
         return
@@ -699,59 +699,12 @@ def _process_book_impl(book_id: int) -> None:
 _VOICE_SAMPLE_TEXT = "Bonjour, voici un aperçu de cette voix clonée par ScriptVox."
 
 
-async def _generate_voice_sample_async(voice_id: str) -> None:
-    """Async variant for FastAPI BackgroundTasks — no Huey worker required."""
-    from pathlib import Path
-
-    from app.core.db import get_engine
-    from app.core.enums import VoiceKind
-    from app.models.entities import Voice
-
-    settings = get_settings()
-    if settings.tts_provider != "qwen":
-        logger.info("generate_voice_sample_async: skipped (TTS_PROVIDER=%s)", settings.tts_provider)
-        return
-
-    engine = get_engine()
-    with Session(engine) as session:
-        voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
-        if voice is None or voice.kind != VoiceKind.CLONED or voice.reference_audio_path is None:
-            logger.warning("generate_voice_sample_async: voice %r not found or no ref audio", voice_id)
-            return
-        ref_path = voice.reference_audio_path
-
-    from app.services.tts.qwen import QwenTTSProvider
-    provider = QwenTTSProvider(settings)
-
-    out_dir = Path("data") / "voice_samples"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"qwen_{voice_id}.wav"
-
-    try:
-        wav_bytes = await provider.synthesise(
-            _VOICE_SAMPLE_TEXT,
-            voice_id,
-            reference_audio_path=ref_path,
-        )
-        out_path.write_bytes(wav_bytes)
-        logger.info("generate_voice_sample_async: saved %s", out_path)
-    except Exception:
-        logger.exception("generate_voice_sample_async failed for voice_id=%r", voice_id)
-    finally:
-        # Libère le modèle GPU immédiatement après la génération
-        import gc
-        provider._base_model = None
-        provider._model = None
-        gc.collect()
-        try:
-            import torch
-            torch.cuda.empty_cache()
-            logger.info("generate_voice_sample_async: GPU cache cleared")
-        except Exception:
-            pass
-
-
 def _generate_voice_sample_impl(voice_id: str) -> None:
+    """Runs exclusively in the Huey worker process (audit 2026-07-02, Lot F1 /
+    M5): loading a Qwen checkpoint and holding CUDA state used to happen inline
+    in the FastAPI process on every POST /voices/{id}/sample, risking VRAM
+    contention with a book/chapter generation running in the worker at the same
+    time — two separate processes touching the same GPU with no coordination."""
     from pathlib import Path
 
     from app.core.db import get_engine
@@ -788,6 +741,8 @@ def _generate_voice_sample_impl(voice_id: str) -> None:
         logger.info("generate_voice_sample: saved %s", out_path)
     except Exception:
         logger.exception("generate_voice_sample failed for voice_id=%r", voice_id)
+    finally:
+        _release_qwen_gpu(provider)
 
 
 @huey.task()
