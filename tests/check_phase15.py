@@ -216,6 +216,28 @@ check(
     abs(len(_resampled) - _expected_len) <= 4,
 )
 
+# ── Section 8b: audioop absent (Python 3.13+, m10) — garde d'import ──────────
+# audioop a été retiré de la stdlib en Python 3.13 (PEP 594) ; le module doit
+# rester importable (audioop=None), seule une resampling réelle doit échouer,
+# avec un TTSError clair au lieu d'un NameError/AttributeError opaque.
+
+section("_resample_to_output: audioop absent + déjà 22050 Hz -> no-op, pas d'erreur")
+with patch.object(qwen_mod, "audioop", None):
+    _noop = _resample_to_output(_silence_1s, _OUTPUT_SAMPLE_RATE)
+    check("identité préservée (aucun resampling nécessaire)", _noop == _silence_1s)
+
+section("_resample_to_output: audioop absent + resampling requis -> TTSError clair")
+with patch.object(qwen_mod, "audioop", None):
+    try:
+        _resample_to_output(_silence_1s, _MODEL_SAMPLE_RATE)
+        check("TTSError levée quand audioop est absent et qu'un resampling est nécessaire",
+              False, "aucune exception levée")
+    except TTSError as exc:
+        check("message mentionne audioop", "audioop" in str(exc), str(exc))
+        check("message mentionne Python 3.13", "3.13" in str(exc), str(exc))
+    except Exception as exc:
+        check("TTSError attendue", False, f"{type(exc).__name__}: {exc}")
+
 # ── Section 9: _ensure_model — ImportError (deps absentes) -> TTSError clair ─
 
 section("synthesise: torch/qwen-tts absents -> TTSError mentionnant requirements-qwen.txt")

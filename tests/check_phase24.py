@@ -347,6 +347,36 @@ except AttributeError as exc:
 get_settings.cache_clear()
 
 
+# ── 12. m1 (audit F4): EDGETTS_LOCALE honoré même si le provider global ≠ edgetts ─
+# Settings.edgetts_locale est toujours peuplé inconditionnellement depuis le lot B1a
+# (ligne 73 de config.py, plus de _require conditionné au provider global) -- ce test
+# verrouille ce comportement pour le chemin qui en dépend réellement : l'aperçu de
+# voix catalogue (GET /voices/{id}/sample), qui utilise toujours EdgeTTS même quand
+# TTS_PROVIDER global est qwen/piper. Avant B1a, un utilisateur qwen/piper n'ayant
+# jamais eu besoin de configurer EDGETTS_LOCALE se serait retrouvé avec des aperçus
+# en français prononcés par une voix en-US (défaut) -- ce test confirme que ce n'est
+# plus le cas dès que EDGETTS_LOCALE est positionné, quel que soit le provider global.
+section("m1: EdgeTTSProvider(settings) honore EDGETTS_LOCALE même si TTS_PROVIDER global = qwen")
+from app.services.tts.edgetts import EdgeTTSProvider  # noqa: E402
+
+os.environ["TTS_PROVIDER"] = "qwen"
+os.environ["EDGETTS_LOCALE"] = "fr-FR"
+get_settings.cache_clear()
+with patch("app.config.load_dotenv", lambda *a, **kw: None):
+    _settings12 = get_settings()
+check("settings.edgetts_locale == 'fr-FR' malgré TTS_PROVIDER=qwen",
+      _settings12.edgetts_locale == "fr-FR", f"got {_settings12.edgetts_locale!r}")
+
+_edge12 = EdgeTTSProvider(_settings12)
+_narrator_voice12 = _edge12.resolve_voice("narrator")
+check("voix narrator résolue en fr-FR (pas de fallback silencieux en-US)",
+      _narrator_voice12 == "fr-FR-HenriNeural", f"got {_narrator_voice12!r}")
+
+os.environ["TTS_PROVIDER"] = "edgetts"
+os.environ.pop("EDGETTS_LOCALE", None)
+get_settings.cache_clear()
+
+
 # ── Nettoyage fichiers de test résiduels ──────────────────────────────────────
 for _leftover in ("scriptvox_test_p24.db", "huey_test_p24.db"):
     try:

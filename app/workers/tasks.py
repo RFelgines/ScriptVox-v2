@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Callable
 
 from huey import SqliteHuey
@@ -141,7 +140,6 @@ async def _analyze_book(
 
             book = session.get(Book, book_id)
             book.progress = 10.0 + (already_done + i + 1) / total * 50.0
-            book.updated_at = datetime.now(timezone.utc)
             session.add(book)
             session.commit()
 
@@ -368,7 +366,6 @@ async def _generate_book_async(book_id: int, engine) -> bool:
         with Session(engine) as session:
             book = session.get(Book, book_id)
             book.progress = 60.0 + done_count / total * 30.0
-            book.updated_at = datetime.now(timezone.utc)
             session.add(book)
             session.commit()
 
@@ -394,7 +391,6 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
         book.status = BookStatus.PROCESSING
         book.progress = 0.0
         book.error_message = None
-        book.updated_at = datetime.now(timezone.utc)
         session.add(book)
         session.commit()
 
@@ -474,7 +470,6 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                     cover_file.write_bytes(parsed.cover_image)
                     book.cover_path = str(cover_file)
                 book.progress = 10.0
-                book.updated_at = datetime.now(timezone.utc)
                 session.add(book)
                 session.commit()
                 chapters = session.exec(
@@ -518,7 +513,6 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             if book is not None and book.status != BookStatus.FAILED:
                 book.status = BookStatus.ANALYZED
                 book.progress = 100.0
-                book.updated_at = datetime.now(timezone.utc)
                 session.add(book)
                 session.commit()
 
@@ -529,7 +523,6 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             if book:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
-                book.updated_at = datetime.now(timezone.utc)
                 session.add(book)
                 session.commit()
 
@@ -557,7 +550,6 @@ def _generate_book_impl(book_id: int) -> None:
         book.status = BookStatus.GENERATING
         book.progress = 0.0
         book.error_message = None
-        book.updated_at = datetime.now(timezone.utc)
         session.add(book)
         session.commit()
 
@@ -623,7 +615,6 @@ def _generate_book_impl(book_id: int) -> None:
             book.mp3_path = mp3_path
             book.status = BookStatus.DONE
             book.progress = 100.0
-            book.updated_at = datetime.now(timezone.utc)
             session.add(book)
             session.commit()
 
@@ -634,7 +625,6 @@ def _generate_book_impl(book_id: int) -> None:
             if book:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
-                book.updated_at = datetime.now(timezone.utc)
                 session.add(book)
                 session.commit()
 

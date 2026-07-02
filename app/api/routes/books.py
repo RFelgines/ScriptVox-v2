@@ -135,8 +135,6 @@ def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookR
         )
     book.status = BookStatus.FAILED
     book.error_message = "Arrêté par l'utilisateur."
-    from datetime import datetime, timezone
-    book.updated_at = datetime.now(timezone.utc)
     session.add(book)
     session.commit()
     session.refresh(book)

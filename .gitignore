@@ -49,6 +49,10 @@ frontend/.env.local
 .claude/settings.local.json
 .claude/launch.json
 
+# Process artifacts — dev server pid files and redirected stdout/stderr logs
+*.pid
+*.log
+
 # IDE
 .vscode/
 .idea/

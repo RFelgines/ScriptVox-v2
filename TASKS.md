@@ -2325,10 +2325,62 @@ Fichiers (4) : `frontend/src/lib/voiceHues.ts` (nouveau),
 `frontend/src/components/player/PlayerProvider.tsx`,
 `frontend/src/components/player/PlayerBar.tsx`, `frontend/src/app/voix/page.tsx`.
 
-### Lot F4 (restant) — non démarré
+### Lot F4 ✅ (2026-07-02) — Hygiène (m1 vérifié, m10, m12) + code mort (Book.updated_at)
 
-Hygiène : `.gitignore` (`*.log`, `*.pid`, nettoyage des `huey_test_p*.db`/`scriptvox_test_p*.db` à
-la racine), garde `audioop` Python 3.13, code mort résiduel. Follow-up frontend : bouton "Reprendre
-la génération" pour les livres FAILED (capacité livrée au Lot C1 mais jamais exposée en UI). Détail
-complet, fichiers concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]]
-(pas dupliqué ici pour éviter la dérive entre les deux sources).
+**⚠️ Mené pendant une génération audio réellement en cours sur le livre 2** (chapitres 5-10
+`GENERATING` en parallèle) — périmètre restreint aux changements sûrs sous cette contrainte :
+aucun redémarrage backend/worker, aucune commande contre `scriptvox.db`/`huey.db` réels, priorité
+aux fichiers dont l'édition n'affecte jamais un process déjà démarré (pas de `--reload`, voir
+[[windows_zombie_process_lesson]]). `voice_tone` (colonne DB réelle, migration + `base.py`
+activement édité par une fenêtre parallèle) et `synthesise_chapter` (choix de conception, pas un
+bug) explicitement **différés** — décidé avec l'utilisateur avant implémentation.
+
+**m12 — hygiène dépôt.** `.gitignore` += `*.pid`, `*.log` (fichiers de process de dev, jusque-là
+non ignorés — apparaissaient en `??` à chaque `git status`). Nettoyage des `scriptvox_test_p*.db` /
+`huey_test_p*.db` résiduels à la racine (déjà `*.db`-gitignorés, pur nettoyage disque — jamais
+`scriptvox.db`/`huey.db` réels, vérifiés intacts après coup).
+
+**m10 — `audioop` retiré de la stdlib en Python 3.13+ (PEP 594).** `app/services/tts/qwen.py`
+important `audioop` sans garde — un upgrade futur vers 3.13 ferait planter l'import du module
+entier (`ImportError` non catché) dès que `QwenTTSProvider` est référencé, même sans jamais
+synthétiser. Fix : `try/except ImportError` au niveau module (`audioop = None` si absent), erreur
+reportée à l'usage réel (`_resample_to_output`) sous forme de `TTSError` explicite au lieu d'un
+`AttributeError` opaque sur `None.ratecv`. Aucune dépendance ajoutée (le message d'erreur mentionne
+le backport `audioop-lts` comme option, sans l'installer). Sans effet sur le venv actuel (3.11.9).
+
+**m1 — déjà corrigé, vérifié par un test de non-régression.** L'audit notait que
+`EDGETTS_LOCALE` pouvait ne pas être honoré quand le provider global n'est pas `edgetts` (aperçus
+catalogue parlant un texte FR avec une voix en-US). Investigation : déjà résolu par effet de bord
+du Lot B1a (`Settings.edgetts_locale` toujours peuplé inconditionnellement depuis ce lot-là,
+`EdgeTTSProvider.__init__` ne fait aucune vérification conditionnelle sur `tts_provider`). Aucun
+code changé — un test verrouille ce comportement pour empêcher une régression silencieuse future.
+
+**Code mort — `Book.updated_at` : écrit partout, jamais lu.** 11 sites d'écriture
+(`app/workers/tasks.py` ×10, `app/api/routes/books.py` ×1) retirés — confirmé qu'aucun schéma API
+(`schemas/book.py`) ni le frontend ne l'exposent. La colonne DB elle-même est **conservée**
+(toujours peuplée une fois à la création via `default_factory`, aucune migration nécessaire) —
+seules les réécritures redondantes à chaque mutation de statut/progression sont supprimées.
+L'import `from datetime import datetime, timezone` dans `tasks.py` devenu entièrement inutile après
+ce retrait a été supprimé aussi (plus aucun usage dans le fichier).
+
+**Test-first.** `tests/check_phase15.py` étendu (2 nouvelles sections, audioop absent : no-op à
+22050 Hz + `TTSError` clair si resampling requis) et `tests/check_phase24.py` étendu (1 nouvelle
+section, m1 verrouillé). Confirmé rouge avant / vert après pour m10 (`git stash` ciblé sur
+`qwen.py`) : le code pré-fix lève un `AttributeError: 'NoneType' object has no attribute 'ratecv'`
+brut au lieu du `TTSError` propre attendu. **27/27 suites vertes**, y compris pendant que la
+génération réelle du livre 2 progressait (chapitre 9 terminé pendant le run de la suite complète,
+`scriptvox.db` vérifié non perturbé avant/après).
+
+Fichiers (5) : `.gitignore`, `app/services/tts/qwen.py`, `app/workers/tasks.py`,
+`app/api/routes/books.py`, `tests/check_phase15.py`, `tests/check_phase24.py`. Aucun changement de
+contrat public, aucune migration de schéma.
+
+**Reste hors de ce lot** : `voice_tone` (colonne morte, nécessite une migration Alembic — différé),
+`synthesise_chapter` (garder ou virer — décision de conception non tranchée). Follow-up frontend :
+bouton "Reprendre la génération" pour les livres `FAILED` (capacité livrée au Lot C1 mais jamais
+exposée en UI). Détail complet : mémoire [[audit-2026-07-02-remediation-plan]].
+
+**🏁 Plan de remédiation post-audit 2026-07-02 : tous les lots avec décision tranchée sont
+maintenant livrés** (A, B, C, D, E, F1, F2, F3, F4). Il ne reste que des points explicitement
+différés par choix (voice_tone, synthesise_chapter) et le follow-up frontend "reprendre
+génération" — aucun n'est bloquant, tous documentés ci-dessus et dans la mémoire.

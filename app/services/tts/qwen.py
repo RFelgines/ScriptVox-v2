@@ -1,9 +1,13 @@
 import array
 import asyncio
-import audioop
 import io
 import wave
 from pathlib import Path
+
+try:
+    import audioop  # Removed from the stdlib in Python 3.13+ (PEP 594).
+except ImportError:  # pragma: no cover — current venv pins Python 3.11
+    audioop = None  # type: ignore[assignment]
 
 from app.config import Settings
 from app.core.exceptions import TTSError
@@ -62,6 +66,15 @@ def _float_to_pcm16(samples) -> bytes:
 def _resample_to_output(pcm16: bytes, source_rate: int) -> bytes:
     if source_rate == _OUTPUT_SAMPLE_RATE:
         return pcm16
+    if audioop is None:
+        raise TTSError(
+            "qwen:resample",
+            ImportError(
+                "audioop is unavailable (removed from the Python stdlib in 3.13+). "
+                "QwenTTSProvider needs it to resample audio to 22050 Hz — run on "
+                "Python <3.13, or install the 'audioop-lts' backport package."
+            ),
+        )
     converted, _ = audioop.ratecv(pcm16, 2, 1, source_rate, _OUTPUT_SAMPLE_RATE, None)
     return converted
 
