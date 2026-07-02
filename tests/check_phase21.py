@@ -22,6 +22,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p21.db",
     "HUEY_DB_PATH": "./huey_test_p21.db",
+    "DATA_DIR": "./data_test",
 })
 
 PASS = "\033[32mOK\033[0m"
@@ -166,7 +167,11 @@ check("2 segments retournés", len(_segs) == 2, f"got {len(_segs)}")
 _s0, _s1 = _segs[0], _segs[1]
 check("position 1 = narration", _s0["segment_type"] == "NARRATION")
 check("position 1 : character_name=None (narration)", _s0["character_name"] is None)
-check("position 1 : voice_id=None (narration sans personnage)", _s0["voice_id"] is None)
+# voice_id doit refléter la voix réellement utilisée à la synthèse (chapter.py
+# résout toujours la narration sur NARRATOR_VOICE_ID), pas rester None — sinon
+# le frontend ("Lu par") n'a aucun moyen de savoir quelle voix lit la narration.
+check("position 1 : voice_id='narrator' (voix réellement utilisée à la synthèse)",
+      _s0["voice_id"] == "narrator", f"got {_s0['voice_id']!r}")
 check("position 1 : audio_offset_ms=0", _s0["audio_offset_ms"] == 0)
 check("position 1 : duration_ms=1200", _s0["duration_ms"] == 1200)
 
@@ -177,6 +182,40 @@ check("position 2 : voice_id='female_0' (dénormalisé)", _s1["voice_id"] == "fe
       f"got {_s1['voice_id']!r}")
 check("position 2 : audio_offset_ms=1200", _s1["audio_offset_ms"] == 1200)
 check("position 2 : duration_ms=800", _s1["duration_ms"] == 800)
+
+
+# ── 6. GET .../segments — personnage sans voice_id assigné -> fallback narrator ─
+section("GET .../segments : personnage sans voice_id -> voice_id='narrator' (comme à la synthèse)")
+
+with Session(_engine) as _s:
+    _ch6 = Chapter(book_id=_book_id, position=2, title="Ch2", raw_text="test")
+    _s.add(_ch6)
+    _s.commit()
+    _ch6_id = _ch6.id
+
+    _char6 = Character(book_id=_book_id, name="Bob", gender="MALE", voice_id=None)
+    _s.add(_char6)
+    _s.commit()
+    _char6_id = _char6.id
+
+    _s.add(Segment(
+        chapter_id=_ch6_id, position=1, text="Salut.",
+        segment_type=SegmentType.DIALOGUE,
+        character_id=_char6_id,
+        audio_offset_ms=0, duration_ms=500,
+    ))
+    _s.commit()
+
+with TestClient(app) as _tc6:
+    _r6 = _tc6.get(f"/books/{_book_id}/chapters/2/segments")
+    check("200 OK", _r6.status_code == 200, f"got {_r6.status_code} {_r6.text[:200]}")
+
+_segs6 = _r6.json()
+check("1 segment retourné", len(_segs6) == 1, f"got {len(_segs6)}")
+check("character_name='Bob' (dénormalisé malgré l'absence de voice_id)",
+      _segs6[0]["character_name"] == "Bob", f"got {_segs6[0]['character_name']!r}")
+check("voice_id='narrator' (fallback -- même règle qu'à la synthèse)",
+      _segs6[0]["voice_id"] == "narrator", f"got {_segs6[0]['voice_id']!r}")
 
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────

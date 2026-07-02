@@ -28,6 +28,9 @@ env/
 data/*
 !data/.gitkeep
 
+# Isolated DATA_DIR for tests/check_phaseN.py (never the real data/ above)
+data_test/
+
 # Local test ebooks — copyrighted, never commit
 Ebook/
 

@@ -18,6 +18,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p3.db",
     "HUEY_DB_PATH": "./huey_test_p3.db",
+    "DATA_DIR": "./data_test",
     "PIPER_VOICES_DIR": "./voices",
     "PIPER_BINARY_PATH": sys.executable,
 })
@@ -331,15 +332,17 @@ assert coerced.characters[0].gender == Gender.UNKNOWN, (
 )
 ok("gender inconnu 'INVALID_GENDER' -> Gender.UNKNOWN, pas de crash")
 
-# Attribution vers personnage inconnu -> character_name=None (fallback gracieux)
+# Attribution vers un pseudo-personnage inconnu et non-nom-propre -> character_name=None
+# (fallback gracieux ; un nom propre plausible mais absent de characters[] est désormais
+# auto-enregistré au lieu de tomber en fallback, cf. section "réparation d'attribution" plus bas)
 fallback = _parse_llm_json(json.dumps({
     "characters": [{"name": "Alice", "gender": "FEMALE", "description": "test"}],
-    "attributions": [{"index": 2, "character_name": "PERSONNAGE_INCONNU"}],
+    "attributions": [{"index": 2, "character_name": "un personnage totalement inconnu"}],
 }), _test_spans)
 assert fallback.segments[1].character_name is None, (
     f"Expected None fallback, got {fallback.segments[1].character_name!r}"
 )
-ok("attribution personnage inconnu -> character_name=None, pas de crash")
+ok("attribution personnage inconnu (non-nom-propre) -> character_name=None, pas de crash")
 
 # Audit 2026-07-02 (F2/m3) : index d'attribution en string -> coercé en int, matché
 # quand même (avant le fix : silencieusement perdu, span.index int ne matchait jamais)
@@ -797,6 +800,80 @@ assert _result_unknown.segments[0].character_name == "Ron", (
     "nom d'incise non reconnu par le LLM -> fallback sur l'attribution LLM (dégradation bornée)"
 )
 ok("incise à nom NON reconnu comme personnage -> attribution LLM conservée (borné)")
+
+
+# ── _resolve_character_name / auto-enregistrement — réparation d'attribution ─────
+# (spike 2026-07-02 : run complet HP qwen3:1.7b/8b, ~30-40% d'attributions perdues
+# à cause de variantes de nom ou de personnages omis de characters[])
+section("_parse_llm_json répare les variantes de nom et les personnages omis")
+from app.services.llm.base import _looks_like_proper_noun, _resolve_character_name  # noqa: E402,F401
+
+# Variante courte/longue (« Percy » <-> « Percy Weasley ») -> résolution vers le nom connu
+_llm_json_variant = json.dumps({
+    "characters": [{"name": "Percy Weasley", "gender": "MALE"}],
+    "attributions": [{"index": 1, "character_name": "Percy"}],
+})
+_spans_variant = [_Span(1, "— Suivez-moi.", True)]
+_result_variant = _parse_llm_json(_llm_json_variant, _spans_variant)
+assert _result_variant.segments[0].character_name == "Percy Weasley", (
+    f"variante de nom non résolue: {_result_variant.segments[0].character_name!r}"
+)
+ok("« Percy » (attribution) résolu vers « Percy Weasley » (characters[]), pas de doublon")
+
+# Variante inverse (attribution longue, personnage connu court : « Rogue » <-> « Professeur Rogue »)
+_llm_json_variant2 = json.dumps({
+    "characters": [{"name": "Rogue", "gender": "MALE"}],
+    "attributions": [{"index": 1, "character_name": "Professeur Rogue"}],
+})
+_result_variant2 = _parse_llm_json(_llm_json_variant2, _spans_variant)
+assert _result_variant2.segments[0].character_name == "Rogue"
+ok("« Professeur Rogue » (attribution) résolu vers « Rogue » (characters[])")
+
+# Personnage attribué mais absent de characters[] -> auto-enregistré (nom propre plausible)
+_llm_json_missing = json.dumps({
+    "characters": [{"name": "Harry", "gender": "MALE"}],
+    "attributions": [{"index": 1, "character_name": "Hagrid"}],
+})
+_result_missing = _parse_llm_json(_llm_json_missing, _spans_variant)
+assert _result_missing.segments[0].character_name == "Hagrid", (
+    f"personnage omis non auto-enregistré: {_result_missing.segments[0].character_name!r}"
+)
+assert any(c.name == "Hagrid" for c in _result_missing.characters), (
+    "Hagrid doit apparaître dans characters[] après auto-enregistrement"
+)
+ok("« Hagrid » attribué mais absent de characters[] -> auto-enregistré, attribution conservée")
+
+# Pseudo-personnage descriptif (pas un nom propre) -> PAS auto-enregistré, fallback narrateur
+assert not _looks_like_proper_noun("une petite voix")
+assert not _looks_like_proper_noun("boa constrictor")
+assert not _looks_like_proper_noun("tout le monde")
+assert _looks_like_proper_noun("Hagrid")
+assert _looks_like_proper_noun("Sir Nicholas")
+_llm_json_junk = json.dumps({
+    "characters": [{"name": "Harry", "gender": "MALE"}],
+    "attributions": [{"index": 1, "character_name": "boa constrictor"}],
+})
+_result_junk = _parse_llm_json(_llm_json_junk, _spans_variant)
+assert _result_junk.segments[0].character_name is None, (
+    "pseudo-personnage descriptif ne doit PAS être auto-enregistré (pollution du casting)"
+)
+assert not any(c.name == "boa constrictor" for c in _result_junk.characters)
+ok("pseudo-personnage descriptif (« boa constrictor ») -> fallback narrateur, pas de faux personnage")
+
+# Deux attributions successives au même personnage omis -> un seul enregistrement (pas de doublon)
+_llm_json_missing_twice = json.dumps({
+    "characters": [{"name": "Harry", "gender": "MALE"}],
+    "attributions": [
+        {"index": 1, "character_name": "Hagrid"},
+        {"index": 2, "character_name": "Hagrid"},
+    ],
+})
+_spans_missing_twice = [_Span(1, "— Salut.", True), _Span(2, "— Ça va ?", True)]
+_result_missing_twice = _parse_llm_json(_llm_json_missing_twice, _spans_missing_twice)
+assert sum(1 for c in _result_missing_twice.characters if c.name == "Hagrid") == 1, (
+    "auto-enregistrement répété -> doit rester un seul personnage 'Hagrid'"
+)
+ok("personnage omis attribué 2x -> un seul auto-enregistrement (pas de doublon)")
 
 
 # ── 8. Live LLM (optional, gated by SCRIPTVOX_LIVE_TEST=1) ───────────────────

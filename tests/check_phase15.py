@@ -24,6 +24,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p15.db",
     "HUEY_DB_PATH": "./huey_test_p15.db",
+    "DATA_DIR": "./data_test",
     "TTS_PROVIDER": "qwen",
 })
 for _var in ("QWEN_MODEL", "QWEN_LANGUAGE", "QWEN_DEVICE", "QWEN_ATTN"):

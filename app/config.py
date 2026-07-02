@@ -94,6 +94,10 @@ class Settings:
 
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")
+        # Obligatoire (pas de défaut silencieux vers "data") : un test qui oublierait de
+        # le définir écrirait dans le vrai dossier data/ de l'application (incident réel
+        # 2026-07-02 -- perte de couverture + audio TTS de plusieurs chapitres réels).
+        self.data_dir: str = _require("DATA_DIR")
 
         _origins_raw = os.environ.get("FRONTEND_ORIGINS", "http://localhost:3000")
         self.frontend_origins: list[str] = [

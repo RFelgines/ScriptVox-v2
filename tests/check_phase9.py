@@ -20,6 +20,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p9.db",
     "HUEY_DB_PATH": "./huey_test_p9.db",
+    "DATA_DIR": "./data_test",
     "TTS_PROVIDER": "edgetts",
 })
 os.environ.pop("EDGETTS_LOCALE", None)
@@ -698,7 +699,7 @@ check("toutes des voix MALE (male_0/1/2)",
 
 from app.services.tts.edgetts import EdgeTTSProvider  # noqa: E402
 
-_sample_dir = ROOT / "data" / "voice_samples"
+_sample_dir = Path(get_settings().data_dir) / "voice_samples"
 _sample_cache_file = _sample_dir / "edgetts_female_0.wav"
 if _sample_cache_file.exists():
     _sample_cache_file.unlink()

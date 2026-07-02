@@ -41,6 +41,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p28.db",
     "HUEY_DB_PATH": "./huey_test_p28.db",
+    "DATA_DIR": "./data_test",
 })
 
 PASS = "\033[32mOK\033[0m"

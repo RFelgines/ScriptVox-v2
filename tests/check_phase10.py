@@ -19,6 +19,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p10.db",
     "HUEY_DB_PATH": "./huey_test_p10.db",
+    "DATA_DIR": "./data_test",
     "TTS_PROVIDER": "edgetts",
 })
 

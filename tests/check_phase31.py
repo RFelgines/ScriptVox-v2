@@ -43,6 +43,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p31.db",
     "HUEY_DB_PATH": "./huey_test_p31.db",
+    "DATA_DIR": "./data_test",
     "EDGETTS_LOCALE": "fr-FR",
 })
 
@@ -159,15 +160,12 @@ if _mock_task7.called:
 ok("400 + aucun dispatch")
 
 
-# _generate_voice_sample_impl builds its output path from a hardcoded relative
-# "data" dir (matches the rest of the codebase, e.g. tests/check_phase2.py) --
-# both `get_settings` and `Path`/`QwenTTSProvider` are imported LOCALLY inside
-# the function, so they must be patched at their SOURCE module, not on
-# app.workers.tasks (a patch there would never be seen by a local import
-# executed fresh at call time).
+# _generate_voice_sample_impl builds its output path from app.workers.tasks.DATA_DIR
+# (derived from get_settings().data_dir, isolated to ./data_test for tests since
+# Phase 35 -- incident 2026-07-02, real data/ was getting written by tests).
 from app.config import get_settings as _real_get_settings  # noqa: E402
 
-_TEST_SAMPLE_PATH = ROOT / "data" / "voice_samples" / "qwen_patrick-baud.wav"
+_TEST_SAMPLE_PATH = ROOT / _real_get_settings().data_dir / "voice_samples" / "qwen_patrick-baud.wav"
 
 
 def _cleanup_test_sample() -> None:

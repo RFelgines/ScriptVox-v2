@@ -22,6 +22,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test.db",
     "HUEY_DB_PATH": "./huey_test.db",
+    "DATA_DIR": "./data_test",
     "PIPER_VOICES_DIR": "./voices",
     "PIPER_BINARY_PATH": sys.executable,
 })
@@ -281,7 +282,8 @@ with TestClient(app) as client:
     # Seed orphan-file fields directly (simulates a book whose book-level WAV/MP3 and
     # data/{id}/ folder — cover + per-chapter WAV — were already generated before
     # deletion; the stubbed analyze_book above never produces these).
-    _del_dir = Path("data") / str(bid)
+    from app.config import get_settings as _get_settings_p2
+    _del_dir = Path(_get_settings_p2().data_dir) / str(bid)
     _del_dir.mkdir(parents=True, exist_ok=True)
     (_del_dir / "cover.jpg").write_bytes(b"fake-cover")
     (_del_dir / "ch1.wav").write_bytes(b"fake-chapter-wav")

@@ -8,21 +8,23 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session, func, select
 
-from app.config import VALID_TTS_PROVIDERS
+from app.config import VALID_TTS_PROVIDERS, get_settings
 from app.core.db import get_session
-from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus
+from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus, SegmentType
 from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment
 from app.schemas.book import (
     BookResponse,
     BookUpdate,
+    ChapterPriorityUpdate,
     ChapterResponse,
     CharacterResponse,
     MergeSuggestionResponse,
     SegmentResponse,
 )
+from app.services.voice_assignment import NARRATOR_VOICE_ID
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
-DATA_DIR = Path("data")
+DATA_DIR = Path(get_settings().data_dir)
 
 _ALLOWED_COVER_TYPES: dict[str, str] = {
     "image/jpeg": ".jpg",
@@ -261,6 +263,55 @@ def trigger_chapter_generate(
     return ChapterResponse.model_validate(chapter)
 
 
+@router.post("/{book_id}/chapters/{position}/stop", response_model=ChapterResponse)
+def trigger_chapter_stop(
+    book_id: int,
+    position: int,
+    session: Session = Depends(get_session),
+) -> ChapterResponse:
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    if chapter.status != ChapterStatus.GENERATING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chapter {position} is not being generated (status={chapter.status.value}).",
+        )
+    # Polled by the segment-level should_abort check (_make_chapter_stop_checker) —
+    # the worker reverts the chapter to PENDING once it notices, mirroring the
+    # book-level /stop mechanism.
+    chapter.cancel_requested = True
+    session.add(chapter)
+    session.commit()
+    session.refresh(chapter)
+    return ChapterResponse.model_validate(chapter)
+
+
+@router.patch("/{book_id}/chapters/{position}/priority", response_model=ChapterResponse)
+def patch_chapter_priority(
+    book_id: int,
+    position: int,
+    body: ChapterPriorityUpdate,
+    session: Session = Depends(get_session),
+) -> ChapterResponse:
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    chapter.priority = body.priority
+    session.add(chapter)
+    session.commit()
+    session.refresh(chapter)
+    return ChapterResponse.model_validate(chapter)
+
+
 @router.post("/{book_id}/chapters/generate", response_model=list[ChapterResponse], status_code=202)
 def trigger_all_chapters_generate(
     book_id: int,
@@ -351,6 +402,16 @@ def get_chapter_segments(
             if seg.character_id not in char_cache:
                 char_cache[seg.character_id] = session.get(Character, seg.character_id)
             char = char_cache[seg.character_id]
+        # Mirrors the exact voice resolution used at synthesis time (chapter.py
+        # _synthesise_segments): narration, and any dialogue whose character has
+        # no voice assigned yet, both fall back to the narrator voice. Without
+        # this, voice_id stayed None for narration -- the frontend had no way to
+        # know which voice actually reads it (audit 2026-07-02 follow-up).
+        voice_id = (
+            NARRATOR_VOICE_ID
+            if seg.segment_type == SegmentType.NARRATION or char is None
+            else (char.voice_id or NARRATOR_VOICE_ID)
+        )
         results.append(SegmentResponse(
             id=seg.id,
             position=seg.position,
@@ -358,7 +419,7 @@ def get_chapter_segments(
             segment_type=seg.segment_type,
             character_id=seg.character_id,
             character_name=char.name if char else None,
-            voice_id=char.voice_id if char else None,
+            voice_id=voice_id,
             audio_offset_ms=seg.audio_offset_ms,
             duration_ms=seg.duration_ms,
         ))

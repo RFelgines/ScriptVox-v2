@@ -38,6 +38,7 @@ _OLLAMA_VARS = {
     "OLLAMA_READ_TIMEOUT": "600",
     "DATABASE_URL": "sqlite:///./scriptvox.db",
     "HUEY_DB_PATH": "./huey.db",
+    "DATA_DIR": "./data_test",
     "PIPER_VOICES_DIR": "./voices",
     "PIPER_BINARY_PATH": sys.executable,  # real file, satisfies is_file() check in tests
 }

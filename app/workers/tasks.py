@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 from typing import Callable
 
 from huey import SqliteHuey
@@ -10,6 +11,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 huey = SqliteHuey(filename=get_settings().huey_db_path)
+DATA_DIR = Path(get_settings().data_dir)
 
 
 async def _analyze_book(
@@ -307,7 +309,7 @@ async def _generate_chapter_async(
 
         wav_bytes, timing = result
 
-        out_dir = _Path("data") / str(book_id)
+        out_dir = DATA_DIR / str(book_id)
         out_dir.mkdir(parents=True, exist_ok=True)
         audio_path = str(out_dir / f"ch{position}.wav")
         _Path(audio_path).write_bytes(wav_bytes)
@@ -486,7 +488,7 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                         "image/webp": ".webp",
                     }
                     ext = _COVER_EXT.get(parsed.cover_media_type or "", ".jpg")
-                    cover_dir = _Path("data") / str(book_id)
+                    cover_dir = DATA_DIR / str(book_id)
                     cover_dir.mkdir(parents=True, exist_ok=True)
                     cover_file = cover_dir / f"cover{ext}"
                     cover_file.write_bytes(parsed.cover_image)
@@ -740,7 +742,7 @@ def _generate_voice_sample_impl(voice_id: str) -> None:
     from app.services.tts.qwen import QwenTTSProvider
     provider = QwenTTSProvider(settings)
 
-    out_dir = Path("data") / "voice_samples"
+    out_dir = DATA_DIR / "voice_samples"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"qwen_{voice_id}.wav"
 

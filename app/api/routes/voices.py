@@ -18,7 +18,7 @@ from app.services.tts.factory import get_tts_provider
 
 router = APIRouter()
 
-DATA_DIR = Path("data")
+DATA_DIR = Path(get_settings().data_dir)
 SAMPLES_DIR = DATA_DIR / "voice_samples"
 _SAMPLE_TEXT = "Bonjour, ceci est un aperçu de cette voix."
 

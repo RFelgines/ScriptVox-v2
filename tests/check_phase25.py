@@ -34,6 +34,7 @@ os.environ.update({
     "OLLAMA_CONTEXT_TOKENS": "8192",
     "DATABASE_URL": "sqlite:///./scriptvox_test_p25.db",
     "HUEY_DB_PATH": "./huey_test_p25.db",
+    "DATA_DIR": "./data_test",
     "PIPER_VOICES_DIR": "./voices",
     "PIPER_BINARY_PATH": sys.executable,
 })
