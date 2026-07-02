@@ -1963,9 +1963,40 @@ Aucun changement de schéma DB.
 
 **Lot B entièrement clos** (B1a + B2 + B3 tous livrés le 2026-07-02).
 
+### Lot F2 ✅ (2026-07-02) — Robustesse du parseur LLM (`_parse_llm_json`)
+
+> Chantier mené en parallèle d'une analyse de livre réelle en cours ailleurs — choisi précisément
+> parce qu'il ne touche que la logique de parsing interne (aucun redémarrage de service requis pour
+> l'implémenter, aucune base réelle touchée par les tests).
+
+**Défaut 1 — index d'attribution non-entier perdu silencieusement.** Un `"index": "3"` (chaîne,
+au lieu de l'entier attendu — arrive avec les petits modèles LLM) ne matchait jamais `span.index`
+(int) : l'attribution était perdue **sans même le WARNING** prévu pour les autres cas malformés.
+Fix : coercion `int(index)` avec `try/except`, WARNING explicite si non convertible.
+
+**Défaut 2 — personnage sans `"name"` faisait échouer tout le chapitre.** La compréhension de
+liste faisait `c["name"]` sans garde ; un dict sans cette clé levait `KeyError`, attrapé par le
+`except` global de la fonction qui le transforme en `LLMParsingError` → tout le chapitre repart en
+échec (3 retries puis livre `FAILED`), pour UNE seule entrée malformée sur potentiellement des
+dizaines — incohérent avec la philosophie "skip + WARNING" du reste du fichier (entrées
+d'attribution/personnage non-dict déjà tolérées ainsi juste au-dessus). Fix : boucle explicite avec
+skip + WARNING si `name` est absent ou vide, au lieu d'une compréhension de liste qui plante.
+
+**Test-first.** 5 nouvelles assertions dans `tests/check_phase3.py` §5 (`_parse_llm_json`), à la
+suite des cas de tolérance déjà existants : index string coercé et matché ; index non convertible
+ignoré proprement ; personnage sans `name` ignoré (WARNING) sans faire planter le parsing du reste.
+Confirmé rouge avant / vert après par un `git stash` ciblé sur `base.py` (l'assertion sur l'index
+string échouait exactement comme prévu : `got None` au lieu de `"Alice"`).
+
+**22/22 suites vertes**, zéro régression (suites LLM/analyse en particulier revérifiées :
+`check_phase1/2/3/14/16/19`).
+
+Fichiers (2) : `app/services/llm/base.py`, `tests/check_phase3.py`. Aucun changement de contrat
+(`_parse_llm_json` garde exactement sa signature et son type de retour).
+
 ### Lots C, E, F (restant) — non démarrés
 
 Robustesse/mémoire de la génération longue (M6/M7/M8, décision d'architecture ⚖️ C0 à trancher —
-**prochain candidat**) ; migrations de schéma (M9) + mineurs restants. Détail complet, fichiers
-concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici
-pour éviter la dérive entre les deux sources).
+**prochain candidat**) ; migrations de schéma (M9) + mineurs restants (F1 résiduel, F3, F4). Détail
+complet, fichiers concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]]
+(pas dupliqué ici pour éviter la dérive entre les deux sources).

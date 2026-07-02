@@ -343,6 +343,45 @@ assert fallback.segments[1].character_name is None, (
 )
 ok("attribution personnage inconnu -> character_name=None, pas de crash")
 
+# Audit 2026-07-02 (F2/m3) : index d'attribution en string -> coercé en int, matché
+# quand même (avant le fix : silencieusement perdu, span.index int ne matchait jamais)
+_str_index_result = _parse_llm_json(json.dumps({
+    "characters": [{"name": "Alice", "gender": "FEMALE"}],
+    "attributions": [{"index": "2", "character_name": "Alice"}],
+}), _test_spans)
+assert _str_index_result.segments[1].character_name == "Alice", (
+    f"index string '2' doit être coercé en int et matcher span.index=2, "
+    f"got {_str_index_result.segments[1].character_name!r}"
+)
+ok("attribution avec index string '2' -> coercé en int, attribution appliquée")
+
+# index non convertible -> attribution ignorée (pas de crash, pas de faux match)
+_bad_index_result = _parse_llm_json(json.dumps({
+    "characters": [{"name": "Alice", "gender": "FEMALE"}],
+    "attributions": [{"index": "not_a_number", "character_name": "Alice"}],
+}), _test_spans)
+assert _bad_index_result.segments[1].character_name is None, (
+    f"index non convertible doit être ignoré, got {_bad_index_result.segments[1].character_name!r}"
+)
+ok("attribution avec index non convertible -> ignorée, pas de crash")
+
+# Audit 2026-07-02 (F2/m3) : personnage sans 'name' -> ignoré + WARNING, PAS de
+# LLMParsingError qui ferait échouer tout le chapitre (avant le fix : KeyError
+# levé pendant la compréhension de liste, attrapé par le except global du dessous)
+_no_name_result = _parse_llm_json(json.dumps({
+    "characters": [
+        {"gender": "MALE", "description": "sans nom"},
+        {"name": "Bob", "gender": "MALE"},
+    ],
+    "attributions": [],
+}), [_Span(1, "x", False)])
+assert len(_no_name_result.characters) == 1, (
+    f"le personnage sans 'name' doit être ignoré, pas planter tout le parsing, "
+    f"got {_no_name_result.characters}"
+)
+assert _no_name_result.characters[0].name == "Bob"
+ok("personnage sans 'name' -> ignoré (WARNING), personnage valide suivant traité, pas de crash")
+
 
 # ── 6. _merge_chunk_results ───────────────────────────────────────────────────
 section("_merge_chunk_results deduplicates characters and renumbers segments")

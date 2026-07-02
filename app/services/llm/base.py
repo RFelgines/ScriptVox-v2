@@ -391,24 +391,31 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
 
     try:
         raw_characters = data.get("characters", [])
+        characters: list[CharacterData] = []
         for c in raw_characters:
             if not isinstance(c, dict):
                 _logger.warning(
                     "_parse_llm_json: character entry is not an object (%r), skipped", c
                 )
-        characters = [
-            CharacterData(
-                name=c["name"],
+                continue
+            name = c.get("name")
+            if not name:
+                # Consistent with every other malformed-entry case in this file: skip
+                # + WARNING, never let one bad entry raise LLMParsingError and fail
+                # the whole chapter (audit 2026-07-02, finding F2/m3).
+                _logger.warning(
+                    "_parse_llm_json: character entry missing 'name' (%r), skipped", c
+                )
+                continue
+            characters.append(CharacterData(
+                name=name,
                 description=c.get("description"),
                 gender=_coerce_enum(c.get("gender", "UNKNOWN"), Gender, Gender.UNKNOWN),
                 age_category=_coerce_enum(c.get("age_category", "UNKNOWN"), AgeCategory, AgeCategory.UNKNOWN),
                 tone=c.get("tone"),
                 voice_quality=c.get("voice_quality"),
                 voice_tone=c.get("voice_tone"),
-            )
-            for c in raw_characters
-            if isinstance(c, dict)
-        ]
+            ))
         known_names = {c.name for c in characters}
         attr_map: dict[int, str] = {}
         emotion_map: dict[int, str] = {}
@@ -422,6 +429,16 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
             if index is None:
                 _logger.warning(
                     "_parse_llm_json: attribution missing 'index' (%r), skipped", a
+                )
+                continue
+            try:
+                index = int(index)
+            except (TypeError, ValueError):
+                # A string index (e.g. "3") used to be stored as-is: it would never
+                # match span.index (int) below, silently dropping the attribution
+                # with no WARNING at all (audit 2026-07-02, finding F2/m3).
+                _logger.warning(
+                    "_parse_llm_json: attribution index=%r is not an integer, skipped", index
                 )
                 continue
             name = a.get("character_name")
