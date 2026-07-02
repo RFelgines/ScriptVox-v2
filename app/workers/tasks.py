@@ -425,8 +425,20 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             return
 
         # ── Voice assignment ───────────────────────────────────────────────────
+        # Use the book's own TTS provider override when set, falling back to the
+        # global default otherwise — mirrors tts_factory.get_tts_provider's own
+        # override resolution (tasks.py _synthesise_book/_synthesise_chapter_worker).
+        # Passing the global unconditionally (previous behaviour) meant a book
+        # overridden to qwen never got clone-priority when the global wasn't qwen,
+        # and a book overridden AWAY from qwen still got clones assigned when the
+        # global was qwen -- voices that then fail to resolve at synthesis time
+        # (audit 2026-07-02, finding M4).
         with Session(engine) as session:
-            assign_voices(book_id, session, tts_provider=get_settings().tts_provider)
+            book = session.get(Book, book_id)
+            effective_tts_provider = (
+                book.tts_provider if book and book.tts_provider else get_settings().tts_provider
+            )
+            assign_voices(book_id, session, tts_provider=effective_tts_provider)
 
         with Session(engine) as session:
             book = session.get(Book, book_id)

@@ -1926,10 +1926,46 @@ fix : plantait en `AttributeError` brut, démontrant le bug M1 en direct) ; rég
 qwen inchangés ; `PATCH /books` rejette `"elevenlabs"` en 422 ; `GET /settings` ne l'annonce plus.
 **21/21 suites vertes** (`check_phase1` → `check_phase25`), zéro régression.
 
-### Lots B (reste) → C, E, F (restant) — non démarrés
+### Lot B ✅ CLOS (2026-07-02) — B2 + B3 : override TTS par livre, dernier volet
 
-Override TTS par livre — reste `assign_voices`/`book.tts_provider` (M4) + `PATCH /characters` refuse
-les voix clonées (M3) ; robustesse/mémoire de la génération longue (M6/M7/M8, décision
-d'architecture ⚖️ C0 à trancher — **prochain candidat**) ; migrations de schéma (M9) + mineurs
-restants. Détail complet, fichiers concernés et test-first par étape : mémoire
-[[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux sources).
+**B2 — `assign_voices` reçoit le provider effectif du livre (M4).** `_analyze_book_impl` passait
+inconditionnellement `get_settings().tts_provider` (le provider **global**) à `assign_voices`, même
+quand le livre avait son propre `tts_provider` overridé. Conséquence bidirectionnelle : un livre
+overridé vers `qwen` (global ≠ qwen) ne bénéficiait jamais de la priorité aux voix clonées ; un livre
+overridé **loin** de `qwen` alors que le global **est** `qwen` se voyait quand même assigner des
+clones, qui échouent ensuite à la synthèse (`resolve_voice` ne les connaît que sous `qwen`). Fix :
+relit `book.tts_provider` juste avant l'appel et retombe sur le global seulement si `None` — même
+logique de résolution que `tts_factory.get_tts_provider(..., override=book.tts_provider)`, déjà
+utilisée ailleurs dans le même fichier pour la synthèse elle-même.
+
+**B3 — `PATCH /characters/{id}` accepte les voix clonées (M3).** La route ne validait
+`body.voice_id` que contre le catalogue figé (`_CATALOGUE_META`) ; l'assignation automatique
+(`assign_voices`) pouvait déjà choisir un clone pour un personnage, mais la correction manuelle
+d'une voix clonée renvoyait systématiquement 422. Fix : `_is_assignable_voice_id` accepte le
+catalogue **ou** un `voice_id` existant en table `Voice` avec `kind=CLONED`.
+
+**Contrat.** Règle de validation d'API élargie (déjà montrée dans le plan mémoire avant
+implémentation) — signature de route et schémas Pydantic inchangés.
+
+**Test-first.** `tests/check_phase26.py` (nouveau, 7 sections), confirmé rouge avant / vert après par
+un cycle `git stash`/`stash pop` sur les 2 fichiers concernés (4 assertions en échec exactement là où
+attendu, régressions déjà vertes avant le fix) :
+- B2 : override `qwen` (global `edgetts`) → clone assigné ; override `edgetts` (global `qwen`) → PAS
+  de clone (catalogue à la place) ; pas d'override (global `qwen`) → clone toujours utilisé
+  (régression, comportement préexistant).
+- B3 : PATCH avec un `voice_id` cloné → 200 ; PATCH catalogue → 200 (régression) ; PATCH totalement
+  inconnu → 422 (régression).
+
+**22/22 suites vertes** (`check_phase1` → `check_phase26`), zéro régression.
+
+Fichiers (3) : `app/workers/tasks.py`, `app/api/routes/characters.py`, `tests/check_phase26.py`.
+Aucun changement de schéma DB.
+
+**Lot B entièrement clos** (B1a + B2 + B3 tous livrés le 2026-07-02).
+
+### Lots C, E, F (restant) — non démarrés
+
+Robustesse/mémoire de la génération longue (M6/M7/M8, décision d'architecture ⚖️ C0 à trancher —
+**prochain candidat**) ; migrations de schéma (M9) + mineurs restants. Détail complet, fichiers
+concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici
+pour éviter la dérive entre les deux sources).
