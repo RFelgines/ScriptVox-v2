@@ -61,6 +61,8 @@ class Chapter(SQLModel, table=True):
     status: ChapterStatus = Field(default=ChapterStatus.PENDING)
     audio_path: Optional[str] = None
     error_message: Optional[str] = None
+    priority: int = Field(default=0)  # 0 = normal priority; higher = more urgent
+    cancel_requested: bool = Field(default=False)  # set by /stop, polled by should_abort
 
     book: Optional["Book"] = Relationship(back_populates="chapters")
     segments: list["Segment"] = Relationship(

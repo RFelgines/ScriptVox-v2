@@ -46,7 +46,7 @@ interface Props {
 }
 
 export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
-  const { currentSegment, voiceHues } = usePlayer();
+  const { currentSegment, voiceHues, seek, isPlaying } = usePlayer();
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const currentRef = useRef<HTMLDivElement | null>(null);
@@ -101,14 +101,33 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
           const voiceId = seg.voice_id;
           const hue = voiceId ? (voiceHues.get(voiceId) ?? 0) : null;
           const label = seg.character_name ?? "Narrateur";
+          const canSeek = seg.audio_offset_ms !== null;
+
+          function seekToSegment() {
+            if (seg.audio_offset_ms !== null) seek(seg.audio_offset_ms / 1000);
+          }
 
           return (
             <div
               key={seg.id}
               ref={isCurrent ? currentRef : null}
+              role={canSeek ? "button" : undefined}
+              tabIndex={canSeek ? 0 : undefined}
+              onClick={canSeek ? seekToSegment : undefined}
+              onKeyDown={
+                canSeek
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        seekToSegment();
+                      }
+                    }
+                  : undefined
+              }
+              aria-label={canSeek ? `Aller à ce passage — ${label}` : undefined}
               className={`flex gap-3 border-b border-border/50 px-4 py-2.5 transition-colors last:border-0 ${
-                isCurrent ? "border-l-2" : "hover:bg-surface-2/40"
-              }`}
+                canSeek ? "cursor-pointer" : ""
+              } ${isCurrent ? "border-l-2" : "hover:bg-surface-2/40"}`}
               style={
                 isCurrent
                   ? {
@@ -121,7 +140,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
               {/* Indicateur de voix */}
               <div className="flex w-28 shrink-0 items-start gap-1.5 pt-0.5">
                 {hue !== null ? (
-                  <LazySegmentOrb hue={hue} active={isCurrent} root={scrollRoot} />
+                  <LazySegmentOrb hue={hue} active={isCurrent && isPlaying} root={scrollRoot} />
                 ) : (
                   <div className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-surface-2" aria-hidden="true" />
                 )}

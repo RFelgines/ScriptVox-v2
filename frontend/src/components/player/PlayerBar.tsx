@@ -46,7 +46,7 @@ function UtilBlock({
 
 export default function PlayerBar() {
   const { track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close,
-          currentSegment, voiceHues } = usePlayer();
+          currentSegment, voiceHues, voiceNames } = usePlayer();
   const [expanded, setExpanded] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -431,7 +431,11 @@ export default function PlayerBar() {
               <div className="flex flex-col leading-tight overflow-hidden">
                 <span className="text-[9px] uppercase tracking-wide text-muted/60">Lu par</span>
                 <span className="truncate text-xs font-medium text-muted max-w-28">
-                  {currentSegment.character_name ?? "Narrateur"}
+                  {currentSegment.voice_id === "narrator"
+                    ? "Narrateur"
+                    : (currentSegment.voice_id && voiceNames.get(currentSegment.voice_id)) ??
+                      currentSegment.character_name ??
+                      "Narrateur"}
                 </span>
               </div>
             </div>

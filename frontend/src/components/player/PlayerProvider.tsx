@@ -10,7 +10,7 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { SegmentSummary, getChapterSegments, listVoices } from "@/lib/api";
+import { SegmentSummary, VoiceSummary, getChapterSegments, listVoices } from "@/lib/api";
 import { buildHueMap } from "@/lib/voiceHues";
 
 export interface Track {
@@ -30,6 +30,7 @@ interface PlayerState {
   rate: number;
   currentSegment: SegmentSummary | null;
   voiceHues: Map<string, number>;
+  voiceNames: Map<string, string>;
 }
 
 interface PlayerControls {
@@ -58,6 +59,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   const rateRef = useRef(1);
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [voiceHues, setVoiceHues] = useState<Map<string, number>>(new Map());
+  const [voiceNames, setVoiceNames] = useState<Map<string, string>>(new Map());
 
   // Créer l'élément audio une seule fois côté client.
   useEffect(() => {
@@ -72,10 +74,16 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Charger les couleurs des orbes une seule fois (correspondance exacte avec /voix)
+  // Charger les couleurs des orbes + les noms de voix une seule fois (correspondance
+  // exacte avec /voix). Le bandeau "Lu par" affiche la voix réellement entendue
+  // (ex. "Nicolas Sarkozy" pour une voix clonée), pas le personnage — qui reste
+  // visible dans la transcription (audit utilisateur 2026-07-02).
   useEffect(() => {
     listVoices()
-      .then((voices) => setVoiceHues(buildHueMap(voices)))
+      .then((voices: VoiceSummary[]) => {
+        setVoiceHues(buildHueMap(voices));
+        setVoiceNames(new Map(voices.map((v) => [v.id, v.name])));
+      })
       .catch(() => {});
   }, []);
 
@@ -156,7 +164,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
     <PlayerContext.Provider
       value={{
         track, isPlaying, currentTime, duration, rate,
-        currentSegment, voiceHues,
+        currentSegment, voiceHues, voiceNames,
         play, toggle, seek, setRate, close,
       }}
     >

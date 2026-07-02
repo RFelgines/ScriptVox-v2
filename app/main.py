@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.books import router as books_router
 from app.api.routes.characters import router as characters_router
 from app.api.routes.merge_suggestions import router as merge_suggestions_router
+from app.api.routes.queue import router as queue_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.voices import router as voices_router
 from app.config import get_settings
@@ -35,3 +36,4 @@ app.include_router(characters_router, prefix="/characters", tags=["characters"])
 app.include_router(merge_suggestions_router, prefix="/merge-suggestions", tags=["merge-suggestions"])
 app.include_router(voices_router, prefix="/voices", tags=["voices"])
 app.include_router(settings_router, prefix="/settings", tags=["settings"])
+app.include_router(queue_router, prefix="/chapters", tags=["queue"])

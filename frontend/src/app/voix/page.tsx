@@ -43,7 +43,7 @@ const SAMPLE_POLL_INTERVAL_MS = 3000;
 const SAMPLE_POLL_MAX_ATTEMPTS = 20; // ~1 min
 
 export default function VoixPage() {
-  const { play } = usePlayer();
+  const { play, track, isPlaying } = usePlayer();
   const [voices, setVoices] = useState<VoiceSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -397,7 +397,11 @@ export default function VoixPage() {
                     aria-label={`Écouter un aperçu de ${v.name}`}
                     className="group transition-transform hover:scale-105"
                   >
-                    <VoiceOrb hue={orbHues.get(v.id) ?? 0} size={ORB_SIZE}>
+                    <VoiceOrb
+                      hue={orbHues.get(v.id) ?? 0}
+                      size={ORB_SIZE}
+                      active={isPlaying && track?.src === voiceSampleUrl(v.id)}
+                    >
                       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
                         ▶
                       </span>

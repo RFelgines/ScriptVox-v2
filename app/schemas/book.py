@@ -24,6 +24,24 @@ class ChapterResponse(BaseModel):
     title: Optional[str] = None
     status: ChapterStatus
     error_message: Optional[str] = None
+    priority: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ChapterPriorityUpdate(BaseModel):
+    priority: int
+
+
+class QueueItemResponse(BaseModel):
+    chapter_id: int
+    book_id: int
+    book_title: str
+    position: int
+    title: Optional[str] = None
+    status: ChapterStatus
+    priority: int
+    error_message: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

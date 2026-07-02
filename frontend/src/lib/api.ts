@@ -53,6 +53,18 @@ export interface ChapterSummary {
   title: string | null;
   status: ChapterStatus;
   error_message: string | null;
+  priority: number;
+}
+
+export interface QueueItem {
+  chapter_id: number;
+  book_id: number;
+  book_title: string;
+  position: number;
+  title: string | null;
+  status: ChapterStatus;
+  priority: number;
+  error_message: string | null;
 }
 
 export type Gender = "MALE" | "FEMALE" | "NEUTRAL" | "UNKNOWN";
@@ -413,6 +425,52 @@ export function acceptMergeSuggestion(suggestionId: number): Promise<MergeSugges
 
 export function rejectMergeSuggestion(suggestionId: number): Promise<MergeSuggestion> {
   return _resolveMergeSuggestion(suggestionId, "reject");
+}
+
+export async function getQueue(): Promise<QueueItem[]> {
+  const res = await fetch(`${API_URL}/chapters/queue`);
+  if (!res.ok) throw new Error(`GET /chapters/queue failed: ${res.status}`);
+  return res.json();
+}
+
+export async function stopChapter(bookId: number, position: number): Promise<ChapterSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/${position}/stop`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Arrêt du chapitre échoué : ${detail}`);
+  }
+  return res.json();
+}
+
+export async function patchChapterPriority(
+  bookId: number,
+  position: number,
+  priority: number,
+): Promise<ChapterSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/${position}/priority`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ priority }),
+  });
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(`Changement de priorité échoué : ${detail}`);
+  }
+  return res.json();
 }
 
 export async function generateAllChapters(bookId: number): Promise<ChapterSummary[]> {
