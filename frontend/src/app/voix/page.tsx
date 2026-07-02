@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import {
   Gender,
   VoiceKind,
@@ -17,6 +16,8 @@ import { usePlayer } from "@/components/player/PlayerProvider";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
+import VoiceOrb from "@/components/VoiceOrb";
+import { buildHueMap } from "@/lib/voiceHues";
 
 function localeToFlag(locale: string): string | null {
   const region = locale.split("-")[1];
@@ -30,25 +31,16 @@ const GENDER_SYMBOL: Partial<Record<Gender, string>> = {
   FEMALE: "♀",
 };
 
-// Angle d'or (137.5077...°) : assigner la N-ième teinte = N x angle d'or
-// répartit n'importe quel nombre de couleurs sur le cercle chromatique de
-// façon maximalement distincte.
-const GOLDEN_ANGLE = 137.5077;
+// Orbes agrandies (vs 96px avant) : moins par ligne, chacune mieux
+// identifiable individuellement (demande explicite).
+const ORB_SIZE = 160;
 
-function buildOrbHueMap(voices: VoiceSummary[]): Map<string, number> {
-  const sortedIds = voices.map((v) => v.id).sort();
-  const map = new Map<string, number>();
-  sortedIds.forEach((id, i) => map.set(id, (i * GOLDEN_ANGLE) % 360));
-  return map;
-}
-
-function orbStyle(hue: number): CSSProperties {
-  return {
-    "--orb-c1": `hsl(${hue} 91% 65%)`,
-    "--orb-c2": `hsl(${(hue + 59) % 360} 81% 60%)`,
-    "--orb-c3": `hsl(${(hue + 347) % 360} 90% 66%)`,
-  } as CSSProperties;
-}
+// POST /voices/{id}/sample répond 202 dès que la génération est dispatchée
+// (audit 2026-07-02, Lot F1) — has_sample reste false dans cette réponse.
+// On reinterroge la liste jusqu'à ce que la voix passe has_sample=true, plafonné
+// pour ne pas poller indéfiniment si la génération échoue côté worker.
+const SAMPLE_POLL_INTERVAL_MS = 3000;
+const SAMPLE_POLL_MAX_ATTEMPTS = 20; // ~1 min
 
 export default function VoixPage() {
   const { play } = usePlayer();
@@ -108,6 +100,29 @@ export default function VoixPage() {
       .finally(() => setDeletingId(null));
   }
 
+  // La génération de sample est dispatchée en tâche de fond côté serveur
+  // (POST /voices/{id}/sample répond 202 immédiatement, has_sample reste false
+  // dans la réponse) — on reinterroge la liste jusqu'à ce qu'elle passe à true.
+  function pollForSample(voiceId: string, attempt = 0) {
+    if (attempt >= SAMPLE_POLL_MAX_ATTEMPTS) {
+      setRequestingId((cur) => (cur === voiceId ? null : cur));
+      return;
+    }
+    setTimeout(() => {
+      listVoices()
+        .then((data) => {
+          setVoices(data);
+          const updated = data.find((v) => v.id === voiceId);
+          if (updated?.has_sample) {
+            setRequestingId((cur) => (cur === voiceId ? null : cur));
+          } else {
+            pollForSample(voiceId, attempt + 1);
+          }
+        })
+        .catch(() => setRequestingId((cur) => (cur === voiceId ? null : cur)));
+    }, SAMPLE_POLL_INTERVAL_MS);
+  }
+
   async function handleCloneSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!cloneName.trim()) { setCloneError("Le nom est requis."); return; }
@@ -125,11 +140,8 @@ export default function VoixPage() {
       if (!created.has_sample && created.kind === "CLONED") {
         setRequestingId(created.id);
         requestVoiceSample(created.id)
-          .then((updated) =>
-            setVoices((prev) => prev.map((x) => (x.id === updated.id ? updated : x))),
-          )
-          .catch(() => {})
-          .finally(() => setRequestingId(null));
+          .then(() => pollForSample(created.id))
+          .catch(() => setRequestingId(null));
       }
     } catch (err) {
       setCloneError(err instanceof Error ? err.message : String(err));
@@ -161,7 +173,7 @@ export default function VoixPage() {
     searchQuery !== "";
   // Calculé sur le catalogue complet (pas `visible`) : la couleur d'une voix
   // ne doit pas changer selon que le filtre "Favoris" est actif ou non.
-  const orbHues = buildOrbHueMap(voices);
+  const orbHues = buildHueMap(voices);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
@@ -353,9 +365,9 @@ export default function VoixPage() {
       )}
 
       {visible.length > 0 && (
-        <div className="mt-8 flex flex-wrap gap-x-6 gap-y-8">
+        <div className="mt-8 flex flex-wrap gap-x-8 gap-y-10">
           {visible.map((v) => (
-            <div key={v.id} className="flex w-28 flex-col items-center gap-2">
+            <div key={v.id} className="flex w-40 flex-col items-center gap-2">
               <div className="relative">
                 {v.kind === "CLONED" && !v.has_sample ? (
                   <button
@@ -363,33 +375,33 @@ export default function VoixPage() {
                       if (requestingId === v.id) return;
                       setRequestingId(v.id);
                       requestVoiceSample(v.id)
-                        .then((updated) =>
-                          setVoices((prev) =>
-                            prev.map((x) => (x.id === updated.id ? updated : x)),
-                          ),
-                        )
-                        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-                        .finally(() => setRequestingId(null));
+                        .then(() => pollForSample(v.id))
+                        .catch((e) => {
+                          setError(e instanceof Error ? e.message : String(e));
+                          setRequestingId(null);
+                        });
                     }}
                     aria-label={`Générer un aperçu pour ${v.name}`}
                     title="Sample non disponible — cliquer pour générer"
-                    style={orbStyle(orbHues.get(v.id) ?? 0)}
-                    className="voice-orb group flex h-24 w-24 items-center justify-center rounded-full shadow-lg grayscale opacity-50 transition-all hover:opacity-70"
+                    className="group grayscale opacity-50 transition-all hover:opacity-70"
                   >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100 text-lg">
-                      {requestingId === v.id ? "…" : "↺"}
-                    </span>
+                    <VoiceOrb hue={orbHues.get(v.id) ?? 0} size={ORB_SIZE}>
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/30 text-xl text-white opacity-0 transition-opacity group-hover:opacity-100">
+                        {requestingId === v.id ? "…" : "↺"}
+                      </span>
+                    </VoiceOrb>
                   </button>
                 ) : (
                   <button
                     onClick={() => play({ title: `Aperçu — ${v.name}`, src: voiceSampleUrl(v.id) })}
                     aria-label={`Écouter un aperçu de ${v.name}`}
-                    style={orbStyle(orbHues.get(v.id) ?? 0)}
-                    className="voice-orb group flex h-24 w-24 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
+                    className="group transition-transform hover:scale-105"
                   >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
-                      ▶
-                    </span>
+                    <VoiceOrb hue={orbHues.get(v.id) ?? 0} size={ORB_SIZE}>
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                        ▶
+                      </span>
+                    </VoiceOrb>
                   </button>
                 )}
                 <button

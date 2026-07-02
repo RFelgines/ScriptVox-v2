@@ -69,9 +69,13 @@ export default function PlayerBar() {
   useEffect(() => {
     if (!expanded || !bookId) return;
     let active = true;
-    listChapters(bookId).then((chs) => {
-      if (active) setChapters(chs);
-    });
+    listChapters(bookId)
+      .then((chs) => {
+        if (active) setChapters(chs);
+      })
+      .catch(() => {
+        if (active) setChapters([]);
+      });
     return () => {
       active = false;
     };

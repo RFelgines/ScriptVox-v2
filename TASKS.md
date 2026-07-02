@@ -2272,11 +2272,63 @@ dans ces deux cas) ; `_generate_voice_sample_impl` no-op propre si `TTS_PROVIDER
 
 Fichiers (3) : `app/workers/tasks.py`, `app/api/routes/voices.py`, `tests/check_phase31.py`.
 
-### Lot F (restant) — non démarré
+### Lot F3 ✅ (2026-07-02) — Quick wins frontend (m2, m8) + polling sample différé de F1
 
-F3 (frontend quick wins, incluant désormais le polling `has_sample` différé ci-dessus), F4
-(hygiène : .gitignore, garde `audioop` Python 3.13, code mort). Follow-up frontend : bouton
-"Reprendre la génération" pour les livres FAILED (capacité livrée au Lot C1 mais jamais exposée en
-UI). Détail complet, fichiers concernés et test-first par étape : mémoire
-[[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux
-sources).
+**m2 — `PlayerProvider.play` relisait une vitesse périmée.** `play` était un `useCallback(..., [])`
+(identité stable, volontaire) qui lisait `rate` par fermeture — capturée à 1× au montage et jamais
+mise à jour puisque le tableau de dépendances est vide. Changer de vitesse mettait bien à jour
+l'affichage (`rate` state, correctement propagé au `<select>`), mais tout nouvel appel à `play()`
+(chapitre suivant, relecture) réappliquait 1× sur l'élément `<audio>` réel — écart invisible entre
+ce que l'UI affichait et la vitesse effectivement entendue. Fix : `rateRef` (ref, pas state) tenu à
+jour par `setRate`, lu par `play()` à la place de la fermeture — identité de `play()` toujours
+stable, plus de valeur périmée. **Vérifié en navigateur** (voir ci-dessous) en instrumentant
+`HTMLMediaElement.prototype.playbackRate` : avant le fix cet essai aurait loggé `1` après un
+changement de vitesse suivi d'un replay ; après fix, loggue bien `1.5` puis `2` comme attendu.
+
+**m8 — `buildHueMap`/`buildOrbHueMap` dupliqués à l'identique** entre `PlayerProvider.tsx` et
+`voix/page.tsx` (même angle d'or, même tri, même logique). Extraits vers
+`frontend/src/lib/voiceHues.ts` (nouveau), importés aux deux endroits — garantit qu'ils ne peuvent
+plus diverger silencieusement.
+
+**`.catch` manquant sur `listChapters`** dans `PlayerBar.tsx` : un échec réseau lors du dépliage du
+bandeau lecteur (chargement de la liste des chapitres) produisait une rejection de promesse non
+gérée, sans que `chapters` retombe à un état connu. Ajouté (aligné sur le pattern déjà utilisé pour
+les segments dans `PlayerProvider`). **Vérifié en navigateur** en interceptant `fetch` pour simuler
+un échec réseau : aucune rejection non gérée détectée (`window.addEventListener('unhandledrejection', ...)`),
+pas de crash du bandeau.
+
+**Polling `has_sample` (différé du Lot F1).** `POST /voices/{id}/sample` répond désormais 202
+immédiatement (dispatch Huey, Lot F1) — le bouton "générer un aperçu" (`voix/page.tsx`) attendait
+jusque-là la réponse finale pour effacer son spinner, ce qui ne se produisait plus jamais aussi
+vite. Nouveau `pollForSample(voiceId)` : reinterroge `listVoices()` toutes les 3 s (plafonné à 20
+essais, ~1 min) jusqu'à ce que `has_sample` passe à `true`, câblé sur les deux points de déclenchement
+(clonage automatique + bouton manuel de régénération). Non vérifié en conditions réelles contre le
+vrai worker (aurait mis en concurrence une tâche de sample avec l'analyse de livre réellement en
+cours pendant cette session sur la même file Huey) — logique revue par lecture de code uniquement
+pour cette partie spécifique.
+
+**Fichier partagé avec une fenêtre parallèle.** `voix/page.tsx` contenait déjà un agrandissement
+non committé des orbes (`ORB_SIZE`, composant `VoiceOrb`) fait par une autre fenêtre pendant cette
+tâche — enchevêtré avec mes propres changements dans les mêmes blocs de diff (même fonction
+`buildOrbHueMap` touchée par les deux, mêmes handlers de clic). Impossible à séparer proprement par
+hunk (`git add -p`) contrairement à `requirements.txt` au Lot E. Décidé avec l'utilisateur : les
+deux jeux de changements sont committés ensemble sur ce fichier plutôt que de laisser un état
+partiellement committé.
+
+**Vérification** (pas de harness automatisé frontend) : `npm run build` + `npm run lint` propres ;
+serveur de prévisualisation (frontend seul, backend réel non redémarré) — page `/voix` sans erreur
+console, couleurs d'orbe cohérentes après extraction du helper partagé ; scénario vitesse/replay
+vérifié par instrumentation directe de `HTMLMediaElement.prototype` ; scénario échec réseau
+`listChapters` vérifié par interception de `fetch`.
+
+Fichiers (4) : `frontend/src/lib/voiceHues.ts` (nouveau),
+`frontend/src/components/player/PlayerProvider.tsx`,
+`frontend/src/components/player/PlayerBar.tsx`, `frontend/src/app/voix/page.tsx`.
+
+### Lot F4 (restant) — non démarré
+
+Hygiène : `.gitignore` (`*.log`, `*.pid`, nettoyage des `huey_test_p*.db`/`scriptvox_test_p*.db` à
+la racine), garde `audioop` Python 3.13, code mort résiduel. Follow-up frontend : bouton "Reprendre
+la génération" pour les livres FAILED (capacité livrée au Lot C1 mais jamais exposée en UI). Détail
+complet, fichiers concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]]
+(pas dupliqué ici pour éviter la dérive entre les deux sources).

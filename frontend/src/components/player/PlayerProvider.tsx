@@ -10,7 +10,8 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { SegmentSummary, VoiceSummary, getChapterSegments, listVoices } from "@/lib/api";
+import { SegmentSummary, getChapterSegments, listVoices } from "@/lib/api";
+import { buildHueMap } from "@/lib/voiceHues";
 
 export interface Track {
   title: string;
@@ -19,15 +20,6 @@ export interface Track {
   bookTitle?: string;
   coverUrl?: string;
   chapterPosition?: number;
-}
-
-const GOLDEN_ANGLE = 137.5077;
-
-function buildHueMap(voices: VoiceSummary[]): Map<string, number> {
-  const sortedIds = voices.map((v) => v.id).sort();
-  const map = new Map<string, number>();
-  sortedIds.forEach((id, i) => map.set(id, (i * GOLDEN_ANGLE) % 360));
-  return map;
 }
 
 interface PlayerState {
@@ -63,6 +55,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRateState] = useState(1);
+  const rateRef = useRef(1);
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [voiceHues, setVoiceHues] = useState<Map<string, number>>(new Map());
 
@@ -113,13 +106,12 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio) return;
     audio.src = newTrack.src;
-    audio.playbackRate = rate;
+    audio.playbackRate = rateRef.current;
     audio.play().catch(() => {});
     setTrack(newTrack);
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggle = useCallback(() => {
@@ -144,6 +136,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   const setRate = useCallback((newRate: number) => {
     const audio = audioRef.current;
     if (audio) audio.playbackRate = newRate;
+    rateRef.current = newRate;
     setRateState(newRate);
   }, []);
 
