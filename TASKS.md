@@ -2061,10 +2061,40 @@ mais l'UI n'a pas de bouton dédié pour ce cas — seul « Reprendre l'analyse 
 la ré-analyse est un no-op qui repasse juste le livre à `ANALYZED`). Différé pour ne pas toucher
 `frontend/src/app/books/[id]/page.tsx`, activement modifié par une session parallèle pendant ce lot.
 
-### Lots C2, C3, E, F (restant) — non démarrés
+### Lot C3 ✅ (2026-07-02) — Retry par segment TTS (M6 résiduel)
 
-Assemblage WAV + encodage MP3 en flux (M8 résiduel) ; retry par segment TTS (M6 résiduel) ;
-migrations de schéma (M9) ; mineurs restants (F1 résiduel, F3, F4) ; follow-up frontend reprise
-génération (ci-dessus). Détail complet, fichiers concernés et test-first par étape : mémoire
-[[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux
+**Défaut.** L'analyse LLM a un retry 3× espacé de 30 s (`tasks.py` `_analyze_book`) ; la synthèse
+TTS n'avait NI retry NI persistance partielle — EdgeTTS fait un appel réseau par segment (des
+milliers par roman), et un flake réseau unique sur un segment faisait échouer tout le chapitre.
+Avec le Lot C1 livré juste avant, ce n'est plus catastrophique (le chapitre repart de zéro, mais
+les autres chapitres déjà `DONE` restent intacts) — mais ça reste un gaspillage évitable pour une
+panne réseau typiquement transitoire.
+
+**Fix.** Nouveau `_synthesise_with_retry` (`app/services/audio/chapter.py`), calqué sur le pattern
+LLM existant : 3 essais, délai entre essais **plus court que le retry LLM** (3 s au lieu de 30 s —
+un flake TTS est un blip réseau transitoire, pas une saturation VRAM nécessitant un temps de
+récupération long). Câblé autour du seul `await tts.synthesise(...)` dans `_synthesise_segments` —
+bénéficie donc uniformément à la génération standalone par chapitre ET à la génération pilotée par
+le livre (Lot C1), sans duplication. `should_abort()` reste vérifié une seule fois par segment
+(avant la boucle de retry), pas à chaque tentative — n'interfère pas avec la logique de `/stop`
+du Lot C1.
+
+**Test-first.** `tests/check_phase28.py` (nouveau, 6 sections) : régression happy path (aucun
+retry si tout réussit) ; échec 2× puis succès → chapitre va au bout sans erreur remontée (3 appels
+TTS au total) ; échec 3× → exception remonte, `_generate_chapter_impl` → chapitre `FAILED` avec
+`error_message` ; aucun délai perdu après le dernier essai (ni en succès ni en échec définitif,
+vérifié par comptage des appels à `asyncio.sleep` patché) ; `should_abort()` appelé exactement une
+fois par segment, pas par tentative de retry. **22/22 suites vertes** (`check_phase1` → `check_phase28`,
+`check_phase3.py` revérifié séparément en lecture seule car actuellement sous modification externe
+non liée à ce lot).
+
+Fichiers (2) : `app/services/audio/chapter.py`, `tests/check_phase28.py`. Aucun changement de
+contrat public (`_synthesise_segments` garde exactement sa signature et son type de retour).
+
+### Lots C2, E, F (restant) — non démarrés
+
+Assemblage WAV + encodage MP3 en flux (M8 résiduel) ; migrations de schéma (M9) ; mineurs restants
+(F1 résiduel, F3, F4) ; follow-up frontend reprise génération (ci-dessus). Détail complet, fichiers
+concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici
+pour éviter la dérive entre les deux
 sources).
