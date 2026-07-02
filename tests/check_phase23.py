@@ -116,7 +116,7 @@ class _StopMidLoopLLM:
         self._book_id = book_id
         self.calls = 0
 
-    async def analyze(self, text: str, known_characters=None) -> LLMChapterResult:
+    async def analyze(self, text: str, known_characters=None, language=None) -> LLMChapterResult:
         self.calls += 1
         if self.calls == 1:
             _simulate_user_stop(self._engine, self._book_id)
@@ -196,7 +196,7 @@ class _StopBeforeMergeLLM:
         self.calls = 0
         self.suggest_calls = 0
 
-    async def analyze(self, text: str, known_characters=None) -> LLMChapterResult:
+    async def analyze(self, text: str, known_characters=None, language=None) -> LLMChapterResult:
         self.calls += 1
         name = self._NAMES[self.calls]
         if self.calls == 3:

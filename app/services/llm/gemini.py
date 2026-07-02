@@ -18,6 +18,7 @@ from app.services.llm.base import (
     _parse_merge_json,
     _pre_segment,
 )
+from app.services.llm.language_profiles import resolve_profile
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,10 @@ class GeminiProvider(BaseLLMProvider):
         self._model = settings.gemini_model
 
     async def analyze(
-        self, text: str, known_characters: list[str] | None = None
+        self, text: str, known_characters: list[str] | None = None,
+        language: str | None = None,
     ) -> LLMChapterResult:
-        spans = _pre_segment(text)
+        spans = _pre_segment(text, resolve_profile(language))
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,

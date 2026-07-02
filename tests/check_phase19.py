@@ -113,7 +113,10 @@ class _Recorder2:
     def __init__(self) -> None:
         self.calls: list[list[str] | None] = []
 
-    async def analyze(self, text: str, known_characters: list[str] | None = None) -> LLMChapterResult:
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None,
+        language: str | None = None,
+    ) -> LLMChapterResult:
         self.calls.append(known_characters)
         return LLMChapterResult(
             characters=[CharacterData(name="Bob", description=None, gender=Gender.MALE)],
@@ -197,7 +200,10 @@ class _Recorder3:
     def __init__(self) -> None:
         self.calls: list[list[str] | None] = []
 
-    async def analyze(self, text: str, known_characters: list[str] | None = None) -> LLMChapterResult:
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None,
+        language: str | None = None,
+    ) -> LLMChapterResult:
         self.calls.append(known_characters)
         return LLMChapterResult(
             characters=[CharacterData(name="Bob", description=None, gender=Gender.MALE)],
@@ -285,7 +291,10 @@ else:
             def __init__(self) -> None:
                 self.calls = 0
 
-            async def analyze(self, text: str, known_characters: list[str] | None = None) -> LLMChapterResult:
+            async def analyze(
+                self, text: str, known_characters: list[str] | None = None,
+                language: str | None = None,
+            ) -> LLMChapterResult:
                 self.calls += 1
                 return LLMChapterResult(
                     characters=[CharacterData(name="FreshChar", description=None, gender=Gender.MALE)],

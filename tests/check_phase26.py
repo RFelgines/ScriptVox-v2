@@ -94,7 +94,7 @@ class _OneMaleCharacterLLM:
     """Renvoie un unique personnage MALE, aucun dialogue -- suffisant pour exercer
     assign_voices sans dépendre du contenu réel de la fixture EPUB."""
 
-    async def analyze(self, text: str, known_characters=None) -> LLMChapterResult:
+    async def analyze(self, text: str, known_characters=None, language=None) -> LLMChapterResult:
         return LLMChapterResult(
             characters=[CharacterData(name="Hero", description=None, gender=Gender.MALE)],
             segments=[],

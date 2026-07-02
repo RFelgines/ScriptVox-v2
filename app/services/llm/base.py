@@ -8,6 +8,7 @@ from typing import TypeVar
 
 from app.core.enums import AgeCategory, Gender, SegmentType
 from app.core.exceptions import LLMParsingError
+from app.services.llm.language_profiles import FR_PROFILE, LanguageProfile
 
 _logger = logging.getLogger(__name__)
 _E = TypeVar("_E", bound=Enum)
@@ -153,7 +154,8 @@ class MergeSuggestion:
 class BaseLLMProvider(ABC):
     @abstractmethod
     async def analyze(
-        self, text: str, known_characters: list[str] | None = None
+        self, text: str, known_characters: list[str] | None = None,
+        language: str | None = None,
     ) -> LLMChapterResult: ...
 
     @abstractmethod
@@ -163,45 +165,10 @@ class BaseLLMProvider(ABC):
 
 
 # ── Pre-segmentation (label-based protocol, ARCHITECTURE.md §2.7) ────────────────
-
-_DIALOGUE_RE = re.compile(
-    "|".join((
-        r"«[^»]*»",              # guillemets français
-        r"“[^”]*”",              # guillemets typographiques
-        r'"[^"]*"',              # guillemets droits
-        r"^[ \t]*[—–―][^\n]*",   # ligne ouverte par un tiret cadratin (dialogue FR)
-    )),
-    re.MULTILINE,
-)
-
-# Verbes d'incise courants (pour le cas « verbe + nom propre » : « dit Harry »).
-# Liste curée, volontairement non exhaustive — voir _split_incise (dégradation bornée).
-# Apostrophe tolérante : l'EPUB source utilise la typographique (’ U+2019), pas la droite (').
-_APOS = r"['’]"
-_INCISE_VERBS = (
-    r"dit|dirent|répondit|répondirent|demanda|demandèrent|murmura|cria|crièrent|"
-    r"reprit|ajouta|lança|soupira|songea|hurla|chuchota|gronda|rétorqua|répliqua|"
-    r"déclara|poursuivit|continua|conclut|fit|gémit|objecta|protesta|insista|"
-    r"expliqua|affirma|marmonna|balbutia|susurra|rugit|beugla|bredouilla|grommela|"
-    r"renchérit|coupa|trancha|s" + _APOS + r"écria|s" + _APOS + r"exclama|"
-    r"s" + _APOS + r"étonna|s" + _APOS + r"enquit"
-)
-
-# Une incise est repérée par l'inversion verbe-sujet, signal le plus fiable du français :
-#   - clitique : « dit-il », « dit-elle », « demanda-t-elle », « s'écria-t-il »…
-#   - verbe d'incise curé + nom propre : « dit Harry », « répondit Mrs Dursley »…
-# On ne l'extrait QUE si elle est terminale et propre (aucune virgule après le verbe) :
-# « …, répondit-il, mais je viendrai » = dialogue repris → NON splitté (borné, cf. tests).
-_INCISE_VERB = (
-    r"(?:"
-    r"(?:[a-zà-ÿ]{1,3}" + _APOS + r")?\w+(?:-t)?-(?:il|elle|ils|elles|on|je)"   # inversion clitique
-    r"|(?:" + _INCISE_VERBS + r")\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]*"           # verbe d'incise + nom propre
-    r")"
-)
-_INCISE_RE = re.compile(
-    r"(?P<dlg>.*[,?!…])(?P<inc>\s+" + _INCISE_VERB + r"[^,]*)$",
-    re.UNICODE,
-)
+# Les règles de dialogue/incise dépendent de la langue -- voir language_profiles.py.
+# FR_PROFILE est le défaut historique (ScriptVox conçu/testé en français) : les
+# fonctions ci-dessous prennent un profil optionnel, défaut FR_PROFILE, pour ne
+# rien changer aux appels existants qui ne connaissent pas encore la langue.
 
 
 @dataclass
@@ -209,6 +176,7 @@ class _Span:
     index: int
     text: str
     is_dialogue: bool
+    incise_character: str | None = None
 
 
 def _is_emdash(text: str) -> bool:
@@ -216,35 +184,45 @@ def _is_emdash(text: str) -> bool:
     return text.lstrip()[:1] in ("—", "–", "―")
 
 
-def _split_incise(span_text: str) -> list[tuple[str, bool]]:
-    """Scinde une réplique en tiret cadratin en ``[(dialogue, True), (incise, False)]``.
+def _split_incise(
+    span_text: str, profile: LanguageProfile = FR_PROFILE,
+) -> list[tuple[str, bool, str | None]]:
+    """Scinde une réplique en tiret cadratin en
+    ``[(dialogue, True, incise_character), (incise, False, None)]``.
 
     L'incise (« dit-elle froidement ») doit être lue par le narrateur, pas par la voix
     du personnage. Découpe byte-exact : ``dialogue + incise == span_text``. Si aucune
-    incise terminale propre n'est détectée, renvoie le span inchangé (``[(span_text, True)]``)
-    — dégradation bornée : jamais de crash, jamais de mot perdu (cf. §2.7).
+    incise terminale propre n'est détectée, renvoie le span inchangé
+    (``[(span_text, True, None)]``) — dégradation bornée : jamais de crash, jamais de
+    mot perdu (cf. §2.7). Quand l'incise nomme explicitement le locuteur (pas un clitique),
+    ``incise_character`` porte ce nom, utilisé par ``_parse_llm_json`` pour une attribution
+    déterministe. ``profile.incise_re`` est censé être non-None ici (appelant garanti,
+    voir _pre_segment) — un profil sans incise_re n'atteint jamais cette fonction.
     """
-    match = _INCISE_RE.match(span_text)
+    match = profile.incise_re.match(span_text)
     if not match:
-        return [(span_text, True)]
+        return [(span_text, True, None)]
     dlg, inc = match.group("dlg"), match.group("inc")
     if not dlg.strip() or not inc.strip():
-        return [(span_text, True)]
-    return [(dlg, True), (inc, False)]
+        return [(span_text, True, None)]
+    name_match = profile.explicit_name_re.search(inc) if profile.explicit_name_re else None
+    incise_character = name_match.group(1) if name_match else None
+    return [(dlg, True, incise_character), (inc, False, None)]
 
 
-def _pre_segment(text: str) -> list[_Span]:
+def _pre_segment(text: str, profile: LanguageProfile = FR_PROFILE) -> list[_Span]:
     """Découpe *text* en spans ordonnés narration/dialogue, byte-exact (zéro mot perdu).
 
     Invariant : ``"".join(s.text for s in _pre_segment(t)) == t`` et index 1-based contigus.
-    Le type (dialogue vs narration) est déterminé ici via les délimiteurs ; les répliques
-    en tiret cadratin sont en plus scindées de leur incise (_split_incise). Le LLM
+    Le type (dialogue vs narration) est déterminé ici via les délimiteurs du *profile*
+    (langue-dépendant, voir language_profiles.py) ; les répliques en tiret cadratin sont
+    en plus scindées de leur incise (_split_incise) si le profil définit incise_re. Le LLM
     n'attribue qu'un locuteur aux spans de dialogue (cf. §2.7). Un dialogue non
     détecté reste narration (lu par le narrateur) — jamais de crash, jamais de perte.
     """
     raw: list[tuple[str, bool]] = []
     pos = 0
-    for match in _DIALOGUE_RE.finditer(text):
+    for match in profile.dialogue_re.finditer(text):
         start, end = match.span()
         if start > pos:
             raw.append((text[pos:start], False))
@@ -255,16 +233,18 @@ def _pre_segment(text: str) -> list[_Span]:
     if not raw:
         raw.append((text, False))
 
-    # Extraction de l'incise sur les répliques en tiret cadratin uniquement
-    # (en guillemets, l'incise tombe déjà hors « », rien à faire).
-    pieces: list[tuple[str, bool]] = []
+    # Extraction de l'incise sur les répliques en tiret cadratin uniquement (en
+    # guillemets, l'incise tombe déjà hors « », rien à faire) -- et seulement si le
+    # profil définit une règle d'incise (ex. EN_PROFILE n'en a pas, cf. commentaire
+    # language_profiles.py).
+    pieces: list[tuple[str, bool, str | None]] = []
     for seg_text, is_dialogue in raw:
-        if is_dialogue and _is_emdash(seg_text):
-            pieces.extend(_split_incise(seg_text))
+        if is_dialogue and profile.incise_re is not None and _is_emdash(seg_text):
+            pieces.extend(_split_incise(seg_text, profile))
         else:
-            pieces.append((seg_text, is_dialogue))
+            pieces.append((seg_text, is_dialogue, None))
 
-    return [_Span(i, t, d) for i, (t, d) in enumerate(pieces, start=1)]
+    return [_Span(i, t, d, n) for i, (t, d, n) in enumerate(pieces, start=1)]
 
 
 def _build_user_prompt(spans: list[_Span], known_characters: list[str] | None = None) -> str:
@@ -381,6 +361,45 @@ def _segment_text(span: "_Span") -> str:
     return text.strip()
 
 
+# ── Réparation d'attribution (spike 2026-07-02) ───────────────────────────────
+# En conditions réelles (run complet HP, qwen3:1.7b ET qwen3:8b), une large part des
+# attributions rejetées n'est pas une hallucination mais une incohérence interne du LLM :
+# soit une variante de nom (« Percy » / « Percy Weasley », « Rogue » / « Professeur Rogue »),
+# soit un personnage cité en attribution mais absent de son propre tableau characters[]
+# (« Hagrid » omis alors qu'il est attribué 15+ fois dans le même livre). Les deux cas
+# sont réparables déterministiquement, sans second appel LLM.
+
+_PROPER_NOUN_RE = re.compile(r"^[A-ZÀ-Ý][\wÀ-ÿ'’-]*(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]*)*$")
+
+
+def _looks_like_proper_noun(name: str) -> bool:
+    """Vrai si chaque mot commence par une majuscule (« Hagrid », « Sir Nicholas »).
+
+    Rejette les pseudo-personnages descriptifs que le LLM invente parfois en attribution
+    (« une petite voix », « tout le monde », « boa constrictor ») — dégradation bornée :
+    on préfère perdre une attribution plutôt que polluer le casting d'un faux personnage.
+    """
+    return bool(_PROPER_NOUN_RE.match(name.strip()))
+
+
+def _resolve_character_name(name: str, known_names: set[str]) -> str | None:
+    """Résout un nom d'attribution vers un personnage déjà connu, au-delà de l'égalité stricte.
+
+    Correspondance floue par inclusion de mots dans les deux sens (« Percy » ⊆ « Percy
+    Weasley », « Dumbledore » ⊆ « Albus Dumbledore ») — jamais une similarité générique.
+    Retourne toujours le nom déjà présent dans ``known_names``, jamais la variante brute,
+    pour ne jamais introduire de doublon de personnage.
+    """
+    if name in known_names:
+        return name
+    name_tokens = set(name.lower().split())
+    for known in known_names:
+        known_tokens = set(known.lower().split())
+        if name_tokens <= known_tokens or known_tokens <= name_tokens:
+            return known
+    return None
+
+
 def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
     """Parse la réponse LLM label-based ``{characters, attributions}`` et reconstruit
     les ``SegmentData`` depuis les spans pré-segmentés (cf. ARCHITECTURE.md §2.7)."""
@@ -442,8 +461,21 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
                 )
                 continue
             name = a.get("character_name")
-            if name and name in known_names:
+            resolved = _resolve_character_name(name, known_names) if name else None
+            if resolved:
+                attr_map[index] = resolved
+            elif name and _looks_like_proper_noun(name):
+                # Le LLM attribue à un personnage qu'il a lui-même omis de déclarer dans
+                # characters[] (incohérence interne observée en conditions réelles) :
+                # on l'enregistre plutôt que de perdre l'attribution (cf. note ci-dessus).
+                characters.append(CharacterData(name=name, description=None, gender=Gender.UNKNOWN))
+                known_names.add(name)
                 attr_map[index] = name
+                _logger.warning(
+                    "_parse_llm_json: attribution index=%s character=%r absent de characters[], "
+                    "auto-enregistré (nom propre plausible)",
+                    index, name,
+                )
             else:
                 _logger.warning(
                     "_parse_llm_json: attribution index=%s character=%r not in characters list, "
@@ -463,6 +495,14 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
             pos += 1
             seg_type = SegmentType.DIALOGUE if span.is_dialogue else SegmentType.NARRATION
             char_name = attr_map.get(span.index) if span.is_dialogue else None
+            # Incise à nom propre explicite (« dit Dumbledore ») = attribution certaine,
+            # écrite noir sur blanc dans le texte : prioritaire sur la réponse du LLM.
+            # Ne s'applique que si le nom résout vers un personnage connu du LLM (sinon
+            # dégradation bornée : on garde l'attribution du LLM, cf. §2.7).
+            if span.is_dialogue and span.incise_character:
+                resolved_incise = _resolve_character_name(span.incise_character, known_names)
+                if resolved_incise:
+                    char_name = resolved_incise
             emotion = emotion_map.get(span.index) if span.is_dialogue else None
             segments.append(SegmentData(
                 position=pos,

@@ -45,6 +45,10 @@ async def _analyze_book(
 
     chapter_ids = [cid for cid, _ in chapter_data]
 
+    with Session(engine) as session:
+        _book = session.get(Book, book_id)
+        book_language = _book.language if _book else None
+
     # Idempotency: wipe any prior LLM results for the chapters we're (re)analyzing.
     # On resume, Characters are preserved (already-known cast from earlier chapters).
     with Session(engine) as session:
@@ -81,7 +85,10 @@ async def _analyze_book(
         last_exc: Exception | None = None
         for attempt in range(_MAX_RETRIES):
             try:
-                chunk_results = [await provider.analyze(chunk, known) for chunk in chunks]
+                chunk_results = [
+                    await provider.analyze(chunk, known, language=book_language)
+                    for chunk in chunks
+                ]
                 merged = _merge_chunk_results(chunk_results)
                 if attempt > 0:
                     logger.info(
@@ -216,6 +223,20 @@ def _release_qwen_gpu(provider) -> None:
         pass
 
 
+def _make_chapter_stop_checker(engine, chapter_id: int) -> Callable[[], bool]:
+    """Mirrors _make_book_stop_checker but polls Chapter.cancel_requested — used by
+    standalone (non book-driven) chapter generation, which has no Book.status to
+    watch. Fresh Session per call, same reasoning as the book checker."""
+    from app.models import Chapter
+
+    def _should_abort() -> bool:
+        with Session(engine) as s:
+            c = s.get(Chapter, chapter_id)
+            return c is None or c.cancel_requested
+
+    return _should_abort
+
+
 def _make_book_stop_checker(engine, book_id: int) -> Callable[[], bool]:
     """Returns a zero-arg callable reporting whether /stop was triggered for this
     book. Opens a FRESH short-lived Session on every call, never reused across
@@ -279,6 +300,7 @@ async def _generate_chapter_async(
                 chapter = session.get(Chapter, chapter_id)
                 if chapter:
                     chapter.status = ChapterStatus.PENDING
+                    chapter.cancel_requested = False
                     session.add(chapter)
                     session.commit()
             return False
@@ -655,16 +677,17 @@ async def _synthesise_chapter_worker(
 
 def _generate_chapter_impl(chapter_id: int) -> None:
     """Huey-facing entry point for a standalone (non book-driven) chapter
-    generation — /stop doesn't apply here (only book-level GENERATING is
-    stop-aware, since standalone chapter generation never touches Book.status),
-    so should_abort is never passed. Swallows the exception _generate_chapter_async
-    already turned into Chapter.FAILED, matching the pre-existing contract of never
-    letting an exception propagate out of a Huey task."""
+    generation. Stop-aware via Chapter.cancel_requested (polled between segments,
+    see _make_chapter_stop_checker) — set by POST /books/{id}/chapters/{pos}/stop.
+    Swallows the exception _generate_chapter_async already turned into
+    Chapter.FAILED, matching the pre-existing contract of never letting an
+    exception propagate out of a Huey task."""
     from app.core.db import get_engine
 
     engine = get_engine()
+    should_abort = _make_chapter_stop_checker(engine, chapter_id)
     try:
-        asyncio.run(_generate_chapter_async(chapter_id, engine))
+        asyncio.run(_generate_chapter_async(chapter_id, engine, should_abort=should_abort))
     except Exception:
         pass  # already persisted to Chapter.FAILED inside _generate_chapter_async
 

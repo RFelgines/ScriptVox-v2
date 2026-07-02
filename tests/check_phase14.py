@@ -131,7 +131,10 @@ class _RecordingProvider:
     def __init__(self) -> None:
         self.calls: list[list[str] | None] = []
 
-    async def analyze(self, text: str, known_characters: list[str] | None = None) -> LLMChapterResult:
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None,
+        language: str | None = None,
+    ) -> LLMChapterResult:
         self.calls.append(known_characters)
         return LLMChapterResult(
             characters=[CharacterData(name="Mr Dursley", description=None, gender=Gender.MALE)],
@@ -186,7 +189,10 @@ with Session(_engine_b1) as _session_b1:
 class _EmotionProvider:
     """Renvoie 1 narration (sans emotion) + 1 dialogue (avec emotion)."""
 
-    async def analyze(self, text: str, known_characters: list[str] | None = None) -> LLMChapterResult:
+    async def analyze(
+        self, text: str, known_characters: list[str] | None = None,
+        language: str | None = None,
+    ) -> LLMChapterResult:
         return LLMChapterResult(
             characters=[CharacterData(name="Bob", description=None, gender=Gender.MALE)],
             segments=[
