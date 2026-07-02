@@ -538,7 +538,7 @@ def _generate_book_impl(book_id: int) -> None:
     from app.core.db import get_engine
     from app.core.enums import BookStatus, ChapterStatus
     from app.models import Book, Chapter
-    from app.services.audio.assembler import assemble_wav_from_files, wav_to_mp3
+    from app.services.audio.assembler import assemble_wav_from_files, wav_to_mp3_streaming
 
     engine = get_engine()
 
@@ -603,13 +603,13 @@ def _generate_book_impl(book_id: int) -> None:
             from pathlib import Path as _Path
             audio_path = str(_Path(source_path).with_suffix(".wav"))
             assemble_wav_from_files(chapter_wav_paths, audio_path)
-            # Final MP3 encode still loads the whole book WAV in memory (Lot C2,
-            # deferred) — the per-chapter synthesis loop is the part that used to
-            # hold ~3-4 GB for a full novel, and that part is now bounded to one
-            # chapter, which is the fix this lot targets.
-            mp3_bytes = wav_to_mp3(_Path(audio_path).read_bytes())
+            # Both steps are now disk-to-disk, streamed in bounded chunks (Lot C2,
+            # audit 2026-07-02): assembling the book WAV from per-chapter WAVs
+            # above, and encoding it to MP3 here — neither holds more than one
+            # chapter's / one chunk's worth of PCM in memory at a time, instead of
+            # the whole book (~1.6 GB of PCM for a 10-hour novel).
             mp3_file = _Path(audio_path).with_suffix(".mp3")
-            mp3_file.write_bytes(mp3_bytes)
+            wav_to_mp3_streaming(audio_path, mp3_file)
             mp3_path = str(mp3_file)
 
         with Session(engine) as session:

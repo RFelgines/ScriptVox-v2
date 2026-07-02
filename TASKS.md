@@ -2091,10 +2091,45 @@ non liée à ce lot).
 Fichiers (2) : `app/services/audio/chapter.py`, `tests/check_phase28.py`. Aucun changement de
 contrat public (`_synthesise_segments` garde exactement sa signature et son type de retour).
 
-### Lots C2, E, F (restant) — non démarrés
+### Lot C2 ✅ (2026-07-02) — Encodage MP3 en flux (M8 résiduel, Lot C entièrement clos)
 
-Assemblage WAV + encodage MP3 en flux (M8 résiduel) ; migrations de schéma (M9) ; mineurs restants
-(F1 résiduel, F3, F4) ; follow-up frontend reprise génération (ci-dessus). Détail complet, fichiers
-concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici
-pour éviter la dérive entre les deux
+**Défaut.** L'assemblage WAV (`assemble_wav_from_files`, Lot C1) était déjà disque→disque, un
+chapitre à la fois. Mais `_generate_book_impl` relisait ensuite **tout** `book.wav` en RAM d'un
+coup (`Path.read_bytes()`) pour l'encodage MP3 — pour un roman de ~10 h, ~1,6 Go de PCM chargés
+d'un bloc, exactement le pic mémoire que C1 visait à éliminer, déplacé à cette dernière étape.
+Documenté comme limite résiduelle assumée dans le résumé du Lot C1.
+
+**Fix.** Nouvelle `wav_to_mp3_streaming(wav_path, output_path, chunk_frames=1_000_000)`
+(`assembler.py`) : lit le WAV par blocs de ~2 Mo (~45 s d'audio à 22050 Hz), encode chaque bloc via
+`lameenc.Encoder.encode()` (encodeur en flux natif), écrit directement sur disque. **Vérifié
+empiriquement** que `lameenc` produit un flux **strictement identique octet pour octet** entre un
+encodage en un seul appel et un encodage en plusieurs blocs, tant que chaque bloc est aligné sur
+une frontière d'échantillon — garanti par `wave.readframes()`, qui ne renvoie jamais une frame
+partielle. `wav_to_mp3(bytes)` (ancienne fonction, petits buffers) conservée telle quelle — reste
+utile et testée indépendamment ; seul `_generate_book_impl` bascule sur la variante en flux.
+
+**Test-first.** `tests/check_phase29.py` (nouveau, 7 sections) : sortie identique octet pour octet
+à l'ancien `wav_to_mp3(bytes)` (cas simple ET cas multi-blocs forcé avec `chunk_frames=137` sur
+5000 frames, ~37 blocs — prouve que le découpage est réellement exercé, pas juste "1 bloc qui
+contient tout par accident") ; WAV plus petit qu'un bloc → fonctionne (1 seul bloc interne) ;
+mêmes erreurs de validation que l'ancienne fonction (8-bit, WAV vide) ; intégration
+`_generate_book_impl` avec **espion** sur `wav_to_mp3_streaming` prouvant que le nouveau chemin est
+réellement emprunté (pas juste que le résultat final est correct — confirmé rouge avant le câblage
+dans `tasks.py` via un `git stash` ciblé : 0 appel espionné avant, 1 après). **22/22 suites vertes.**
+
+Fichiers (3) : `app/services/audio/assembler.py`, `app/workers/tasks.py`, `tests/check_phase29.py`.
+Aucun changement de contrat public.
+
+**Pic mémoire non mesuré en test** (portabilité fiable impossible sans dépendance supplémentaire,
+cf. plan) — la preuve est structurelle (chunking + `lameenc` streaming natif), à confirmer au
+premier run réel sur un livre volumineux.
+
+**Lot C entièrement clos** (C0 décision + C1 unification + C3 retry + C2 flux MP3, tous livrés le
+2026-07-02).
+
+### Lots E, F (restant) — non démarrés
+
+Migrations de schéma (M9) ; mineurs restants (F1 résiduel, F3, F4) ; follow-up frontend reprise
+génération (Lot C1 ci-dessus). Détail complet, fichiers concernés et test-first par étape : mémoire
+[[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux
 sources).

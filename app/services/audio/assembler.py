@@ -104,3 +104,61 @@ def wav_to_mp3(wav_bytes: bytes, bit_rate: int = 128) -> bytes:
     enc.set_channels(n_channels)
     enc.set_quality(2)
     return bytes(enc.encode(pcm) + enc.flush())
+
+
+# Frames per chunk when streaming an encode: 1,000,000 frames ≈ 2 MB of 16-bit
+# mono PCM ≈ 45 s of audio at 22050 Hz — enough to keep syscall/lameenc-call
+# overhead negligible on a full novel, small enough that peak memory never
+# approaches the whole book (audit 2026-07-02, Lot C2 / finding M8 residual).
+_MP3_STREAM_CHUNK_FRAMES = 1_000_000
+
+
+def wav_to_mp3_streaming(
+    wav_path: str | Path, output_path: str | Path,
+    bit_rate: int = 128, chunk_frames: int = _MP3_STREAM_CHUNK_FRAMES,
+) -> Path:
+    """Encode a WAV file to MP3 streaming disk-to-disk, in fixed-size PCM chunks —
+    at most one chunk's worth of PCM held in memory at a time, instead of the
+    whole file (companion to wav_to_mp3, which is fine for small in-memory
+    buffers but was the last RAM-unbounded step in book generation: C1 already
+    made WAV assembly disk-to-disk, but _generate_book_impl still read the
+    entire assembled book.wav into memory here — up to ~1.6 GB of PCM for a
+    10-hour novel).
+
+    lameenc.Encoder.encode() is a proper streaming encoder: calling it with N
+    successive sample-aligned PCM chunks produces byte-identical output to a
+    single call with the whole PCM buffer (verified empirically) — wave's
+    readframes() always returns whole frames, so this chunking is always
+    sample-aligned and the result is never observably different from
+    wav_to_mp3(wav_bytes)."""
+    import lameenc  # lazy: keeps assembler importable before lameenc is installed
+
+    output_path = Path(output_path)
+    with wave.open(str(wav_path), "rb") as w:
+        n_channels = w.getnchannels()
+        sampwidth = w.getsampwidth()
+        framerate = w.getframerate()
+        n_frames = w.getnframes()
+        if n_frames == 0:
+            raise ValueError("WAV has no audio frames")
+        if sampwidth != 2:
+            raise ValueError(
+                f"wav_to_mp3_streaming requires 16-bit PCM (sampwidth=2), got sampwidth={sampwidth}"
+            )
+
+        enc = lameenc.Encoder()
+        enc.set_bit_rate(bit_rate)
+        enc.set_in_sample_rate(framerate)
+        enc.set_channels(n_channels)
+        enc.set_quality(2)
+
+        with open(output_path, "wb") as out:
+            remaining = n_frames
+            while remaining > 0:
+                to_read = min(chunk_frames, remaining)
+                pcm_chunk = w.readframes(to_read)
+                remaining -= to_read
+                out.write(bytes(enc.encode(pcm_chunk)))
+            out.write(bytes(enc.flush()))
+
+    return output_path
