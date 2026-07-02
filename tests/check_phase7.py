@@ -1102,6 +1102,34 @@ with TestClient(app) as _tc:
     )
 ok(f"GET /settings -> {_r33_data}")
 
+section("GET /settings: preferred_tts_provider absent par défaut (null)")
+
+with TestClient(app) as _tc:
+    _r34 = _tc.get("/settings")
+    assert _r34.status_code == 200, f"Expected 200, got {_r34.status_code} ({_r34.text})"
+    assert _r34.json()["preferred_tts_provider"] is None, f"got {_r34.json()}"
+ok("preferred_tts_provider == None avant tout PATCH")
+
+section("PATCH /settings: persiste la préférence, rejette une valeur invalide")
+
+with TestClient(app) as _tc:
+    _r35 = _tc.patch("/settings", json={"preferred_tts_provider": "edgetts"})
+    assert _r35.status_code == 200, f"Expected 200, got {_r35.status_code} ({_r35.text})"
+    assert _r35.json()["preferred_tts_provider"] == "edgetts", f"got {_r35.json()}"
+
+    _r36 = _tc.get("/settings")
+    assert _r36.json()["preferred_tts_provider"] == "edgetts", (
+        f"la préférence doit survivre à une nouvelle requête, got {_r36.json()}"
+    )
+
+    _r37b = _tc.patch("/settings", json={"preferred_tts_provider": "not_a_provider"})
+    assert _r37b.status_code == 422, f"Expected 422, got {_r37b.status_code} ({_r37b.text})"
+
+    _r38 = _tc.patch("/settings", json={"preferred_tts_provider": None})
+    assert _r38.status_code == 200, f"Expected 200, got {_r38.status_code} ({_r38.text})"
+    assert _r38.json()["preferred_tts_provider"] is None, f"got {_r38.json()}"
+ok("PATCH persiste, 422 sur valeur invalide, remise à None supportée")
+
 app.dependency_overrides.clear()
 
 

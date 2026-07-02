@@ -27,6 +27,7 @@ export interface BookSummary {
 
 export interface AppSettings {
   default_tts_provider: string;
+  preferred_tts_provider: string | null;
   available_tts_providers: string[];
 }
 
@@ -169,6 +170,18 @@ export function patchBookPublishedAt(
 export async function getAppSettings(): Promise<AppSettings> {
   const res = await fetch(`${API_URL}/settings`);
   if (!res.ok) throw new Error(`GET /settings failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateAppSettings(
+  patch: Partial<Pick<AppSettings, "preferred_tts_provider">>
+): Promise<AppSettings> {
+  const res = await fetch(`${API_URL}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`PATCH /settings failed: ${res.status}`);
   return res.json();
 }
 

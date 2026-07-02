@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AppSetting,
     Book,
     Chapter,
     Character,
@@ -7,4 +8,12 @@ from app.models.entities import (
     Voice,
 )
 
-__all__ = ["Book", "Chapter", "Character", "CharacterMergeSuggestion", "Segment", "Voice"]
+__all__ = [
+    "AppSetting",
+    "Book",
+    "Chapter",
+    "Character",
+    "CharacterMergeSuggestion",
+    "Segment",
+    "Voice",
+]

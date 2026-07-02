@@ -33,7 +33,6 @@ import {
   voiceSampleUrl,
 } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
-import ChapterTranscript from "@/components/ChapterTranscript";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Button from "@/components/ui/Button";
 import Alert from "@/components/ui/Alert";
@@ -56,7 +55,7 @@ export default function BookDetailPage({
 }) {
   const { id } = use(params);
   const bookId = Number(id);
-  const { play, track } = usePlayer();
+  const { play } = usePlayer();
 
   const [book, setBook] = useState<BookSummary | null>(null);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -798,10 +797,6 @@ export default function BookDetailPage({
                 </div>
               )}
             </section>
-          )}
-
-          {track?.bookId === book.id && track.chapterPosition !== undefined && (
-            <ChapterTranscript bookId={book.id} chapterPosition={track.chapterPosition} />
           )}
 
           <section className="mt-8">

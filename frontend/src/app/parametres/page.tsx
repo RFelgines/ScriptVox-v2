@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppStatus, getAppStatus } from "@/lib/api";
+import { AppSettings, AppStatus, getAppSettings, getAppStatus, updateAppSettings } from "@/lib/api";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
 
@@ -54,18 +54,32 @@ function ProviderCard({
 
 export default function ParametresPage() {
   const [status, setStatus] = useState<AppStatus | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    getAppStatus()
-      .then((s) => {
+    Promise.all([getAppStatus(), getAppSettings()])
+      .then(([s, cfg]) => {
         setStatus(s);
+        setSettings(cfg);
         setError(null);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  function handlePreferredProviderChange(value: string) {
+    if (!settings) return;
+    const preferred = value === "" ? null : value;
+    setSettings({ ...settings, preferred_tts_provider: preferred });
+    setSaving(true);
+    updateAppSettings({ preferred_tts_provider: preferred })
+      .then(setSettings)
+      .catch((e) => setError(String(e)))
+      .finally(() => setSaving(false));
+  }
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
@@ -102,6 +116,35 @@ export default function ParametresPage() {
             status={status.tts.status}
             detail={status.tts.detail}
           />
+
+          {settings && (
+            <div className="rounded-card border border-border bg-surface p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                Modèle TTS préféré
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <select
+                  value={settings.preferred_tts_provider ?? ""}
+                  onChange={(e) => handlePreferredProviderChange(e.target.value)}
+                  disabled={saving}
+                  className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-60"
+                  aria-label="Modèle TTS préféré"
+                >
+                  <option value="">Par défaut ({settings.default_tts_provider})</option>
+                  {settings.available_tts_providers.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                {saving && <span className="text-xs text-muted">Enregistrement…</span>}
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                Préférence enregistrée, pas encore appliquée à la génération — le moteur réel reste
+                celui choisi par livre (page Casting) ou la valeur par défaut du serveur.
+              </p>
+            </div>
+          )}
 
           <div className="rounded-card border border-border bg-surface p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">

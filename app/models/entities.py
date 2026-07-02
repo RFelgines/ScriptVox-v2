@@ -137,3 +137,16 @@ class Voice(SQLModel, table=True):
     # audio de référence pour une voix CLONED.
     reference_audio_path: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AppSetting(SQLModel, table=True):
+    __tablename__ = "app_setting"
+
+    # Table singleton (une seule ligne, id=1 toujours) -- pas de vraie clé
+    # métier, juste un point d'ancrage pour des préférences app-wide qui ne
+    # justifient pas encore une table dédiée par réglage.
+    id: int = Field(default=1, primary_key=True)
+    # Préférence affichable/éditable en Paramètres. PAS ENCORE consultée par
+    # le pipeline de génération (qui reste sur Settings.tts_provider, .env) --
+    # câblage réel différé à une étape séparée.
+    preferred_tts_provider: Optional[str] = None

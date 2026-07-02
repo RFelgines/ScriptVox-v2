@@ -1,9 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { ChapterSummary, chapterAudioUrl, listChapters } from "@/lib/api";
 import { usePlayer } from "./PlayerProvider";
+import VoiceOrb from "@/components/VoiceOrb";
+import ChapterTranscript from "@/components/ChapterTranscript";
 
 const RATES = [0.5, 1, 1.25, 1.5, 2] as const;
 
@@ -270,6 +271,12 @@ export default function PlayerBar() {
               })}
             </ul>
           )}
+
+          {bookId && track.chapterPosition !== undefined && (
+            <div className="w-full max-w-md">
+              <ChapterTranscript bookId={bookId} chapterPosition={track.chapterPosition} />
+            </div>
+          )}
         </div>
       )}
 
@@ -301,7 +308,7 @@ export default function PlayerBar() {
         {!expanded ? (
           <button
             onClick={() => setExpanded(true)}
-            className="flex min-w-0 items-center gap-2 justify-self-start text-left hover:text-muted"
+            className="flex w-full min-w-0 items-center gap-2 text-left hover:text-muted"
             title={track.title}
           >
             {track.coverUrl ? (
@@ -317,18 +324,18 @@ export default function PlayerBar() {
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
               <path d="M6 4l4 4-4 4" />
             </svg>
-            <span className="truncate text-sm font-medium">{track.title}</span>
+            <span className="min-w-0 truncate text-sm font-medium">{track.title}</span>
           </button>
         ) : (
           <button
             onClick={() => setExpanded(false)}
-            className="flex min-w-0 items-center gap-1.5 justify-self-start text-left text-sm font-medium hover:text-muted"
+            className="flex w-full min-w-0 items-center gap-1.5 text-left text-sm font-medium hover:text-muted"
             title={track.title}
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0 rotate-90">
               <path d="M6 4l4 4-4 4" />
             </svg>
-            <span className="truncate">{track.title}</span>
+            <span className="min-w-0 truncate">{track.title}</span>
           </button>
         )}
 
@@ -410,14 +417,11 @@ export default function PlayerBar() {
           {currentSegment !== null && (
             <div className="hidden sm:flex items-center gap-1.5 overflow-hidden">
               {currentSegment.voice_id && (
-                <div
-                  style={{
-                    "--orb-c1": `hsl(${voiceHues.get(currentSegment.voice_id) ?? 0} 91% 65%)`,
-                    "--orb-c2": `hsl(${((voiceHues.get(currentSegment.voice_id) ?? 0) + 59) % 360} 81% 60%)`,
-                    "--orb-c3": `hsl(${((voiceHues.get(currentSegment.voice_id) ?? 0) + 347) % 360} 90% 66%)`,
-                  } as CSSProperties}
-                  className="voice-orb h-6 w-6 shrink-0 rounded-full shadow"
-                  aria-hidden="true"
+                <VoiceOrb
+                  hue={voiceHues.get(currentSegment.voice_id) ?? 0}
+                  size={24}
+                  className="shadow"
+                  active={isPlaying}
                 />
               )}
               <div className="flex flex-col leading-tight overflow-hidden">

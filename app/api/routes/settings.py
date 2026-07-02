@@ -1,22 +1,68 @@
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, func, select
 
 from app.config import VALID_TTS_PROVIDERS, Settings, get_settings
 from app.core.db import get_session
 from app.core.enums import VoiceKind
-from app.models.entities import Voice
-from app.schemas.settings import ProviderStatus, SettingsResponse, StatusResponse
+from app.models.entities import AppSetting, Voice
+from app.schemas.settings import (
+    ProviderStatus,
+    SettingsResponse,
+    SettingsUpdate,
+    StatusResponse,
+)
 
 router = APIRouter()
 
 
+def _get_or_create_app_setting(session: Session) -> AppSetting:
+    row = session.get(AppSetting, 1)
+    if row is None:
+        row = AppSetting(id=1)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+    return row
+
+
 @router.get("", response_model=SettingsResponse)
-def get_app_settings(settings: Settings = Depends(get_settings)) -> SettingsResponse:
+def get_app_settings(
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> SettingsResponse:
+    row = _get_or_create_app_setting(session)
     return SettingsResponse(
         default_tts_provider=settings.tts_provider,
+        preferred_tts_provider=row.preferred_tts_provider,
+        available_tts_providers=sorted(VALID_TTS_PROVIDERS),
+    )
+
+
+@router.patch("", response_model=SettingsResponse)
+def update_app_settings(
+    payload: SettingsUpdate,
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> SettingsResponse:
+    if (
+        payload.preferred_tts_provider is not None
+        and payload.preferred_tts_provider not in VALID_TTS_PROVIDERS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid preferred_tts_provider={payload.preferred_tts_provider!r}",
+        )
+    row = _get_or_create_app_setting(session)
+    row.preferred_tts_provider = payload.preferred_tts_provider
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return SettingsResponse(
+        default_tts_provider=settings.tts_provider,
+        preferred_tts_provider=row.preferred_tts_provider,
         available_tts_providers=sorted(VALID_TTS_PROVIDERS),
     )
 

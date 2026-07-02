@@ -1,16 +1,43 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { SegmentSummary, getChapterSegments } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
+import VoiceOrb from "@/components/VoiceOrb";
 
-function orbStyle(hue: number): CSSProperties {
-  return {
-    "--orb-c1": `hsl(${hue} 91% 65%)`,
-    "--orb-c2": `hsl(${(hue + 59) % 360} 81% 60%)`,
-    "--orb-c3": `hsl(${(hue + 347) % 360} 90% 66%)`,
-  } as CSSProperties;
+// Un chapitre peut avoir 50-200+ segments rendus simultanément dans la liste
+// scrollable ci-dessous. VoiceOrb est du CSS pur (plus de contexte WebGL) mais
+// on garde le montage paresseux par IntersectionObserver : seul le segment
+// visible + actif a besoin du rendu complet, les autres affichent un point de
+// couleur unie le temps d'entrer dans la zone.
+function LazySegmentOrb({ hue, active, root }: { hue: number; active: boolean; root: HTMLDivElement | null }) {
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setVisible(entry.isIntersecting),
+      { root, rootMargin: "200px 0px", threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [root]);
+
+  return (
+    <div ref={anchorRef} className="mt-0.5 h-4 w-4 shrink-0">
+      {visible ? (
+        <VoiceOrb hue={hue} size={16} active={active} />
+      ) : (
+        <div
+          className="h-4 w-4 rounded-full"
+          style={{ backgroundColor: `hsl(${hue} 91% 65%)` }}
+          aria-hidden="true"
+        />
+      )}
+    </div>
+  );
 }
 
 interface Props {
@@ -23,6 +50,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const currentRef = useRef<HTMLDivElement | null>(null);
+  const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -67,7 +95,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
         )}
       </div>
 
-      <div className="max-h-[50vh] overflow-y-auto">
+      <div ref={setScrollRoot} className="max-h-[50vh] overflow-y-auto">
         {segments.map((seg) => {
           const isCurrent = currentSegment?.id === seg.id;
           const voiceId = seg.voice_id;
@@ -79,19 +107,21 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
               key={seg.id}
               ref={isCurrent ? currentRef : null}
               className={`flex gap-3 border-b border-border/50 px-4 py-2.5 transition-colors last:border-0 ${
-                isCurrent
-                  ? "bg-primary/8 border-l-2 border-l-primary"
-                  : "hover:bg-surface-2/40"
+                isCurrent ? "border-l-2" : "hover:bg-surface-2/40"
               }`}
+              style={
+                isCurrent
+                  ? {
+                      backgroundColor: "var(--transcript-highlight-bg)",
+                      borderLeftColor: "var(--transcript-highlight-border)",
+                    }
+                  : undefined
+              }
             >
               {/* Indicateur de voix */}
               <div className="flex w-28 shrink-0 items-start gap-1.5 pt-0.5">
                 {hue !== null ? (
-                  <div
-                    style={orbStyle(hue)}
-                    className="voice-orb mt-0.5 h-4 w-4 shrink-0 rounded-full"
-                    aria-hidden="true"
-                  />
+                  <LazySegmentOrb hue={hue} active={isCurrent} root={scrollRoot} />
                 ) : (
                   <div className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-surface-2" aria-hidden="true" />
                 )}
