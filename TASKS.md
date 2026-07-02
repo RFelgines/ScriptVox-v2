@@ -2127,9 +2127,117 @@ premier run réel sur un livre volumineux.
 **Lot C entièrement clos** (C0 décision + C1 unification + C3 retry + C2 flux MP3, tous livrés le
 2026-07-02).
 
-### Lots E, F (restant) — non démarrés
+### Lot G ✅ (2026-07-02) — Analyse LLM plus rapide sans perte de qualité (spike mesuré)
 
-Migrations de schéma (M9) ; mineurs restants (F1 résiduel, F3, F4) ; follow-up frontend reprise
-génération (Lot C1 ci-dessus). Détail complet, fichiers concernés et test-first par étape : mémoire
+Point B de la roadmap (« moteur d'analyse plus léger/rapide ») traité comme spike mesuré,
+pas comme promesse (cf. [[feature-roadmap-decisions]]). Trois changements, mesurés
+ensemble sur un run complet HP T01 (18 chapitres réels) :
+
+1. **`think=False` natif** (`app/services/llm/ollama.py`) remplace le suffixe prompt
+   `/no_think` — fiable sur tous les modèles qwen3 (le suffixe était ignoré par les
+   petits modèles). Dépendance `ollama` montée `~0.4.0` → `~0.6.0` (`requirements.txt`).
+2. **Modèle par défaut `qwen3:1.7b`** (`ollama pull qwen3:1.7b`) au lieu de `qwen3:8b`,
+   avec `OLLAMA_CONTEXT_TOKENS=32768` (tient 100% GPU, poids ~1.4 Go) et
+   `OLLAMA_CHUNK_TOKENS=26000` (un chapitre HP tient en un seul chunk — éviter de
+   fragmenter inutilement la liste de personnages entre appels).
+3. **Réparation d'attribution déterministe** (`app/services/llm/base.py`,
+   `_parse_llm_json`) : deux correctifs post-traitement, zéro appel LLM supplémentaire :
+   - `_resolve_character_name` : matching flou par inclusion de mots pour les variantes
+     de nom (« Percy » ⊆ « Percy Weasley », « Rogue » ⊆ « Professeur Rogue »).
+   - Auto-enregistrement d'un personnage attribué mais absent de `characters[]` (incohérence
+     interne du LLM observée en conditions réelles), borné par une heuristique nom-propre
+     (`_looks_like_proper_noun`) pour ne pas polluer le casting avec des pseudo-personnages
+     descriptifs (« boa constrictor », « tout le monde »).
+   - Bonus : `_Span.incise_character` (détecté dans `_split_incise`) permet une attribution
+     déterministe à 100% quand le texte source nomme explicitement le locuteur dans son
+     incise (« dit Dumbledore »), prioritaire sur la réponse du LLM.
+
+**Mesures (18 chapitres HP T01, `tests/bench_hp_label_based.py` / variante full-book) :**
+
+| Config | Attribution | Temps total |
+|---|---|---|
+| qwen3:1.7b, sans réparation | 60% (1061/1764) | 445.7 s |
+| qwen3:8b, sans réparation | 70% (1241/1764) | 1444.4 s |
+| qwen3:8b + réparation | 76% (1337/1764) | 1442.7 s |
+| **qwen3:1.7b + réparation (retenu)** | **79% (1391/1764)** | **529.2 s** |
+
+Le petit modèle + réparations bat le gros modèle sur les deux axes (qualité ET vitesse,
+~×2.7 plus rapide) — contre-intuitif, mais mesuré. Reste imparfait : quelques chapitres à
+beaucoup de personnages restent faibles (ex. Ch.6 sorti à 14% dans un run) — variance
+inter-chapitres réelle des deux côtés, pas une solution parfaite.
+
+Tests : `tests/check_phase3.py` étendu (sections `_resolve_character_name` /
+auto-enregistrement / `_Span.incise_character`), suite complète verte.
+
+**Non fait / écarté par le protocole (bornes explicites du spike) :** passage à un LLM
+cloud (Gemini déjà codé, jamais activé ; Claude jamais implémenté) — écarté par choix
+utilisateur (« si c'est pas en local ça ne m'intéresse pas »). Split de la tâche en deux
+appels LLM (lister puis attribuer) et allocation adaptative par chapitre : pistes
+identifiées mais non implémentées, réservées si les réparations déterministes s'avèrent
+insuffisantes en usage réel.
+
+### Lot E ✅ (2026-07-02) — Migrations de schéma Alembic (M9)
+
+**Défaut.** `init_db()` appelait `SQLModel.metadata.create_all(engine)` sans conditions — cette
+fonction ne fait *jamais* que créer les tables manquantes, elle n'altère jamais une table
+existante. Conséquence vécue plusieurs fois dans l'historique du projet : chaque changement de
+modèle a nécessité de supprimer `scriptvox.db` à la main et de perdre toute la bibliothèque.
+
+**Fix.** Adoption d'Alembic (`alembic~=1.18.0`, scaffold dans `migrations/`) :
+- `migrations/env.py` — cible `SQLModel.metadata`, lit `DATABASE_URL` depuis `.env` (source
+  unique avec `app/config.py`).
+- `migrations/script.py.mako` édité pour toujours `import sqlmodel` — gap connu Alembic+SQLModel
+  où l'autogenerate référence `sqlmodel.sql.sqltypes.AutoString(...)` sans jamais importer le
+  module (aurait fait planter toute migration générée avec un `NameError`).
+- Migration baseline (`migrations/versions/0a0a59b228cc_baseline.py`) générée par autogenerate
+  contre une base jetable, capturant les 7 tables actuelles. **Vérifiée** : l'appliquer sur une
+  base neuve puis relancer l'autogenerate dessus ne détecte plus aucun diff (`pass`/`pass`).
+- `app/core/db.py` — `_ensure_schema(engine)` remplace l'appel direct à `create_all` :
+  inspecte les tables existantes via `sqlalchemy.inspect` ; si des tables applicatives existent
+  mais sans historique Alembic (`alembic_version` absent — l'état de **tout** `scriptvox.db`
+  actuel, y compris le tien), la base est **auto-tamponnée** (`command.stamp`, qui enregistre
+  seulement « cette base est déjà à la révision X », sans jamais toucher aux données) au lieu de
+  tenter un `CREATE TABLE` qui planterait sur des tables déjà existantes. Sinon, `command.upgrade`
+  normal.
+
+**Bug piégé en testant (pas dans le plan initial) :** `migrations/env.py` écrasait
+inconditionnellement l'URL de la base — même quand `_ensure_schema` avait déjà positionné une URL
+précise sur l'objet `Config` avant d'appeler `command.upgrade`/`command.stamp` — en la remplaçant
+systématiquement par `DATABASE_URL` lu depuis l'environnement. Concrètement : **toute base cible
+autre que celle de l'app elle-même était silencieusement ignorée**, la migration s'appliquant
+toujours sur `scriptvox.db` (ou la valeur de `DATABASE_URL` du process) au lieu de la base
+réellement voulue. Repéré à l'exécution des tests : `inspect()` montrait zéro table après un
+`_ensure_schema` sur une base jetable alors que les logs Alembic montraient bien une migration
+appliquée — quelque part ailleurs. Fix : `env.py` ne lit `DATABASE_URL` que si aucune URL n'a déjà
+été positionnée programmatiquement sur le `Config`. Sans ce correctif, le mécanisme
+d'auto-tamponnement aurait été un no-op silencieux en usage réel (bien qu'inoffensif dans ce cas
+précis, car la seule base ciblée en usage réel est justement `DATABASE_URL`) — mais aurait rendu
+**tout test contre une base jetable invalide**, laissant croire à un mécanisme vérifié qui ne
+l'était pas.
+
+**Test-first.** `tests/check_phase30.py` (nouveau, 7 sections, exclusivement contre des fichiers
+SQLite jetables en tempdir — jamais `scriptvox.db`/`data/` réels) : base neuve → schéma complet
+créé ; base "pré-Alembic" simulée (tables via `create_all` brut, sans `alembic_version` — état
+exact de toute base existante aujourd'hui) → auto-tamponnée sans crash ; **le plus important** :
+une base pré-Alembic contenant un vrai `Book` inséré AVANT `_ensure_schema` → survit intact
+(titre, statut, chemins audio) après l'opération ; idempotence (2 appels de suite sans crash) ;
+intégration `init_db()` sur base neuve (schéma + catalogue de voix seedé) et sur base pré-Alembic
+avec données existantes (`Voice` clonée + favorite → survit, catalogue seedé sans doublon).
+**30/30 suites vertes** (régression complète).
+
+Fichiers (6) : `requirements.txt` (ligne `alembic`), `alembic.ini`, `migrations/env.py`,
+`migrations/script.py.mako`, `migrations/versions/0a0a59b228cc_baseline.py`, `app/core/db.py`,
+`tests/check_phase30.py`, `README.md` (nouvelle section "Database migrations (Alembic)").
+
+Aucune commande Alembic n'a été exécutée contre le vrai `scriptvox.db`/`data/` pendant cette
+tâche — uniquement contre des bases jetables en tempdir, nettoyées après chaque test. L'auto-
+tamponnement de la vraie base se déclenchera de lui-même au prochain démarrage du backend.
+
+### Lot F (restant) — non démarré
+
+Mineurs restants : F1 résiduel (génération d'échantillon de voix hors thread API), F3 (frontend
+quick wins), F4 (hygiène : .gitignore, garde `audioop` Python 3.13, code mort). Follow-up
+frontend : bouton "Reprendre la génération" pour les livres FAILED (capacité livrée au Lot C1
+mais jamais exposée en UI). Détail complet, fichiers concernés et test-first par étape : mémoire
 [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux
 sources).

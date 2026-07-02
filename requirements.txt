@@ -14,6 +14,7 @@ uvicorn[standard]~=0.34.0
 # ─── Database ─────────────────────────────────────────────────────────────────
 sqlmodel~=0.0.38
 sqlalchemy~=2.0.0
+alembic~=1.18.0      # schema migrations — replaces create_all-only (audit 2026-07-02, Lot E / M9)
 
 # ─── Validation ───────────────────────────────────────────────────────────────
 pydantic~=2.11.0

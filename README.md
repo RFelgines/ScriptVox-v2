@@ -47,6 +47,28 @@ The app **fails at startup** if any required variable for the active provider is
 
 ---
 
+## Database migrations (Alembic)
+
+Schema changes are applied via [Alembic](https://alembic.sqlalchemy.org/), not `SQLModel.metadata.create_all()`. This matters because `create_all()` only ever creates *missing* tables — it never alters an existing one, so every model change previously required deleting `scriptvox.db` and losing the whole library.
+
+**You don't need to run anything manually for this.** `init_db()` (called at API startup) brings the schema up to date automatically every time the app starts:
+
+- **New database** (file doesn't exist yet) → all tables are created via the migration history, equivalent to the old `create_all()`.
+- **Existing database created before Alembic was adopted** (i.e. any `scriptvox.db` from before this feature — has tables but no migration history) → auto-stamped at the current baseline revision. Stamping only records "this DB is already at revision X" in a new `alembic_version` table; it never re-runs `CREATE TABLE` or touches existing rows.
+- **Database already tracked by Alembic** → any migrations newer than its current revision are applied normally.
+
+**When you (or an agent) change a `SQLModel` model**, generate the migration by hand:
+
+```bash
+alembic revision --autogenerate -m "short description"
+```
+
+Review the generated file in `migrations/versions/` before committing — autogenerate is a good first draft, not a guarantee (it can miss things like renamed columns, which look like a drop + an add). The migration runs automatically on next startup; there is no separate `alembic upgrade` step to remember.
+
+`migrations/env.py` reads `DATABASE_URL` from `.env`, the same source of truth as `app/config.py` — always targeting whichever database the app itself is configured for.
+
+---
+
 ## Launch
 
 Three processes must run in parallel:
