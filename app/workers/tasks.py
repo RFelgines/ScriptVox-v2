@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Callable
 
 from huey import SqliteHuey
 from sqlmodel import Session, select
@@ -217,91 +218,161 @@ def _release_qwen_gpu(provider) -> None:
         pass
 
 
-async def _synthesise_book(
-    book_id: int,
-    source_path: str,
-    engine,
-) -> str | None:
-    """Returns the assembled WAV path, "" if the book has no segments, or None if
-    aborted mid-synthesis (user /stop — Book.status flipped to FAILED concurrently).
-    Callers must not write audio_path/DONE on a None return."""
+def _make_book_stop_checker(engine, book_id: int) -> Callable[[], bool]:
+    """Returns a zero-arg callable reporting whether /stop was triggered for this
+    book. Opens a FRESH short-lived Session on every call, never reused across
+    calls -- reusing a long-lived session would return a stale cached Book row
+    from its identity map, missing a concurrent commit made by the /stop route's
+    own session (same pattern the per-segment stop-check already relied on,
+    Lot A)."""
+    from app.core.enums import BookStatus
+    from app.models import Book
+
+    def _should_abort() -> bool:
+        with Session(engine) as s:
+            b = s.get(Book, book_id)
+            return b is None or b.status == BookStatus.FAILED
+
+    return _should_abort
+
+
+async def _generate_chapter_async(
+    chapter_id: int, engine, should_abort: Callable[[], bool] | None = None,
+) -> bool:
+    """Synthesise one chapter's audio end-to-end (status, TTS, per-segment timing,
+    WAV on disk). Returns True if the chapter completed (status DONE), False if
+    aborted via should_abort() before completion.
+
+    On abort, NOTHING is persisted (no WAV file, no timing) and the chapter is
+    reverted to PENDING so it gets fully redone on the next attempt -- chapters are
+    the retry/reprise unit (Lot C, audit 2026-07-02), so an interrupted chapter's
+    partial work is simply discarded rather than reconciled into a torn WAV file
+    with partial timing.
+
+    On a genuine failure the chapter is marked FAILED with its error_message (same
+    as before this refactor) and the exception is RE-RAISED so a book-driven caller
+    can fail the whole book -- a standalone Huey call swallows it instead, see
+    _generate_chapter_impl."""
     from pathlib import Path as _Path
 
-    from app.core.enums import BookStatus, SegmentType
-    from app.models import Book, Chapter, Character, Segment, Voice
-    from app.services.audio.assembler import assemble_wav
-    from app.services.tts import factory as tts_factory
-    from app.services.voice_assignment import NARRATOR_VOICE_ID
-
-    settings = get_settings()
+    from app.core.enums import ChapterStatus
+    from app.models import Chapter, Segment
 
     with Session(engine) as session:
-        book = session.get(Book, book_id)
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None:
+            logger.error("generate_chapter called with unknown chapter_id=%d", chapter_id)
+            return False
+        book_id = chapter.book_id
+        position = chapter.position
+        chapter.status = ChapterStatus.GENERATING
+        chapter.error_message = None
+        session.add(chapter)
+        session.commit()
+
+    try:
+        result = await _synthesise_chapter_worker(chapter_id, engine, should_abort=should_abort)
+        if result is None:
+            logger.info(
+                "generate_chapter: aborted mid-chapter (chapter_id=%d), reverting to PENDING",
+                chapter_id,
+            )
+            with Session(engine) as session:
+                chapter = session.get(Chapter, chapter_id)
+                if chapter:
+                    chapter.status = ChapterStatus.PENDING
+                    session.add(chapter)
+                    session.commit()
+            return False
+
+        wav_bytes, timing = result
+
+        out_dir = _Path("data") / str(book_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = str(out_dir / f"ch{position}.wav")
+        _Path(audio_path).write_bytes(wav_bytes)
+
+        with Session(engine) as session:
+            for seg_id, offset_ms, dur_ms in timing:
+                seg = session.get(Segment, seg_id)
+                if seg:
+                    seg.audio_offset_ms = offset_ms
+                    seg.duration_ms = dur_ms
+                    session.add(seg)
+
+            chapter = session.get(Chapter, chapter_id)
+            chapter.audio_path = audio_path
+            chapter.status = ChapterStatus.DONE
+            session.add(chapter)
+            session.commit()
+        return True
+
+    except Exception as exc:
+        logger.exception("generate_chapter failed for chapter_id=%d", chapter_id)
+        with Session(engine) as session:
+            chapter = session.get(Chapter, chapter_id)
+            if chapter:
+                chapter.status = ChapterStatus.FAILED
+                chapter.error_message = str(exc)
+                session.add(chapter)
+                session.commit()
+        raise
+
+
+async def _generate_book_async(book_id: int, engine) -> bool:
+    """Iterate the book's chapters, generating whichever aren't already DONE
+    (reprise -- _generate_book_impl resets every chapter to PENDING first unless
+    this is a resume-after-failure, so this only ever skips something on a true
+    resume). Stop-aware at SEGMENT granularity: should_abort() is checked before
+    each chapter starts AND threaded down into that chapter's own segment loop
+    (_synthesise_segments), so /stop takes effect within one segment's TTS call,
+    not after a whole chapter finishes. The interrupted chapter's partial work is
+    discarded and reverted to PENDING (see _generate_chapter_async) -- the cost of
+    a stop is bounded to redoing at most the one chapter in flight, never the book.
+
+    Returns True if every chapter was attempted (some may have been skipped via
+    reprise), False if aborted by /stop. Raises on a genuine chapter failure (a
+    real TTSError, not an abort) -- the caller's except block fails the whole book,
+    reusing the existing book-level error handling unchanged."""
+    from app.core.enums import ChapterStatus
+    from app.models import Book, Chapter
+
+    should_abort = _make_book_stop_checker(engine, book_id)
+
+    with Session(engine) as session:
         chapters = session.exec(
             select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
         ).all()
-        all_segments: list = []
-        for ch in chapters:
-            all_segments.extend(
-                session.exec(
-                    select(Segment).where(Segment.chapter_id == ch.id).order_by(Segment.position)
-                ).all()
+        pending = [(c.id, c.status) for c in chapters]
+
+    total = len(pending)
+    if total == 0:
+        return True
+
+    done_count = sum(1 for _, status in pending if status == ChapterStatus.DONE)
+
+    for i, (chapter_id, status) in enumerate(pending):
+        if should_abort():
+            logger.info(
+                "generate_book: stop requested before chapter %d/%d, aborting", i + 1, total
             )
-        char_voice: dict[int, str] = {}
-        for seg in all_segments:
-            if seg.character_id and seg.character_id not in char_voice:
-                char = session.get(Character, seg.character_id)
-                if char and char.voice_id:
-                    char_voice[seg.character_id] = char.voice_id
+            return False
+        if status == ChapterStatus.DONE:
+            continue  # reprise -- déjà généré (résume-après-échec uniquement)
 
-        # Look up reference_audio_path once per unique voice_id (one query per voice, not per segment)
-        all_voice_ids: set[str] = set(char_voice.values()) | {NARRATOR_VOICE_ID}
-        ref_path: dict[str, str | None] = {}
-        for vid in all_voice_ids:
-            v = session.exec(select(Voice).where(Voice.voice_id == vid)).first()
-            ref_path[vid] = v.reference_audio_path if v else None
+        completed = await _generate_chapter_async(chapter_id, engine, should_abort=should_abort)
+        if not completed:
+            return False
 
-    if not all_segments:
-        return ""
+        done_count += 1
+        with Session(engine) as session:
+            book = session.get(Book, book_id)
+            book.progress = 60.0 + done_count / total * 30.0
+            book.updated_at = datetime.now(timezone.utc)
+            session.add(book)
+            session.commit()
 
-    provider = tts_factory.get_tts_provider(settings, override=book.tts_provider if book else None)
-    n = len(all_segments)
-    wav_chunks: list[bytes] = []
-
-    try:
-        for i, seg in enumerate(all_segments):
-            # Abort if the user triggered /stop while we were synthesising a
-            # previous segment — otherwise a multi-hour book generation ignores
-            # /stop entirely and still writes DONE + audio_path at the end.
-            with Session(engine) as _s:
-                _b = _s.get(Book, book_id)
-                if _b is None or _b.status == BookStatus.FAILED:
-                    logger.info("generate_book: stop requested at segment %d/%d, aborting", i, n)
-                    return None
-
-            voice_id = (
-                NARRATOR_VOICE_ID
-                if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
-                else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
-            )
-            wav_chunks.append(await provider.synthesise(
-                seg.text, voice_id,
-                emotion=seg.emotion,
-                reference_audio_path=ref_path.get(voice_id),
-            ))
-
-            with Session(engine) as session:
-                book = session.get(Book, book_id)
-                book.progress = 60.0 + (i + 1) / n * 30.0
-                book.updated_at = datetime.now(timezone.utc)
-                session.add(book)
-                session.commit()
-
-        audio_path = str(_Path(source_path).with_suffix(".wav"))
-        assemble_wav(wav_chunks, audio_path)
-        return audio_path
-    finally:
-        _release_qwen_gpu(provider)
+    return True
 
 
 def _analyze_book_impl(book_id: int, force: bool = False) -> None:
@@ -465,8 +536,9 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
 
 def _generate_book_impl(book_id: int) -> None:
     from app.core.db import get_engine
-    from app.core.enums import BookStatus
-    from app.models import Book
+    from app.core.enums import BookStatus, ChapterStatus
+    from app.models import Book, Chapter
+    from app.services.audio.assembler import assemble_wav_from_files, wav_to_mp3
 
     engine = get_engine()
 
@@ -475,12 +547,13 @@ def _generate_book_impl(book_id: int) -> None:
         if book is None:
             logger.error("generate_book called with unknown book_id=%d", book_id)
             return
-        if book.status not in (BookStatus.ANALYZED, BookStatus.DONE):
+        if book.status not in (BookStatus.ANALYZED, BookStatus.DONE, BookStatus.FAILED):
             logger.warning(
                 "generate_book skipped: book_id=%d has status=%s", book_id, book.status
             )
             return
         source_path = book.source_path
+        previous_status = book.status
         book.status = BookStatus.GENERATING
         book.progress = 0.0
         book.error_message = None
@@ -488,19 +561,52 @@ def _generate_book_impl(book_id: int) -> None:
         session.add(book)
         session.commit()
 
+    # Reprise (skip chapters already DONE) only applies when resuming after a
+    # failure — a fresh "Générer"/"Regénérer" click on ANALYZED/DONE must redo
+    # everything, so every chapter is reset to PENDING first (mirrors
+    # _analyze_book_impl's resume_requested/force pattern; audit 2026-07-02 Lot C).
+    resume = previous_status == BookStatus.FAILED
+    if not resume:
+        with Session(engine) as session:
+            chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+            for c in chapters:
+                if c.status != ChapterStatus.DONE:
+                    continue
+                c.status = ChapterStatus.PENDING
+                c.audio_path = None
+                session.add(c)
+            session.commit()
+
     try:
-        # ── TTS synthesis + audio assembly (progress 60% → 90%) ───────────────
-        audio_path = asyncio.run(_synthesise_book(book_id, source_path, engine))
-        if audio_path is None:
+        # ── TTS synthesis, chapter by chapter (progress 60% → 90%) ────────────
+        completed = asyncio.run(_generate_book_async(book_id, engine))
+        if not completed:
             # Aborted by a concurrent /stop — Book.status is already FAILED (set by
-            # the stop endpoint). Never proceed to writing audio_path / DONE.
+            # the stop endpoint). Never proceed to assembling / writing DONE.
             logger.info("generate_book: aborted by stop for book_id=%d", book_id)
             return
 
+        # ── Assemble the book WAV from the per-chapter WAVs already on disk ────
+        # (streamed disk-to-disk, one chapter's frames in memory at a time — not
+        # the whole book, unlike the old flat-segment-loop design it replaces).
+        with Session(engine) as session:
+            done_chapters = session.exec(
+                select(Chapter)
+                .where(Chapter.book_id == book_id, Chapter.status == ChapterStatus.DONE)
+                .order_by(Chapter.position)
+            ).all()
+            chapter_wav_paths = [c.audio_path for c in done_chapters if c.audio_path]
+
+        audio_path: str | None = None
         mp3_path: str | None = None
-        if audio_path:
+        if chapter_wav_paths:
             from pathlib import Path as _Path
-            from app.services.audio.assembler import wav_to_mp3
+            audio_path = str(_Path(source_path).with_suffix(".wav"))
+            assemble_wav_from_files(chapter_wav_paths, audio_path)
+            # Final MP3 encode still loads the whole book WAV in memory (Lot C2,
+            # deferred) — the per-chapter synthesis loop is the part that used to
+            # hold ~3-4 GB for a full novel, and that part is now bounded to one
+            # chapter, which is the fix this lot targets.
             mp3_bytes = wav_to_mp3(_Path(audio_path).read_bytes())
             mp3_file = _Path(audio_path).with_suffix(".mp3")
             mp3_file.write_bytes(mp3_bytes)
@@ -508,12 +614,12 @@ def _generate_book_impl(book_id: int) -> None:
 
         with Session(engine) as session:
             book = session.get(Book, book_id)
-            # Re-check: a /stop could have raced in between the last segment and
+            # Re-check: a /stop could have raced in between the last chapter and
             # here. Never overwrite a FAILED status with DONE.
             if book is None or book.status == BookStatus.FAILED:
                 logger.info("generate_book: stop requested just before commit, aborting")
                 return
-            book.audio_path = audio_path if audio_path else None
+            book.audio_path = audio_path
             book.mp3_path = mp3_path
             book.status = BookStatus.DONE
             book.progress = 100.0
@@ -534,9 +640,10 @@ def _generate_book_impl(book_id: int) -> None:
 
 
 async def _synthesise_chapter_worker(
-    chapter_id: int, engine
-) -> tuple[bytes, list[tuple[int, int, int]]]:
-    """Returns (wav_bytes, [(seg_id, offset_ms, duration_ms)])."""
+    chapter_id: int, engine, should_abort: Callable[[], bool] | None = None,
+) -> tuple[bytes, list[tuple[int, int, int]]] | None:
+    """Returns (wav_bytes, [(seg_id, offset_ms, duration_ms)]), or None if
+    should_abort() fired before the chapter finished synthesising."""
     from app.models import Book, Chapter
     from app.services.audio.chapter import _synthesise_segments
     from app.services.tts import factory as tts_factory
@@ -549,65 +656,27 @@ async def _synthesise_chapter_worker(
             settings, override=book.tts_provider if book else None
         )
         try:
-            return await _synthesise_segments(chapter_id, session, provider)
+            return await _synthesise_segments(
+                chapter_id, session, provider, should_abort=should_abort,
+            )
         finally:
             _release_qwen_gpu(provider)
 
 
 def _generate_chapter_impl(chapter_id: int) -> None:
-    from pathlib import Path as _Path
-
+    """Huey-facing entry point for a standalone (non book-driven) chapter
+    generation — /stop doesn't apply here (only book-level GENERATING is
+    stop-aware, since standalone chapter generation never touches Book.status),
+    so should_abort is never passed. Swallows the exception _generate_chapter_async
+    already turned into Chapter.FAILED, matching the pre-existing contract of never
+    letting an exception propagate out of a Huey task."""
     from app.core.db import get_engine
-    from app.core.enums import ChapterStatus
-    from app.models import Chapter
 
     engine = get_engine()
-
-    with Session(engine) as session:
-        chapter = session.get(Chapter, chapter_id)
-        if chapter is None:
-            logger.error("generate_chapter called with unknown chapter_id=%d", chapter_id)
-            return
-        book_id = chapter.book_id
-        position = chapter.position
-        chapter.status = ChapterStatus.GENERATING
-        chapter.error_message = None
-        session.add(chapter)
-        session.commit()
-
     try:
-        wav_bytes, timing = asyncio.run(_synthesise_chapter_worker(chapter_id, engine))
-
-        out_dir = _Path("data") / str(book_id)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        audio_path = str(out_dir / f"ch{position}.wav")
-        _Path(audio_path).write_bytes(wav_bytes)
-
-        with Session(engine) as session:
-            # Persiste le timing par segment
-            from app.models import Segment
-            for seg_id, offset_ms, dur_ms in timing:
-                seg = session.get(Segment, seg_id)
-                if seg:
-                    seg.audio_offset_ms = offset_ms
-                    seg.duration_ms = dur_ms
-                    session.add(seg)
-
-            chapter = session.get(Chapter, chapter_id)
-            chapter.audio_path = audio_path
-            chapter.status = ChapterStatus.DONE
-            session.add(chapter)
-            session.commit()
-
-    except Exception as exc:
-        logger.exception("generate_chapter failed for chapter_id=%d", chapter_id)
-        with Session(engine) as session:
-            chapter = session.get(Chapter, chapter_id)
-            if chapter:
-                chapter.status = ChapterStatus.FAILED
-                chapter.error_message = str(exc)
-                session.add(chapter)
-                session.commit()
+        asyncio.run(_generate_chapter_async(chapter_id, engine))
+    except Exception:
+        pass  # already persisted to Chapter.FAILED inside _generate_chapter_async
 
 
 def _process_book_impl(book_id: int) -> None:

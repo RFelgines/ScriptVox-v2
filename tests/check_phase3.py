@@ -199,12 +199,10 @@ async def _ollama_capture_timeout(*_a, **_kw):
     return _FakeOllamaResponse('{"characters": [], "attributions": []}')
 
 
-from app.services.llm.ollama import _NO_THINK_SUFFIX  # noqa: E402
-
 _dyn_chapter_text = "Elle marcha lentement vers la porte. " * 500  # assez gros pour dépasser le plancher
 provider._client.chat = _ollama_capture_timeout
 asyncio.run(provider.analyze(_dyn_chapter_text))
-_dyn_prompt = _b_build_user_prompt(_b_pre_segment(_dyn_chapter_text), None) + _NO_THINK_SUFFIX
+_dyn_prompt = _b_build_user_prompt(_b_pre_segment(_dyn_chapter_text), None)
 _expected_timeout = _compute_read_timeout(
     _dyn_prompt, provider._read_timeout_floor, provider._timeout_per_1k_tokens
 )
@@ -460,8 +458,22 @@ if not Path(epub_path).exists():
     ebook.spine = ["nav", c1, c2]
     epub.write_epub(epub_path, ebook)
 
+# book.source_path est copié vers un tempdir plutôt que de pointer directement sur
+# la fixture versionnée : depuis que _generate_book_impl tourne réellement dans ce
+# test (Lot C1, plus de fake _synthesise_book), il dérive le nom du WAV/MP3 de
+# source_path -- pointer sur tests/fixtures/test.epub écrirait test.wav/test.mp3
+# à côté du fichier versionné (déjà rencontré et corrigé une fois sur ce même
+# genre de test, cf. Lot A / check_phase23.py).
+import shutil as _shutil  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+_p3_tmpdir_ctx = _tempfile.TemporaryDirectory()
+_p3_tmpdir = Path(_p3_tmpdir_ctx.name)
+_p3_epub_copy = str(_p3_tmpdir / "test.epub")
+_shutil.copy(epub_path, _p3_epub_copy)
+
 with Session(test_engine) as session:
-    book = Book(title="temp", source_path=epub_path)
+    book = Book(title="temp", source_path=_p3_epub_copy)
     session.add(book)
     session.commit()
     session.refresh(book)
@@ -515,21 +527,35 @@ async def _fake_analyze_book(
     return True
 
 
-_original_synthesise_book = tasks_module._synthesise_book
+# _synthesise_book n'existe plus (audit 2026-07-02, Lot C1 -- génération livre
+# unifiée sur le chemin chapitre) : on ne peut plus monkeypatcher cette fonction.
+# Un mock TTS minimal au niveau du factory suffit -- _generate_book_impl (appelé
+# par _process_book_impl) fait le reste normalement via le chemin chapitre réel.
+from unittest.mock import AsyncMock, MagicMock, patch as _patch  # noqa: E402
 
 
-async def _fake_synthesise_book(book_id: int, source_path: str, engine) -> str:
-    return ""  # no real audio needed for this test
+async def _fake_tts_synthesise(text, voice_id, emotion=None, reference_audio_path=None) -> bytes:
+    import io as _io
+    import wave as _wave
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(22050)
+        w.writeframes(b"\x00\x00" * 50)
+    return buf.getvalue()
 
+
+_fake_tts_provider = MagicMock()
+_fake_tts_provider.synthesise = AsyncMock(side_effect=_fake_tts_synthesise)
 
 tasks_module._analyze_book = _fake_analyze_book
-tasks_module._synthesise_book = _fake_synthesise_book
 
 try:
-    _process_book_impl(book_id)
+    with _patch("app.services.tts.factory.get_tts_provider", return_value=_fake_tts_provider):
+        _process_book_impl(book_id)
 finally:
     tasks_module._analyze_book = _original_analyze_book
-    tasks_module._synthesise_book = _original_synthesise_book
 
 from sqlmodel import select  # noqa: E402
 
@@ -715,6 +741,64 @@ assert _segment_text(sp1[1]).startswith("dit-elle"), \
 ok("_segment_text: dialogue sans — ni virgule traînante ; incise lue par le narrateur")
 
 
+# ── _Span.incise_character — nom explicite détecté dans l'incise (spike 2026-07-02) ──
+section("_pre_segment capture le nom explicite d'une incise (attribution déterministe)")
+
+# Clitique (« dit-elle ») -> pas de nom déductible, incise_character reste None
+assert sp1[0].incise_character is None, \
+    f"incise clitique ne doit PAS produire de nom: {sp1[0].incise_character!r}"
+ok("« dit-elle » (clitique) -> incise_character=None (référent non déductible)")
+
+# Verbe + nom propre simple (« dit Harry »)
+assert sp3[0].incise_character == "Harry", f"nom explicite mal détecté: {sp3[0].incise_character!r}"
+ok("« dit Harry » -> incise_character='Harry'")
+
+# Verbe réflexif + nom composé (« s’exclama Mr Dursley »)
+assert sp7[0].incise_character == "Mr Dursley", f"nom composé mal détecté: {sp7[0].incise_character!r}"
+ok("« s’exclama Mr Dursley » -> incise_character='Mr Dursley'")
+
+# Pas d'incise du tout -> pas de nom
+assert sp4[0].incise_character is None
+ok("réplique sans incise -> incise_character=None")
+
+
+# ── _parse_llm_json — override déterministe par incise à nom explicite ───────
+section("_parse_llm_json : l'incise à nom explicite prime sur l'attribution LLM")
+
+_llm_json_incise = json.dumps({
+    "characters": [{"name": "Harry", "gender": "MALE"}, {"name": "Ron", "gender": "MALE"}],
+    "attributions": [
+        {"index": 1, "character_name": "Ron"},   # le LLM se trompe : le span 1 sera corrigé
+        {"index": 3, "character_name": "Ron"},   # aucune incise -> reste tel quel
+    ],
+})
+
+_spans_incise = [
+    _Span(1, "— Bonjour, dit Harry.", True, incise_character="Harry"),
+    _Span(2, "dit Harry.", False, None),
+    _Span(3, "— Salut !", True, None),
+]
+_result_incise = _parse_llm_json(_llm_json_incise, _spans_incise)
+_by_pos = {s.position: s for s in _result_incise.segments}
+assert _by_pos[1].character_name == "Harry", (
+    f"incise explicite doit prévaloir sur le LLM (Ron): {_by_pos[1].character_name!r}"
+)
+assert _by_pos[3].character_name == "Ron", "span sans incise -> attribution LLM inchangée"
+ok("incise à nom connu ('Harry') écrase l'attribution erronée du LLM ('Ron')")
+
+# Nom détecté mais absent des personnages connus -> dégradation bornée, LLM garde la main
+_llm_json_unknown = json.dumps({
+    "characters": [{"name": "Ron", "gender": "MALE"}],
+    "attributions": [{"index": 1, "character_name": "Ron"}],
+})
+_spans_unknown_name = [_Span(1, "— Bonjour, dit Machin.", True, incise_character="Machin")]
+_result_unknown = _parse_llm_json(_llm_json_unknown, _spans_unknown_name)
+assert _result_unknown.segments[0].character_name == "Ron", (
+    "nom d'incise non reconnu par le LLM -> fallback sur l'attribution LLM (dégradation bornée)"
+)
+ok("incise à nom NON reconnu comme personnage -> attribution LLM conservée (borné)")
+
+
 # ── 8. Live LLM (optional, gated by SCRIPTVOX_LIVE_TEST=1) ───────────────────
 if os.environ.get("SCRIPTVOX_LIVE_TEST") == "1":
     section("Live LLM call (SCRIPTVOX_LIVE_TEST=1)")
@@ -738,6 +822,7 @@ test_engine.dispose()
 for leftover in ("scriptvox_test_p3.db", "huey_test_p3.db"):
     if os.path.exists(leftover):
         os.remove(leftover)
+_p3_tmpdir_ctx.cleanup()
 ok("Test DBs cleaned up")
 
 print("\nPHASE 3 OK\n")

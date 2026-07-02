@@ -1,5 +1,6 @@
 import io
 import wave
+from typing import Callable
 
 from sqlmodel import Session, select
 
@@ -19,10 +20,17 @@ async def _synthesise_segments(
     chapter_id: int,
     session: Session,
     tts: BaseTTSProvider,
-) -> tuple[bytes, list[tuple[int, int, int]]]:
+    should_abort: Callable[[], bool] | None = None,
+) -> tuple[bytes, list[tuple[int, int, int]]] | None:
     """Synthesise all segments and compute per-segment timing.
 
-    Returns (assembled_wav_bytes, [(seg_id, offset_ms, duration_ms), ...]).
+    Returns (assembled_wav_bytes, [(seg_id, offset_ms, duration_ms), ...]), or None
+    if should_abort() returned True before the last segment was synthesised —
+    callers must discard everything computed so far for this chapter (nothing here
+    is persisted; the whole chapter is meant to be redone from scratch on the next
+    attempt, see _generate_chapter_async). should_abort is only ever passed by
+    book-driven generation (Lot C, audit 2026-07-02); a standalone chapter
+    generation has no such concept since it never tracks Book.status.
     """
     segments = session.exec(
         select(Segment).where(Segment.chapter_id == chapter_id).order_by(Segment.position)
@@ -49,6 +57,9 @@ async def _synthesise_segments(
     offset = 0
 
     for seg in segments:
+        if should_abort is not None and should_abort():
+            return None
+
         voice_id = (
             NARRATOR_VOICE_ID
             if seg.segment_type == SegmentType.NARRATION or seg.character_id is None

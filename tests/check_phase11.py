@@ -144,13 +144,18 @@ check("mp3_path renseignable", r2.mp3_path == "data/2/book.mp3")
 
 
 # ── 7. Worker -- mp3_path ecrit apres generation ─────────────────────────────
+# Réécrit (audit 2026-07-02, Lot C1) : _synthesise_book n'existe plus (génération
+# livre unifiée sur le chemin chapitre) -- le patch global de asyncio.run ne
+# fonctionne plus. On construit un vrai chapitre/segment et on laisse
+# _generate_book_impl faire tout le travail normalement (mock uniquement au niveau
+# du provider TTS), comme le reste de la suite Lot C (check_phase27.py).
 section("Worker _generate_book_impl -- mp3_path persiste en BDD")
 import tempfile as _tf  # noqa: E402
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
 from sqlalchemy import StaticPool, create_engine  # noqa: E402
-from sqlmodel import SQLModel, Session as _Session  # noqa: E402
-from app.core.enums import BookStatus  # noqa: E402
-from app.models.entities import Book  # noqa: E402
+from sqlmodel import SQLModel, Session as _Session, select as _select  # noqa: E402
+from app.core.enums import BookStatus, ChapterStatus, SegmentType  # noqa: E402
+from app.models.entities import Book, Chapter, Segment  # noqa: E402
 
 _engine = create_engine(
     "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -160,11 +165,6 @@ SQLModel.metadata.create_all(_engine)
 with _tf.TemporaryDirectory() as _tmpdir:
     _tmpdir = Path(_tmpdir)
 
-    # Cree un WAV minimal sur disque (simule la sortie de assemble_wav)
-    _wav_path = _tmpdir / "book.wav"
-    _wav_path.write_bytes(_make_wav(n_frames=100))
-
-    # Insere un Book avec source_path et status GENERATING
     with _Session(_engine) as _s:
         _book = Book(
             title="MP3 Test", source_path=str(_tmpdir / "test.epub"),
@@ -175,10 +175,26 @@ with _tf.TemporaryDirectory() as _tmpdir:
         _s.refresh(_book)
         _bid = _book.id
 
-    # Patch get_engine + _synthesise_book pour retourner le WAV pre-cree
+        _ch = Chapter(book_id=_bid, position=1, title="Ch1", raw_text="x")
+        _s.add(_ch)
+        _s.commit()
+        _s.refresh(_ch)
+
+        _s.add(Segment(
+            chapter_id=_ch.id, position=1, text="Une phrase.",
+            segment_type=SegmentType.NARRATION, character_id=None,
+        ))
+        _s.commit()
+
+    async def _mp3_fake_tts(text, voice_id, emotion=None, reference_audio_path=None) -> bytes:
+        return _make_wav(n_frames=100)
+
+    _mock_tts = MagicMock()
+    _mock_tts.synthesise = AsyncMock(side_effect=_mp3_fake_tts)
+
     with (
         patch("app.core.db.get_engine", return_value=_engine),
-        patch("app.workers.tasks.asyncio.run", return_value=str(_wav_path)),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_mock_tts),
     ):
         from app.workers.tasks import _generate_book_impl
         _generate_book_impl(_bid)
@@ -190,6 +206,9 @@ with _tf.TemporaryDirectory() as _tmpdir:
         if _b.mp3_path:
             check("fichier MP3 sur disque", Path(_b.mp3_path).exists())
             check("mp3_path se termine par .mp3", _b.mp3_path.endswith(".mp3"))
+        _ch_after = _s.exec(_select(Chapter).where(Chapter.book_id == _bid)).first()
+        check("chapitre DONE (généré via le nouveau chemin unifié)",
+              _ch_after.status == ChapterStatus.DONE, f"got {_ch_after.status}")
 
 
 # ── 8. GET /books/{id}/audio/mp3 -- 200 OK ───────────────────────────────────

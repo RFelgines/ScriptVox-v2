@@ -43,6 +43,45 @@ def assemble_wav_bytes(audio_segments: list[bytes]) -> bytes:
     return buf.getvalue()
 
 
+def _assemble_paths(paths: list[Path], dest) -> None:
+    """Same contract as _assemble (format-mismatch guard included), but reads each
+    input from disk instead of from an in-memory bytes list — only one file's
+    frames are held in memory at a time, not all of them at once."""
+    if not paths:
+        raise ValueError("paths must not be empty")
+
+    with wave.open(str(paths[0]), "rb") as first:
+        n_channels = first.getnchannels()
+        sampwidth = first.getsampwidth()
+        framerate = first.getframerate()
+
+    with wave.open(dest, "wb") as out:
+        out.setnchannels(n_channels)
+        out.setsampwidth(sampwidth)
+        out.setframerate(framerate)
+        for i, path in enumerate(paths):
+            with wave.open(str(path), "rb") as seg:
+                seg_ch, seg_sw, seg_fr = seg.getnchannels(), seg.getsampwidth(), seg.getframerate()
+                if (seg_ch, seg_sw, seg_fr) != (n_channels, sampwidth, framerate):
+                    raise ValueError(
+                        f"WAV format mismatch at file {i} ({path}): "
+                        f"expected ({n_channels}ch, {sampwidth}B, {framerate}Hz), "
+                        f"got ({seg_ch}ch, {seg_sw}B, {seg_fr}Hz)"
+                    )
+                out.writeframes(seg.readframes(seg.getnframes()))
+
+
+def assemble_wav_from_files(paths: list[str | Path], output_path: str | Path) -> Path:
+    """Concatenate already-on-disk WAV files (one per chapter) into a single output
+    WAV, streaming disk-to-disk. Companion to assemble_wav (which takes in-memory
+    bytes, used for the per-chapter segment-synthesis path) — used by book-level
+    generation to bound peak memory to one chapter's audio at a time instead of the
+    whole book (audit 2026-07-02, Lot C / finding M8)."""
+    output_path = Path(output_path)
+    _assemble_paths([Path(p) for p in paths], str(output_path))
+    return output_path
+
+
 def wav_to_mp3(wav_bytes: bytes, bit_rate: int = 128) -> bytes:
     import lameenc  # lazy: keeps assembler importable before lameenc is installed
 

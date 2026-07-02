@@ -86,8 +86,8 @@ from app.services.tts.factory import get_tts_provider  # noqa: E402
 from app.services.tts.piper import PiperProvider  # noqa: E402
 from app.services.tts.qwen import QwenTTSProvider  # noqa: E402
 from app.workers.tasks import (  # noqa: E402
+    _generate_book_impl,
     _release_qwen_gpu,
-    _synthesise_book,
     _synthesise_chapter_worker,
 )
 ok("PiperProvider, QwenTTSProvider, get_tts_provider, tasks helpers")
@@ -140,8 +140,12 @@ except Exception as exc:
          f"{type(exc).__name__}: {exc}")
 
 
-# ── 4. _synthesise_book libère la VRAM après une génération réussie ──────────
-section("F1b: _synthesise_book() libère provider._model après une génération réussie")
+# ── 4. _generate_book_impl libère la VRAM après une génération réussie ───────
+# Réécrit (audit 2026-07-02, Lot C1) : _synthesise_book n'existe plus (génération
+# livre unifiée sur le chemin chapitre) -- on exerce maintenant le point d'entrée
+# public _generate_book_impl, qui délègue à _synthesise_chapter_worker (déjà
+# couvert individuellement en section 6 ci-dessous) pour chaque chapitre.
+section("F1b: _generate_book_impl() libère provider._model après une génération réussie")
 _e4 = _make_test_engine()
 with tempfile.TemporaryDirectory() as _tmp4:
     _src4 = str(Path(_tmp4) / "book.epub")
@@ -169,15 +173,18 @@ with tempfile.TemporaryDirectory() as _tmp4:
         patch("app.core.db.get_engine", return_value=_e4),
         patch("app.services.tts.factory.get_tts_provider", return_value=_provider4),
     ):
-        _result4 = asyncio.run(_synthesise_book(_b4_id, _src4, _e4))
+        _generate_book_impl(_b4_id)
 
-    check("génération réussie (chemin WAV renvoyé)", bool(_result4), f"got {_result4!r}")
+    with Session(_e4) as _s:
+        _b4_after = _s.get(Book, _b4_id)
+        check("génération réussie (livre DONE)", _b4_after.status == BookStatus.DONE,
+              f"got {_b4_after.status}")
     check("provider._model libéré (None) après succès", _provider4._model is None,
           f"got {_provider4._model!r}")
 
 
-# ── 5. _synthesise_book libère la VRAM même après un abandon (/stop, Lot A) ──
-section("F1b: _synthesise_book() libère provider._model même après un /stop mi-course")
+# ── 5. _generate_book_impl libère la VRAM même après un abandon (/stop) ──────
+section("F1b: _generate_book_impl() libère provider._model même après un /stop mi-chapitre")
 _e5 = _make_test_engine()
 with tempfile.TemporaryDirectory() as _tmp5:
     _src5 = str(Path(_tmp5) / "book.epub")
@@ -214,10 +221,14 @@ with tempfile.TemporaryDirectory() as _tmp5:
         patch("app.core.db.get_engine", return_value=_e5),
         patch("app.services.tts.factory.get_tts_provider", return_value=_provider5),
     ):
-        _result5 = asyncio.run(_synthesise_book(_b5_id, _src5, _e5))
+        _generate_book_impl(_b5_id)
 
-    check("génération abandonnée (None renvoyé, cf. Lot A)", _result5 is None, f"got {_result5!r}")
-    check("un seul segment synthétisé avant l'abandon", _calls5["n"] == 1, f"got {_calls5['n']}")
+    with Session(_e5) as _s:
+        _b5_after = _s.get(Book, _b5_id)
+        check("génération abandonnée (status FAILED)", _b5_after.status == BookStatus.FAILED,
+              f"got {_b5_after.status}")
+    check("un seul segment synthétisé avant l'abandon (granularité segment, Lot C1)",
+          _calls5["n"] == 1, f"got {_calls5['n']}")
     check("provider._model libéré (None) même après un abandon", _provider5._model is None,
           f"got {_provider5._model!r}")
 

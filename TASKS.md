@@ -1994,9 +1994,77 @@ string échouait exactement comme prévu : `got None` au lieu de `"Alice"`).
 Fichiers (2) : `app/services/llm/base.py`, `tests/check_phase3.py`. Aucun changement de contrat
 (`_parse_llm_json` garde exactement sa signature et son type de retour).
 
-### Lots C, E, F (restant) — non démarrés
+### Lot C1 ✅ (2026-07-02) — Génération livre unifiée sur le chemin chapitre (M6+M7+M8)
 
-Robustesse/mémoire de la génération longue (M6/M7/M8, décision d'architecture ⚖️ C0 à trancher —
-**prochain candidat**) ; migrations de schéma (M9) + mineurs restants (F1 résiduel, F3, F4). Détail
-complet, fichiers concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]]
-(pas dupliqué ici pour éviter la dérive entre les deux sources).
+**Décision d'architecture (⚖️ C0, GO utilisateur reçu).** `_generate_book_impl` bouclait sur TOUS
+les segments du livre à plat (`_synthesise_book`, supprimée) : RAM ~3-4 Go pour un roman, aucun
+timing/statut par chapitre après une génération livre (transcription synchronisée cassée), aucune
+reprise après échec. Réécrit pour déléguer à la génération par chapitre (déjà propre et bornée)
+puis concaténer les WAV chapitres **depuis le disque**.
+
+**Granularité du `/stop` — décision affinée en cours de route.** Proposé initialement à la
+granularité chapitre (compromis "sûr"), mais en creusant avec l'utilisateur, la granularité
+**segment** s'est révélée tout aussi propre à implémenter : un chapitre interrompu jette
+simplement son travail partiel (rien n'est écrit sur disque, aucun timing persisté) et repasse à
+`PENDING` pour être refait en entier au prochain essai — le coût d'un stop reste borné à *un*
+chapitre perdu, jamais au livre entier, mais la réactivité reste quasi-instantanée (comme avant
+ce lot). `should_abort` callback threadé de `_generate_book_async` jusqu'à
+`_synthesise_segments` (chapter.py).
+
+**Reprise vs régénération complète — distinction ajoutée en implémentant.** La reprise (sauter les
+chapitres déjà `DONE`) ne doit s'appliquer qu'en résumant après un échec (`Book.status == FAILED`)
+— sinon un simple clic sur « Regénérer l'audio » sur un livre déjà `DONE` deviendrait un no-op
+silencieux (tous les chapitres déjà `DONE`, rien à refaire). `_generate_book_impl` réinitialise
+donc tous les chapitres à `PENDING` avant la boucle, SAUF si le livre reprend après un `FAILED`
+(symétrique à `_analyze_book_impl`/`resume_requested`). `POST /books/{id}/generate` élargi pour
+accepter `FAILED` (auparavant bloqué à ANALYZED/DONE — la reprise n'aurait jamais été
+déclenchable) : contrat élargi, montré et implémenté dans la même passe.
+
+**Nouvelles fonctions (`app/workers/tasks.py`).** `_make_book_stop_checker` (session fraîche à
+chaque appel, évite le cache d'identité SQLAlchemy périmé — même piège que Lot A) ;
+`_generate_chapter_async` (cœur async extrait de `_generate_chapter_impl`, réutilisable sans
+`asyncio.run` imbriqué, ré-élève l'exception pour que l'appelant livre puisse faire échouer le
+livre entier) ; `_generate_book_async` (boucle chapitres, reprise, stop). `_synthesise_book`
+**supprimée**.
+
+**`app/services/audio/assembler.py`** — nouvelle `assemble_wav_from_files` (concat disque→disque,
+un chapitre en mémoire à la fois — pas tout le livre). **Encodage MP3 final : limite résiduelle
+assumée** (relit encore tout `book.wav` en mémoire d'un coup) — différé au Lot C2, non traité ici.
+
+**`app/services/audio/chapter.py`** — `_synthesise_segments` accepte un `should_abort` optionnel
+(défaut `None`, no-op pour la génération standalone par chapitre qui ne suit pas `Book.status`).
+
+**Test-first.** `tests/check_phase27.py` (nouveau, 10 sections) : happy path (2 chapitres → book.wav
+assemblé depuis le disque, timing persisté) ; reprise après échec (chapitre déjà DONE jamais
+retouché) ; régénération complète (tous les chapitres refaits, pas de no-op) ; échec partiel
+(ch.1 DONE préservé, ch.2 FAILED → livre FAILED) ; stop granularité segment (abandon mi-chapitre,
+rien persisté, chapitre PENDING) ; stop entre chapitres (ch.1 DONE préservé, ch.2 jamais entamé) ;
+`POST /generate` accepte FAILED ; livre sans chapitre → toujours DONE ; `assemble_wav_from_files`
+(concat + garde-fou format). **5 suites existantes adaptées** (`_synthesise_book` n'existe plus) :
+`check_phase3.py` (fake remplacé par un mock TTS via le factory — a aussi révélé et corrigé la
+même pollution `tests/fixtures/test.wav`/`.mp3` déjà rencontrée en Lot A, fixée par copie vers un
+tempdir), `check_phase4.py` (§21 retirée, couverte par check_phase27 §2), `check_phase11.py`
+(§7 réécrite avec un vrai chapitre au lieu d'un patch global fragile de `asyncio.run`),
+`check_phase24.py` (F1b §4-5 adaptées au nouveau point d'entrée). `check_phase23.py` (A2, Lot A)
+n'a nécessité **aucun changement** — il testait déjà le contrat public `_generate_book_impl`, pas
+les détails internes. **22/22 suites vertes.**
+
+Fichiers (9) : `app/workers/tasks.py`, `app/services/audio/assembler.py`,
+`app/services/audio/chapter.py`, `app/api/routes/books.py`, `tests/check_phase27.py` (nouveau) +
+`tests/check_phase3.py`, `check_phase4.py`, `check_phase11.py`, `check_phase24.py` (adaptées).
+Aucun changement de schéma DB.
+
+**⚠️ Follow-up frontend non traité (backend seul dans ce lot).** La reprise après un échec de
+génération est maintenant possible côté API (`POST /books/{id}/generate` sur un livre `FAILED`),
+mais l'UI n'a pas de bouton dédié pour ce cas — seul « Reprendre l'analyse » s'affiche sur un livre
+`FAILED` (qui, pour un échec de génération, ne fait rien d'utile : tous les segments existent déjà,
+la ré-analyse est un no-op qui repasse juste le livre à `ANALYZED`). Différé pour ne pas toucher
+`frontend/src/app/books/[id]/page.tsx`, activement modifié par une session parallèle pendant ce lot.
+
+### Lots C2, C3, E, F (restant) — non démarrés
+
+Assemblage WAV + encodage MP3 en flux (M8 résiduel) ; retry par segment TTS (M6 résiduel) ;
+migrations de schéma (M9) ; mineurs restants (F1 résiduel, F3, F4) ; follow-up frontend reprise
+génération (ci-dessus). Détail complet, fichiers concernés et test-first par étape : mémoire
+[[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux
+sources).

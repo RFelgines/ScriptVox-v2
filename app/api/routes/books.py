@@ -148,10 +148,16 @@ def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> B
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status not in (BookStatus.ANALYZED, BookStatus.DONE):
+    # FAILED accepted (audit 2026-07-02, Lot C) so a generation interrupted by /stop
+    # or a real error can be resumed — chapters already DONE are skipped (reprise),
+    # mirroring how /books/{id}/analyze already accepts FAILED to resume analysis.
+    if book.status not in (BookStatus.ANALYZED, BookStatus.DONE, BookStatus.FAILED):
         raise HTTPException(
             status_code=409,
-            detail=f"Book {book_id} cannot be generated (status={book.status.value}). Expected ANALYZED or DONE.",
+            detail=(
+                f"Book {book_id} cannot be generated (status={book.status.value}). "
+                "Expected ANALYZED, DONE or FAILED."
+            ),
         )
     generate_book(book.id)
     return BookResponse.model_validate(book)
