@@ -5,7 +5,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _VALID_LLM = frozenset({"gemini", "ollama"})
-VALID_TTS_PROVIDERS = frozenset({"piper", "elevenlabs", "edgetts", "qwen"})
+# "elevenlabs" retiré (2026-07-02, audit finding M2) : le provider n'a jamais pu
+# fonctionner (voice_id logiques du catalogue injectés tels quels dans une API qui
+# attend un UUID ElevenLabs, modèle codé en dur anglais-only) et n'était couvert par
+# aucun test réel. Voir mémoire audit-2026-07-02-remediation-plan, Lot D.
+VALID_TTS_PROVIDERS = frozenset({"piper", "edgetts", "qwen"})
 
 
 def _require(name: str) -> str:
@@ -87,9 +91,6 @@ class Settings:
                 raise ValueError(
                     f"PIPER_BINARY_PATH does not exist or is not a file: {self.piper_binary_path!r}"
                 )
-
-        if self.tts_provider == "elevenlabs":
-            self.elevenlabs_api_key: str = _require("ELEVENLABS_API_KEY")
 
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")

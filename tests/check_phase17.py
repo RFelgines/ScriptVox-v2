@@ -166,18 +166,16 @@ assert captured == ["refs/voice.wav"], f"Obtenu : {captured}"
 ok("reference_audio_path transmis jusqu'à la méthode")
 
 
-# ── 10. Signatures — tous les 4 providers concrets ────────────────────────────
-section("Tous les 4 providers concrets — synthesise accepte reference_audio_path")
+# ── 10. Signatures — tous les 3 providers concrets ────────────────────────────
+section("Tous les 3 providers concrets — synthesise accepte reference_audio_path")
 
 from app.services.tts.edgetts import EdgeTTSProvider  # noqa: E402
 from app.services.tts.piper import PiperProvider  # noqa: E402
-from app.services.tts.elevenlabs import ElevenLabsProvider  # noqa: E402
 from app.services.tts.qwen import QwenTTSProvider  # noqa: E402
 
 _PROVIDERS_TO_CHECK = [
     (EdgeTTSProvider, "EdgeTTSProvider"),
     (PiperProvider, "PiperProvider"),
-    (ElevenLabsProvider, "ElevenLabsProvider"),
     (QwenTTSProvider, "QwenTTSProvider"),
 ]
 for _cls, _cname in _PROVIDERS_TO_CHECK:
@@ -187,7 +185,7 @@ for _cls, _cname in _PROVIDERS_TO_CHECK:
     _p = _sig.parameters["reference_audio_path"]
     if _p.default is not None:
         die(f"{_cname}.synthesise: reference_audio_path doit defaut a None, obtenu: {_p.default!r}")
-ok("EdgeTTS / Piper / ElevenLabs / Qwen -- reference_audio_path: str | None = None")
+ok("EdgeTTS / Piper / Qwen -- reference_audio_path: str | None = None")
 
 
 # ── 11. QwenTTS chemin clone — generate_voice_clone appele ───────────────────

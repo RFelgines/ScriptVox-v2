@@ -11,8 +11,8 @@ ScriptVox converts EPUB books into full multi-voice audiobooks:
 4. **Generation** — Synthesise every line with its assigned voice and assemble the
    final audio file.
 
-The application runs **entirely locally** (Ollama + Piper) or in **cloud mode**
-(Gemini + ElevenLabs) based on environment variables — no code change required.
+The application runs **entirely locally** (Ollama + Piper, or Ollama + Qwen3-TTS) or with a
+**cloud LLM** (Gemini) based on environment variables — no code change required.
 
 ---
 
@@ -60,7 +60,6 @@ Same principle for speech synthesis.
 app/services/tts/
 ├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id, emotion=None) -> bytes
 ├── piper.py          # PiperProvider    — local, offline; subprocess piper.exe; voice_id → PIPER_VOICES_DIR/<id>.onnx
-├── elevenlabs.py     # ElevenLabsProvider — cloud, high quality; voice_id = ElevenLabs voice UUID
 ├── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 22050 Hz
 └── qwen.py           # QwenTTSProvider  — local GPU, expressive; emotion → `instruct` param; torch/qwen-tts lazy-imported
 ```
@@ -68,10 +67,17 @@ app/services/tts/
 > **Licence Piper:** `piper-tts` est distribué sous **GPL-3.0** (`OHF-Voice/piper1-gpl`).
 > Toute distribution de ScriptVox incluant Piper doit respecter cette licence.
 
-Provider selected via env var: `TTS_PROVIDER=piper | elevenlabs | edgetts | qwen`
+> **ElevenLabs retiré (2026-07-02, audit finding M2).** Un `ElevenLabsProvider` a existé mais n'a
+> **jamais fonctionné** : les voice_id logiques du catalogue (`male_0`…) étaient injectés tels
+> quels dans l'URL de l'API ElevenLabs, qui attend un UUID de voix réel (aucun mapping n'a jamais
+> existé), et le modèle codé en dur (`eleven_monolingual_v1`) était anglais-only. Aucun test ne
+> l'exerçait en conditions réelles. Supprimé plutôt que corrigé (KISS — pas de besoin identifié) ;
+> voir mémoire `audit-2026-07-02-remediation-plan`, Lot D, si un besoin réel émerge un jour.
 
-> **`emotion` (Phase 14 §B2)** is forwarded from `Segment.emotion` to `synthesise()`. Piper,
-> ElevenLabs and EdgeTTS accept it but ignore it (no-op — none has an emotion lever).
+Provider selected via env var: `TTS_PROVIDER=piper | edgetts | qwen`
+
+> **`emotion` (Phase 14 §B2)** is forwarded from `Segment.emotion` to `synthesise()`. Piper
+> and EdgeTTS accept it but ignore it (no-op — neither has an emotion lever).
 > **`QwenTTSProvider` (§B3, 2026-06-22) is the only consumer**: `emotion` is forwarded as the
 > `instruct` parameter to `generate_custom_voice`. `torch`/`qwen_tts` are heavy optional deps
 > (`requirements-qwen.txt`, not in `requirements.txt`), imported lazily inside the provider —

@@ -1022,10 +1022,10 @@ with Session(_rb_engine) as _s30:
     _r30_book_id = _r30_book.id
 
 with TestClient(app) as _tc:
-    _r30 = _tc.patch(f"/books/{_r30_book_id}", json={"tts_provider": "elevenlabs"})
+    _r30 = _tc.patch(f"/books/{_r30_book_id}", json={"tts_provider": "qwen"})
     assert _r30.status_code == 200, f"Expected 200, got {_r30.status_code} ({_r30.text})"
-    assert _r30.json()["tts_provider"] == "elevenlabs", f"got {_r30.json()}"
-ok("tts_provider='elevenlabs' persisté et renvoyé dans BookResponse")
+    assert _r30.json()["tts_provider"] == "qwen", f"got {_r30.json()}"
+ok("tts_provider='qwen' persisté et renvoyé dans BookResponse")
 
 section("PATCH /books/{id}: tts_provider invalide -> 422")
 
@@ -1050,10 +1050,10 @@ with TestClient(app) as _tc:
     assert _r34.status_code == 200, f"Expected 200, got {_r34.status_code} ({_r34.text})"
     _r34_data = _r34.json()
     assert _r34_data["genre"] == "Fantasy", f"got {_r34_data}"
-    assert _r34_data["tts_provider"] == "elevenlabs", (
+    assert _r34_data["tts_provider"] == "qwen", (
         f"tts_provider (set in section 30) must survive a genre-only PATCH, got {_r34_data}"
     )
-ok("genre='Fantasy' persisté, tts_provider='elevenlabs' (section 30) toujours présent")
+ok("genre='Fantasy' persisté, tts_provider='qwen' (section 30) toujours présent")
 
 section("PATCH /books/{id}: tts_provider seul -> persisté, genre inchangé (pas d'effacement croisé)")
 
@@ -1097,7 +1097,7 @@ with TestClient(app) as _tc:
     assert _r33.status_code == 200, f"Expected 200, got {_r33.status_code} ({_r33.text})"
     _r33_data = _r33.json()
     assert _r33_data["default_tts_provider"], f"got {_r33_data}"
-    assert set(_r33_data["available_tts_providers"]) == {"piper", "elevenlabs", "edgetts", "qwen"}, (
+    assert set(_r33_data["available_tts_providers"]) == {"piper", "edgetts", "qwen"}, (
         f"got {_r33_data['available_tts_providers']}"
     )
 ok(f"GET /settings -> {_r33_data}")

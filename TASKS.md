@@ -1887,11 +1887,49 @@ Fichiers (3) : `app/workers/tasks.py`, `app/config.py`, `app/services/tts/piper.
 d'édition en temps réel ; aucun chevauchement de fond (fonctionnalités indépendantes), juste un
 chevauchement de fichier ponctuel. À reprendre une fois ce fichier stabilisé.
 
-### Lots B → C, D, E, F (restant) — non démarrés
+### Lot D ✅ (2026-07-02) — Suppression complète d'ElevenLabs (M2)
+
+**Décision (option KISS, cf. note de coordination ci-dessus — débloqué dès que l'autre fenêtre a
+committé son travail sur `check_phase7.py`).** Le provider n'a **jamais** pu fonctionner : les
+voice_id logiques du catalogue (`male_0`…) étaient injectés tels quels dans l'URL de l'API
+ElevenLabs (qui attend un UUID de voix réel — aucun mapping n'a jamais existé), et le modèle codé
+en dur (`eleven_monolingual_v1`) était anglais-only. Aucun test ne l'exerçait en conditions réelles.
+Supprimé entièrement plutôt que corrigé — pas de besoin identifié.
+
+**Bug latent corrigé au passage.** Le factory (`get_tts_provider`) retombait **silencieusement sur
+Piper** pour toute valeur de provider non reconnue (y compris, après cette migration, un
+`book.tts_provider="elevenlabs"` stocké avant coup) — un livre aurait été resynthétisé avec la
+mauvaise voix sans la moindre erreur. Le factory a désormais une branche explicite par provider
+connu + un `else: raise ValueError` pour tout le reste.
+
+**Fichiers (11).**
+- `app/config.py` — `VALID_TTS_PROVIDERS` réduit à `{piper, edgetts, qwen}` ; bloc
+  `if self.tts_provider == "elevenlabs":` retiré.
+- `app/services/tts/elevenlabs.py` — **supprimé** (dead code, jamais fonctionnel).
+- `app/services/tts/factory.py` — branche `piper` rendue explicite (était le fallback implicite) +
+  `else: raise ValueError` pour toute valeur inconnue.
+- `app/api/routes/settings.py` — branche `if p == "elevenlabs":` de `_probe_tts` retirée (code mort
+  depuis le fail-fast de `Settings`, trouvé en vérifiant les résidus après la suppression).
+- `.env.example`, `README.md`, `ARCHITECTURE.md` — mentions ElevenLabs retirées (nouvelle note dans
+  ARCHITECTURE.md §2.2 expliquant la suppression, pour qui la chercherait). Le tableau historique
+  « Phasing » (Phase 3, en bas d'ARCHITECTURE.md) volontairement **laissé inchangé** — trace
+  factuelle de ce qui a été livré à l'époque, pas l'état actuel.
+- `tests/check_phase4.py`, `check_phase7.py`, `check_phase9.py`, `check_phase17.py` — assertions
+  ElevenLabs retirées/adaptées (ex. `check_phase7.py` : PATCH `tts_provider="elevenlabs"` remplacé
+  par `"qwen"` pour continuer à tester la persistance à travers des PATCH partiels).
+
+**Test-first.** `tests/check_phase25.py` (nouveau, 7 sections) : `elevenlabs` absent de
+`VALID_TTS_PROVIDERS` ; `Settings(TTS_PROVIDER=elevenlabs)` lève `ValueError` ; le module
+`elevenlabs.py` n'existe plus (`ModuleNotFoundError` à l'import) ; `get_tts_provider(override=
+"elevenlabs")` lève un `ValueError` explicite (pas de repli silencieux — confirmé en échec avant le
+fix : plantait en `AttributeError` brut, démontrant le bug M1 en direct) ; régression piper/edgetts/
+qwen inchangés ; `PATCH /books` rejette `"elevenlabs"` en 422 ; `GET /settings` ne l'annonce plus.
+**21/21 suites vertes** (`check_phase1` → `check_phase25`), zéro régression.
+
+### Lots B (reste) → C, E, F (restant) — non démarrés
 
 Override TTS par livre — reste `assign_voices`/`book.tts_provider` (M4) + `PATCH /characters` refuse
-les voix clonées (M3) ; ElevenLabs jamais fonctionnel (M2, décision ⚖️ D à trancher — **prochain
-candidat**, bloqué temporairement cf. note ci-dessus) ; robustesse/mémoire de la génération longue
-(M6/M7/M8, décision d'architecture ⚖️ C0 à trancher) ; migrations de schéma (M9) + mineurs restants.
-Détail complet, fichiers concernés et test-first par étape : mémoire
+les voix clonées (M3) ; robustesse/mémoire de la génération longue (M6/M7/M8, décision
+d'architecture ⚖️ C0 à trancher — **prochain candidat**) ; migrations de schéma (M9) + mineurs
+restants. Détail complet, fichiers concernés et test-first par étape : mémoire
 [[audit-2026-07-02-remediation-plan]] (pas dupliqué ici pour éviter la dérive entre les deux sources).

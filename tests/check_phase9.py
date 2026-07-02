@@ -164,10 +164,10 @@ app.dependency_overrides.clear()
 
 # ── Section 5: GET /voices — provider sans locale -> null ────────────────────
 
-section("GET /voices: provider=elevenlabs -> locale null (autre branche)")
+section("GET /voices: provider=qwen -> locale null (autre branche)")
 
 mock_eleven = MagicMock()
-mock_eleven.tts_provider = "elevenlabs"
+mock_eleven.tts_provider = "qwen"
 app.dependency_overrides[get_settings] = lambda: mock_eleven
 with TestClient(app) as tc:
     resp = tc.get("/voices")

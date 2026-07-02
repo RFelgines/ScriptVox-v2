@@ -103,9 +103,6 @@ def _probe_tts(settings: Settings) -> ProviderStatus:
         locale = getattr(settings, "edgetts_locale", "fr-FR")
         return ProviderStatus(name=f"EdgeTTS ({locale})", status="ok", detail="Cloud, toujours disponible")
 
-    if p == "elevenlabs":
-        return ProviderStatus(name="ElevenLabs", status="ok", detail="Clé API configurée")
-
     if p == "piper":
         binary_ok = Path(settings.piper_binary_path).is_file()
         voices_ok = Path(settings.piper_voices_dir).is_dir()

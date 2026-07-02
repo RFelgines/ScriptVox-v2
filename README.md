@@ -1,7 +1,7 @@
 # ScriptVox
 
 Convert an EPUB book into a full multi-voice audiobook.  
-Runs with **EdgeTTS** (free, no key, internet required — default), **locally** (Ollama + Piper), or in **cloud mode** (Gemini + ElevenLabs) — no code change required, only environment variables.
+Runs with **EdgeTTS** (free, no key, internet required — default), **locally** (Ollama + Piper), or with **Qwen3-TTS** (local GPU, emotion per line) — no code change required, only environment variables.
 
 ---
 
@@ -32,11 +32,10 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size — **32768 recommended** (8192 truncates responses on real novel chapters) |
 | `GEMINI_API_KEY` | `LLM_PROVIDER=gemini` | Gemini API key |
 | `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
-| `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `elevenlabs` (cloud) · `qwen` (local GPU, emotion) |
+| `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `qwen` (local GPU, emotion) |
 | `EDGETTS_LOCALE` | `TTS_PROVIDER=edgetts` | BCP-47 locale for voice selection, e.g. `en-US` (default), `fr-FR` |
 | `PIPER_VOICES_DIR` | `TTS_PROVIDER=piper` | Path to the folder containing `.onnx` voice files |
 | `PIPER_BINARY_PATH` | `TTS_PROVIDER=piper` | Path to the `piper` executable (see Piper binary below) |
-| `ELEVENLABS_API_KEY` | `TTS_PROVIDER=elevenlabs` | ElevenLabs API key |
 | `QWEN_MODEL` | `TTS_PROVIDER=qwen` | `1.7b` (default) or `0.6b` — see Qwen3-TTS below |
 | `QWEN_LANGUAGE` | `TTS_PROVIDER=qwen` | Language passed to the model, e.g. `French` (default) |
 | `QWEN_DEVICE` | `TTS_PROVIDER=qwen` | torch device string, default `cuda:0` |
@@ -92,7 +91,7 @@ Set `TTS_PROVIDER=edgetts` in `.env` (it is the default). Optionally set `EDGETT
 
 The voice catalogue maps logical IDs (`narrator`, `male_0` … `neutral_1`) to neural voice names automatically — no configuration needed.
 
-> EdgeTTS output is normalised to **22050 Hz mono 16-bit WAV** by the `miniaudio` decoder before assembly, so it is fully compatible with the Piper and ElevenLabs audio formats.
+> EdgeTTS output is normalised to **22050 Hz mono 16-bit WAV** by the `miniaudio` decoder before assembly, so it is fully compatible with the Piper audio format.
 
 ---
 

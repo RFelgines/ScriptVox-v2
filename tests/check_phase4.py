@@ -43,10 +43,9 @@ def die(msg: str) -> None:
 section("All TTS modules import cleanly")
 from app.services.tts.base import BaseTTSProvider  # noqa: E402
 from app.services.tts.piper import PiperProvider  # noqa: E402
-from app.services.tts.elevenlabs import ElevenLabsProvider  # noqa: E402
 from app.services.tts.factory import get_tts_provider  # noqa: E402
 from app.core.exceptions import TTSError  # noqa: E402
-ok("base, piper, elevenlabs, factory, TTSError")
+ok("base, piper, factory, TTSError")
 
 
 # ── 2. BaseTTSProvider is abstract ────────────────────────────────────────────
@@ -67,33 +66,16 @@ provider = get_tts_provider(settings)
 assert isinstance(provider, PiperProvider), f"Expected PiperProvider, got {type(provider)}"
 ok(f"TTS_PROVIDER=piper => {type(provider).__name__}")
 
-os.environ["TTS_PROVIDER"] = "elevenlabs"
-os.environ["ELEVENLABS_API_KEY"] = "fake-key-for-type-check"
-get_settings.cache_clear()
-el_provider = get_tts_provider(get_settings())
-assert isinstance(el_provider, ElevenLabsProvider), f"Expected ElevenLabsProvider, got {type(el_provider)}"
-ok(f"TTS_PROVIDER=elevenlabs => {type(el_provider).__name__}")
 
-# Restore to piper for remaining tests
-os.environ["TTS_PROVIDER"] = "piper"
-del os.environ["ELEVENLABS_API_KEY"]
-get_settings.cache_clear()
-
-
-# ── 4. Fail-fast: ELEVENLABS_API_KEY manquant ─────────────────────────────────
-section("Settings raises ValueError when ELEVENLABS_API_KEY is absent")
-os.environ["TTS_PROVIDER"] = "elevenlabs"
-os.environ.pop("ELEVENLABS_API_KEY", None)
+# ── 4. get_tts_provider() lève une erreur explicite pour une valeur inconnue ──
+section("get_tts_provider() raises ValueError for an unknown provider (no silent Piper fallback)")
 get_settings.cache_clear()
 try:
-    get_settings()
-    die("Expected ValueError when ELEVENLABS_API_KEY missing")
+    get_tts_provider(get_settings(), override="ghost_provider")
+    die("Expected ValueError for an unrecognised provider override")
 except ValueError as exc:
-    assert "ELEVENLABS_API_KEY" in str(exc), f"Unexpected error: {exc}"
+    assert "ghost_provider" in str(exc), f"Unexpected error: {exc}"
     ok(f"ValueError raised: {exc}")
-finally:
-    os.environ["TTS_PROVIDER"] = "piper"
-    get_settings.cache_clear()
 
 
 # ── 5. PiperProvider lève TTSError (model absent / piper-tts non installé) ───
@@ -106,27 +88,7 @@ try:
 except TTSError:
     ok("TTSError raised (missing model file or piper-tts not installed)")
 
-# ── 6. ElevenLabsProvider lève TTSError sur erreur HTTP ──────────────────────
-section("ElevenLabsProvider.synthesise raises TTSError on HTTP error")
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
-import httpx  # noqa: E402
-
-os.environ["TTS_PROVIDER"] = "elevenlabs"
-os.environ["ELEVENLABS_API_KEY"] = "fake-key"
-get_settings.cache_clear()
-el = ElevenLabsProvider(get_settings())
-
-with patch("httpx.AsyncClient.post", new_callable=AsyncMock,
-           side_effect=httpx.ConnectError("connection refused")):
-    try:
-        asyncio.run(el.synthesise("hello", "voice_id"))
-        die("Expected TTSError from ElevenLabsProvider")
-    except TTSError:
-        ok("TTSError raised on HTTP ConnectError")
-
-os.environ["TTS_PROVIDER"] = "piper"
-del os.environ["ELEVENLABS_API_KEY"]
-get_settings.cache_clear()
 
 
 # ── 6. TTSError stocke context et cause ───────────────────────────────────────
@@ -144,13 +106,13 @@ section("synthesise(text, voice_id, emotion=None) -- contrat sur base + 3 provid
 import inspect  # noqa: E402
 from app.services.tts.edgetts import EdgeTTSProvider  # noqa: E402
 
-for _cls in (BaseTTSProvider, PiperProvider, ElevenLabsProvider, EdgeTTSProvider):
+for _cls in (BaseTTSProvider, PiperProvider, EdgeTTSProvider):
     _sig = inspect.signature(_cls.synthesise)
     assert "emotion" in _sig.parameters, f"{_cls.__name__}.synthesise sans param 'emotion'"
     assert _sig.parameters["emotion"].default is None, (
         f"{_cls.__name__}.synthesise : emotion défaut != None"
     )
-ok("base + Piper + ElevenLabs + EdgeTTS exposent emotion: str|None = None")
+ok("base + Piper + EdgeTTS exposent emotion: str|None = None")
 
 
 # ── 7. Import voice_assignment ────────────────────────────────────────────────
@@ -335,31 +297,6 @@ with tempfile.TemporaryDirectory() as _tmpdir:
         assert _assembled.getnchannels() == 1
         assert _assembled.getframerate() == 22050
     ok("Assembled WAV: 3 segments -> 350 frames, 1ch / 22050 Hz")
-
-
-
-# ── 20. ElevenLabsProvider retourne du WAV valide sur 200 ────────────────────
-section("ElevenLabsProvider wraps PCM in valid WAV bytes on HTTP 200")
-os.environ["TTS_PROVIDER"] = "elevenlabs"
-os.environ["ELEVENLABS_API_KEY"] = "fake-key"
-get_settings.cache_clear()
-_el_ok = ElevenLabsProvider(get_settings())
-
-_fake_pcm = b"\x00\x00" * 100  # 100 frames, 16-bit silence
-_mock_resp = MagicMock()
-_mock_resp.raise_for_status.return_value = None
-_mock_resp.content = _fake_pcm
-
-with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=_mock_resp):
-    _wav = asyncio.run(_el_ok.synthesise("hello world", "test_voice_id"))
-    assert _wav[:4] == b"RIFF", f"Expected WAV RIFF header, got {_wav[:4]!r}"
-    with wave.open(io.BytesIO(_wav), "rb") as _wf:
-        assert _wf.getnframes() == 100, f"Expected 100 frames, got {_wf.getnframes()}"
-    ok(f"ElevenLabsProvider returned {len(_wav)}-byte WAV from 200-byte PCM input")
-
-os.environ["TTS_PROVIDER"] = "piper"
-del os.environ["ELEVENLABS_API_KEY"]
-get_settings.cache_clear()
 
 
 
