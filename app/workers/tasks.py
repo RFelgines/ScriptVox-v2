@@ -192,6 +192,31 @@ async def _analyze_book(
     return True
 
 
+def _release_qwen_gpu(provider) -> None:
+    """Best-effort VRAM release once a synthesis run ends. Only the internal
+    Base<->CustomVoice swap (qwen.py `_ensure_model`/`_ensure_base_model`) and the
+    voice-sample endpoint (`_generate_voice_sample_async`) ever cleared CUDA memory
+    before -- a normal generate_book/generate_chapter run never did, leaving VRAM
+    reserved by this process for its whole lifetime even after switching to a
+    different TTS provider for the next book (risk of contention with Ollama, see
+    memory tts_emotion_qwen3_direction). No-op for any provider that isn't Qwen,
+    or if nothing was actually loaded during this run."""
+    from app.services.tts.qwen import QwenTTSProvider
+    if not isinstance(provider, QwenTTSProvider):
+        return
+    if provider._model is None and provider._base_model is None:
+        return
+    import gc
+    provider._model = None
+    provider._base_model = None
+    gc.collect()
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 async def _synthesise_book(
     book_id: int,
     source_path: str,
@@ -243,37 +268,40 @@ async def _synthesise_book(
     n = len(all_segments)
     wav_chunks: list[bytes] = []
 
-    for i, seg in enumerate(all_segments):
-        # Abort if the user triggered /stop while we were synthesising a previous
-        # segment — otherwise a multi-hour book generation ignores /stop entirely
-        # and still writes DONE + audio_path at the end.
-        with Session(engine) as _s:
-            _b = _s.get(Book, book_id)
-            if _b is None or _b.status == BookStatus.FAILED:
-                logger.info("generate_book: stop requested at segment %d/%d, aborting", i, n)
-                return None
+    try:
+        for i, seg in enumerate(all_segments):
+            # Abort if the user triggered /stop while we were synthesising a
+            # previous segment — otherwise a multi-hour book generation ignores
+            # /stop entirely and still writes DONE + audio_path at the end.
+            with Session(engine) as _s:
+                _b = _s.get(Book, book_id)
+                if _b is None or _b.status == BookStatus.FAILED:
+                    logger.info("generate_book: stop requested at segment %d/%d, aborting", i, n)
+                    return None
 
-        voice_id = (
-            NARRATOR_VOICE_ID
-            if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
-            else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
-        )
-        wav_chunks.append(await provider.synthesise(
-            seg.text, voice_id,
-            emotion=seg.emotion,
-            reference_audio_path=ref_path.get(voice_id),
-        ))
+            voice_id = (
+                NARRATOR_VOICE_ID
+                if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
+                else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
+            )
+            wav_chunks.append(await provider.synthesise(
+                seg.text, voice_id,
+                emotion=seg.emotion,
+                reference_audio_path=ref_path.get(voice_id),
+            ))
 
-        with Session(engine) as session:
-            book = session.get(Book, book_id)
-            book.progress = 60.0 + (i + 1) / n * 30.0
-            book.updated_at = datetime.now(timezone.utc)
-            session.add(book)
-            session.commit()
+            with Session(engine) as session:
+                book = session.get(Book, book_id)
+                book.progress = 60.0 + (i + 1) / n * 30.0
+                book.updated_at = datetime.now(timezone.utc)
+                session.add(book)
+                session.commit()
 
-    audio_path = str(_Path(source_path).with_suffix(".wav"))
-    assemble_wav(wav_chunks, audio_path)
-    return audio_path
+        audio_path = str(_Path(source_path).with_suffix(".wav"))
+        assemble_wav(wav_chunks, audio_path)
+        return audio_path
+    finally:
+        _release_qwen_gpu(provider)
 
 
 def _analyze_book_impl(book_id: int, force: bool = False) -> None:
@@ -508,7 +536,10 @@ async def _synthesise_chapter_worker(
         provider = tts_factory.get_tts_provider(
             settings, override=book.tts_provider if book else None
         )
-        return await _synthesise_segments(chapter_id, session, provider)
+        try:
+            return await _synthesise_segments(chapter_id, session, provider)
+        finally:
+            _release_qwen_gpu(provider)
 
 
 def _generate_chapter_impl(chapter_id: int) -> None:

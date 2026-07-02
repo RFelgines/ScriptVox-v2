@@ -10,10 +10,38 @@ from app.services.tts.base import BaseTTSProvider
 
 class PiperProvider(BaseTTSProvider):
     def __init__(self, settings: Settings) -> None:
+        # Settings always populates these two fields (possibly None) regardless of
+        # whether piper is the global provider -- a per-book override can reach here
+        # even when piper isn't configured at all (audit 2026-07-02, M1). Validate
+        # explicitly instead of letting Path(None) raise an opaque TypeError.
+        if not settings.piper_voices_dir or not settings.piper_binary_path:
+            raise TTSError(
+                "piper:config",
+                ValueError(
+                    "Piper is not configured: set PIPER_VOICES_DIR and PIPER_BINARY_PATH "
+                    "(required even when piper is only used as a per-book override)."
+                ),
+            )
+        voices_dir = Path(settings.piper_voices_dir)
+        if not voices_dir.is_dir():
+            raise TTSError(
+                "piper:config",
+                ValueError(
+                    f"PIPER_VOICES_DIR does not exist or is not a directory: {settings.piper_voices_dir!r}"
+                ),
+            )
+        binary = Path(settings.piper_binary_path)
+        if not binary.is_file():
+            raise TTSError(
+                "piper:config",
+                ValueError(
+                    f"PIPER_BINARY_PATH does not exist or is not a file: {settings.piper_binary_path!r}"
+                ),
+            )
         # Resolve to absolute so synthesis is independent of the worker's cwd.
         # piper.exe locates its DLLs and espeak-ng-data relative to its own path.
-        self._voices_dir = Path(settings.piper_voices_dir).resolve()
-        self._binary = Path(settings.piper_binary_path).resolve()
+        self._voices_dir = voices_dir.resolve()
+        self._binary = binary.resolve()
 
     async def synthesise(
         self, text: str, voice_id: str,

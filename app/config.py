@@ -55,33 +55,41 @@ class Settings:
                 os.environ.get("OLLAMA_TIMEOUT_PER_1K_TOKENS", "200")
             )
 
+        # Piper/EdgeTTS/Qwen settings are ALWAYS populated (best-effort, no _require),
+        # regardless of which provider is the global default: a book can override its
+        # TTS provider independently of TTS_PROVIDER (see app/services/tts/factory.py),
+        # so the provider actually instantiated at generation time may not be the
+        # global one. Fail-fast (ValueError) still applies below, but ONLY for the
+        # provider that is actually the global default -- other providers validate
+        # their own prerequisites lazily, at instantiation (see PiperProvider), with
+        # a clear error instead of an AttributeError on a missing Settings attribute
+        # (audit 2026-07-02, finding M1).
+        self.piper_voices_dir: str | None = os.environ.get("PIPER_VOICES_DIR", "").strip() or None
+        self.piper_binary_path: str | None = os.environ.get("PIPER_BINARY_PATH", "").strip() or None
+        self.edgetts_locale: str = os.environ.get("EDGETTS_LOCALE", "en-US").strip() or "en-US"
+        # torch/qwen-tts are optional heavy deps (requirements-qwen.txt), imported lazily
+        # by the provider -- cannot fail-fast on their absence here without importing them.
+        self.qwen_model: str = os.environ.get("QWEN_MODEL", "1.7b").strip() or "1.7b"
+        self.qwen_language: str = os.environ.get("QWEN_LANGUAGE", "French").strip() or "French"
+        self.qwen_device: str = os.environ.get("QWEN_DEVICE", "cuda:0").strip() or "cuda:0"
+        self.qwen_attn: str = os.environ.get("QWEN_ATTN", "sdpa").strip() or "sdpa"
+
         if self.tts_provider == "piper":
-            self.piper_voices_dir: str = _require("PIPER_VOICES_DIR")
+            if not self.piper_voices_dir:
+                raise ValueError("Missing required env var: PIPER_VOICES_DIR")
             if not Path(self.piper_voices_dir).is_dir():
                 raise ValueError(
                     f"PIPER_VOICES_DIR does not exist or is not a directory: {self.piper_voices_dir!r}"
                 )
-            self.piper_binary_path: str = _require("PIPER_BINARY_PATH")
+            if not self.piper_binary_path:
+                raise ValueError("Missing required env var: PIPER_BINARY_PATH")
             if not Path(self.piper_binary_path).is_file():
                 raise ValueError(
                     f"PIPER_BINARY_PATH does not exist or is not a file: {self.piper_binary_path!r}"
                 )
 
-        if self.tts_provider == "edgetts":
-            self.edgetts_locale: str = (
-                os.environ.get("EDGETTS_LOCALE", "en-US").strip() or "en-US"
-            )
-
         if self.tts_provider == "elevenlabs":
             self.elevenlabs_api_key: str = _require("ELEVENLABS_API_KEY")
-
-        if self.tts_provider == "qwen":
-            # torch/qwen-tts are optional heavy deps (requirements-qwen.txt), imported lazily
-            # by the provider -- cannot fail-fast on their absence here without importing them.
-            self.qwen_model: str = os.environ.get("QWEN_MODEL", "1.7b").strip() or "1.7b"
-            self.qwen_language: str = os.environ.get("QWEN_LANGUAGE", "French").strip() or "French"
-            self.qwen_device: str = os.environ.get("QWEN_DEVICE", "cuda:0").strip() or "cuda:0"
-            self.qwen_attn: str = os.environ.get("QWEN_ATTN", "sdpa").strip() or "sdpa"
 
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")
