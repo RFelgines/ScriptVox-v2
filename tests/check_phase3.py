@@ -438,7 +438,7 @@ async def _fake_analyze_book(
     engine,
     resume: bool = False,
     already_done: int = 0,
-) -> None:
+) -> bool:
     from sqlalchemy import delete as sa_delete
     from datetime import datetime, timezone
 
@@ -472,6 +472,8 @@ async def _fake_analyze_book(
             bk.updated_at = datetime.now(timezone.utc)
             session.add(bk)
             session.commit()
+
+    return True
 
 
 _original_synthesise_book = tasks_module._synthesise_book

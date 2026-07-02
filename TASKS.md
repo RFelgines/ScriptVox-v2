@@ -1616,3 +1616,196 @@ Frontend pur, dépend de D2 pour le champ `genre`.
 Vérifié en conditions réelles (preview, backend redémarré pour charger le nouveau schéma,
 2 vrais livres HP taggés "Fantasy jeunesse" via l'UI). `npm run build` + `npm run lint` verts
 sur les 3 sous-étapes.
+
+---
+
+## Phase 21 — Suivi de lecture synchronisé (E0/E1/E2) ✅ (2026-06-30/07-01)
+
+**Pourquoi.** Point E de la roadmap 2026-06-30 — le "saut produit" façon ElevenLabs : timing par
+segment, bandeau "Lu par" + orbe, transcription synchronisée. Détail complet déjà documenté en
+mémoire ([[player-sync-e0-e1-e2]]) — résumé ici pour combler l'absence de section TASKS.md.
+
+- **E0** (commits `077ecaa`, `6824a3c`) — `Segment.audio_offset_ms`/`duration_ms` (migration réelle,
+  pas de wipe), `GET /books/{id}/chapters/{n}/segments`, calcul dans `_synthesise_segments()`.
+- **E1** (commit `1b8ae57`) — `PlayerProvider.tsx` dérive `currentSegment` (via `useMemo`, pas de
+  `setState` en effet) ; `PlayerBar.tsx` affiche orbe + nom du personnage.
+- **E2** (commit `ec63371`) — `ChapterTranscript.tsx` (nouveau), affiché sur `/books/{id}` dès qu'un
+  chapitre du livre joue, segment courant surligné + auto-scroll.
+- **E3 (mot-à-mot) : décidé explicitement PAS FAIT** — seul EdgeTTS fournit `WordBoundary`, jugé pas
+  assez rentable. Ne pas reproposer sauf changement d'avis explicite sur EdgeTTS.
+- Fix connexe (commit `c25e17a`) : 409 sur `.../chapters/{n}/generate` et `.../chapters/generate` si
+  `chapter.status == GENERATING` (évite un double-dispatch Huey sur double-clic).
+
+Tests : `tests/check_phase21.py` (E0) + sections ajoutées à `tests/check_phase7.py` (guard 409).
+
+---
+
+## Phase 22 — Refonte des orbes de voix : design retenu + mise en production
+
+> **Contexte.** Long chantier d'exploration (2026-07-01/02, voir mémoire
+> [[voice-orb-redesign-elevenlabs]] pour le fil complet des itérations) : shader WebGL (OGL/fbm)
+> abandonné après plusieurs tours jugés décevants ; brainstorm de 14 designs CSS/SVG très différents ;
+> **décision finale (2026-07-02) : "Glass Bubble original"** — conic-gradient qui tourne + verre en
+> overlay, sans reflet. La page `frontend/src/app/orb-lab/page.tsx` est **conservée à dessein** pour
+> continuer à expérimenter d'autres pistes plus tard (ne pas la supprimer sans demande explicite).
+> Une évolution "nuages qui se dispersent" plaît aussi mais reste à trancher **dans le labo**, pas
+> encore en prod. **4 étapes, GO explicite avant chacune (Plan-First, CLAUDE.md).**
+
+### Étape 1 — Migrer `VoiceOrb.tsx` vers "Glass Bubble original" + prop `active`
+
+**Pourquoi.** `VoiceOrb.tsx` (production) tourne encore sur l'ancien shader WebGL (`ogl`) + un reliquat
+d'expérimentation de palettes (`palette?: "A"|...|"H"`, jamais utilisé en prod) — aucun des deux n'est
+le design retenu. Contrainte de performance actée par l'utilisateur : **un orbe n'anime que lorsqu'il
+est actif** (segment en cours de lecture, voix survolée/prévisualisée) ; **statique sinon** — critique
+pour la transcription (jusqu'à 50-200 orbes simultanés) et le catalogue de voix.
+
+**Fichiers (~4-5, à confirmer au moment du plan détaillé).**
+- `frontend/src/components/VoiceOrb.tsx` — réécriture : structure `GlassBubbleOriginal` de
+  `orb-lab/page.tsx` (conic-gradient `filter:blur(14px)` qui tourne + verre `backdrop-filter:blur(4px)
+  saturate(1.3)`, bordure, ombres internes, respiration au clic) ; nouvelle prop `active?: boolean`
+  (défaut `false` = statique, pas d'animation CSS déclenchée) ; suppression de `palette` et du code
+  shader/`ogl`.
+- `frontend/package.json` — retirer la dépendance `ogl` si plus utilisée nulle part après la migration
+  (vérifier avant de la retirer).
+- `frontend/src/app/voix/page.tsx`, `frontend/src/components/ChapterTranscript.tsx`,
+  `frontend/src/components/player/PlayerBar.tsx` — adapter les appels (`palette` retiré, `active` câblé
+  : catalogue = survol/aperçu en cours, transcription = segment en cours de lecture, bandeau = toujours
+  actif tant qu'une lecture est en cours).
+
+**Contrat.** Pas de contrat backend. Composant partagé à 3 emplacements + suppression d'une dépendance
+(`ogl`) — à valider avant implémentation par prudence (CLAUDE.md Niveau 3, "changement de signature").
+
+### Étape 2 — Vérifier l'unicité de la teinte par voix à la création
+
+**Pourquoi.** Demande utilisateur : "si ce n'est pas déjà le cas". **Exploration effectuée (2026-07-02,
+agent Explore)** : `buildOrbHueMap()` (`voix/page.tsx:42-46`) et `buildHueMap()`
+(`PlayerProvider.tsx:26-30`, logique dupliquée) calculent `hue = (index × 137.5077°) % 360` sur les
+voix **triées par id** — donc une voix nouvellement créée/clonée obtient automatiquement une teinte
+distincte (le tri + angle d'or re-répartit tout l'ensemble). **A priori déjà garanti, aucun bug
+identifié.** Cette étape est donc probablement une simple **vérification en conditions réelles**
+(cloner une voix, confirmer visuellement une teinte différente de toutes les autres) plutôt qu'un
+correctif — sauf si la vérification révèle un cas de collision non anticipé.
+
+**Fichiers.** Aucun a priori — vérification seule.
+
+### Étape 3 — Paramètres : modèle TTS préféré
+
+**Pourquoi.** Demande utilisateur : ajouter dans l'onglet Paramètres un réglage pour choisir le modèle
+TTS préféré. **État actuel (vérifié)** : `GET /settings` (`app/schemas/settings.py`,
+`app/api/routes/settings.py`) expose `default_tts_provider`/`available_tts_providers` en **lecture
+seule** — `frontend/src/app/parametres/page.tsx` n'affiche que des cartes de statut, aucune UI
+d'édition, aucune route `PATCH`.
+
+**⚠️ Contrat — REVUE HUMAINE OBLIGATOIRE avant implémentation (CLAUDE.md Niveau 3).** Question à
+trancher au moment du plan détaillé, avant tout code : `default_tts_provider` vient-il aujourd'hui
+d'une variable d'environnement (process-level, donc changer la préférence nécessiterait un redémarrage
+backend) ou doit-on créer une vraie persistance (nouvelle table/colonne DB) modifiable à chaud depuis
+l'UI ? Ce choix détermine si c'est un simple `PATCH /settings` en mémoire ou un vrai modèle SQLModel
+nouveau — à ne pas trancher sans montrer le contrat.
+
+**Fichiers (pressentis, à confirmer).** `app/schemas/settings.py`, `app/api/routes/settings.py`,
+potentiellement un nouveau modèle si persistance DB, `frontend/src/app/parametres/page.tsx` (nouveau
+sélecteur).
+
+### Étape 4 — Transcription déplacée dans le player déplié + surlignage de phrase + orbe active sur le segment en cours
+
+**Pourquoi.** Demande utilisateur : ne plus afficher la transcription en direct sur la page livre,
+mais dans le panneau du lecteur une fois déplié. La phrase en cours doit être surlignée (bleu foncé en
+thème sombre, teinte adaptée en thème clair), et **seule l'orbe de la voix qui lit la phrase courante
+doit être animée** (cf. Étape 1, prop `active`) — ex. si Harry (voix "toto") parle, seule sa bulle
+s'anime pendant que les autres restent statiques.
+
+**État actuel (vérifié)** : `ChapterTranscript.tsx` est aujourd'hui rendu directement dans
+`frontend/src/app/books/[id]/page.tsx:804` (condition `track?.bookId === book.id`). `PlayerBar.tsx` a
+déjà un état `expanded` (ligne 49) avec deux branches de rendu distinctes. `currentSegment` est déjà
+calculé (memoïsé, pas de `setState` en effet) dans `PlayerProvider.tsx:103-110` à partir de
+`currentTime` et `audio_offset_ms` — pas de nouveau calcul de timing nécessaire, seulement du
+déplacement de composant + du style.
+
+**Fichiers (~4).**
+- `frontend/src/components/player/PlayerBar.tsx` — monter `<ChapterTranscript>` dans la branche
+  `expanded` (au lieu de la page livre), lui passer `bookId`/`chapterPosition` depuis `track`.
+- `frontend/src/app/books/[id]/page.tsx` — retirer le rendu direct de `ChapterTranscript`.
+- `frontend/src/components/ChapterTranscript.tsx` — passer `active={true}` uniquement à l'orbe du
+  segment courant (cf. Étape 1) ; classe de surlignage par thème.
+- `frontend/src/app/globals.css` (ou classes Tailwind existantes) — couleur de surlignage adaptée au
+  thème clair/sombre (le projet a déjà un mécanisme de thème, voir `layout.tsx`/`data-theme`).
+
+**Contrat.** Pas de contrat backend — uniquement du déplacement de composant + style frontend. Dépend
+de l'Étape 1 (prop `active` doit exister avant de câbler "seule l'orbe active s'anime").
+
+**Ordre recommandé entre les 4 étapes : 1 → 4 → 2 → 3.** L'Étape 1 (migration du composant + prop
+`active`) est un prérequis direct de l'Étape 4 (qui a besoin de cette prop). L'Étape 2 est une simple
+vérification, faisable à tout moment, y compris en passant. L'Étape 3 est la plus indépendante mais
+nécessite une décision de contrat avant de coder — bon candidat pour la fin ou en parallèle si un
+second contexte de travail est disponible.
+
+---
+
+## Phase 23 — Hardening post-audit (2026-07-02)
+
+> **Contexte.** Audit technique complet du dépôt (2026-07-02, session dédiée) : backend, worker,
+> frontend, tests. Rapport structuré par sévérité (Critique/Majeur/Mineur/Note), plan de remédiation
+> détaillé en mémoire ([[audit-2026-07-02-remediation-plan]]) — lots A→F, plusieurs décisions ⚖️
+> encore à trancher (override TTS par livre, ElevenLabs, unification génération, sample GPU hors
+> process API). Cette section ne documente que ce qui est réellement livré ; le reste du plan reste
+> dans la mémoire tant qu'aucun GO n'a été donné.
+
+### Lot A ✅ (2026-07-02) — Honorer `/stop` (Critique C1)
+
+**Symptôme.** `POST /books/{id}/stop` posait `Book.status=FAILED` en base, mais le worker écrivait
+ensuite `ANALYZED`/`DONE` sans jamais revérifier le statut — un livre stoppé en cours d'analyse ou de
+génération finissait affiché comme réussi, avec des chapitres restants totalement dépourvus de
+segments (générant un audiobook tronqué sans la moindre erreur visible).
+
+**A1 — stop pendant l'analyse.**
+- `_analyze_book` retourne désormais `bool` (`True` = analyse allée jusqu'au bout, `False` = abandon
+  détecté). Le check de statut FAILED en boucle est désormais fait à **chaque** chapitre (avant, seul
+  `i > 0` déclenchait le check, sautant le 1ᵉʳ chapitre) + un nouveau check est ajouté juste avant
+  `suggest_merges` (le stop pouvait survenir après le dernier chapitre mais avant les suggestions de
+  fusion).
+- `_analyze_book_impl` n'écrit `ANALYZED` que si `_analyze_book` a retourné `True` **et** que le
+  statut relu en DB n'est pas `FAILED` (double garde contre une course résiduelle entre les deux
+  points de contrôle).
+
+**A2 — stop pendant la génération.**
+- `_synthesise_book` retourne désormais `str | None` (`None` = abandon ; `""` = livre sans segment,
+  comportement préexistant inchangé ; chemin réel = chemin du WAV). Le statut est revérifié avant
+  **chaque** segment synthétisé (avant : aucun check dans toute la boucle TTS).
+- `_generate_book_impl` n'écrit `audio_path`/`mp3_path`/`DONE` que si `_synthesise_book` n'a pas
+  retourné `None`, avec la même double garde contre une course juste avant le commit final.
+
+**Contrat interne changé (non public — pas de revue CLAUDE.md niveau 3 requise) :** `_analyze_book`
+retournait `None`, retourne maintenant `bool` ; `_synthesise_book` retournait `str`, retourne
+maintenant `str | None`. Un seul call-site externe à corriger : `tests/check_phase3.py` monkeypatchait
+`_analyze_book` avec un faux implicitement `-> None` — mis à jour pour retourner `True`.
+
+**Test-first.** `tests/check_phase23.py` (nouveau, 5 sections) :
+- A1a : stop simulé pendant l'analyse du chapitre 1/3 → `analyze()` appelé une seule fois, chapitres
+  2 et 3 sans aucun segment, statut reste `FAILED`, `error_message` préservé, aucun `voice_id` assigné
+  (confirmant qu'`assign_voices` n'a pas tourné).
+- A1b : stop simulé juste après le 3ᵉ (dernier) chapitre, avant `suggest_merges` → les 3 chapitres
+  sont bien analysés (3 personnages distincts), mais `suggest_merges` n'est **jamais** appelé, statut
+  reste `FAILED`.
+- A2 : stop simulé après le 1ᵉʳ segment synthétisé sur 4 → `synthesise()` appelé une seule fois,
+  statut reste `FAILED`, `audio_path`/`mp3_path` jamais écrits.
+
+Confirmé en échec sur le code d'avant fix (9/9 assertions rouges), vert après (5/5 sections, 18/18
+assertions). **19/19 suites existantes sans régression** (`check_phase1` → `check_phase21` +
+`check_phase23`) — une seule adaptation nécessaire (`check_phase3.py`, cf. ci-dessus).
+
+Fichiers (2) : `app/workers/tasks.py`, `tests/check_phase23.py` + `tests/check_phase3.py` (fix du
+fake). Aucun changement de schéma DB, aucune migration nécessaire.
+
+**Hors périmètre de ce lot (documenté dans le plan mémoire, non traité ici) :** génération par
+chapitre (`_generate_chapter_impl`) — ne touche jamais `Book.status`, donc `/stop` (qui exige
+`Book.status ∈ {PROCESSING, GENERATING}`) ne s'y applique de toute façon pas ; pas une régression
+introduite par ce lot.
+
+### Lots B → F — non démarrés
+
+Override TTS par livre cassé (M1/M3/M4), ElevenLabs jamais fonctionnel (M2, décision ⚖️ à trancher),
+robustesse/mémoire de la génération longue (M6/M7/M8, décision d'architecture ⚖️ C0 à trancher),
+migrations de schéma (M9), sample voix clonée bloquant le process API (M5) + mineurs. Détail complet,
+fichiers concernés et test-first par étape : mémoire [[audit-2026-07-02-remediation-plan]] (pas
+dupliqué ici pour éviter la dérive entre les deux sources).

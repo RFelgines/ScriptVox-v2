@@ -18,7 +18,10 @@ async def _analyze_book(
     engine,
     resume: bool = False,
     already_done: int = 0,
-) -> None:
+) -> bool:
+    """Returns True if analysis ran to completion, False if aborted (user /stop —
+    Book.status flipped to FAILED concurrently). Callers must not proceed to voice
+    assignment / ANALYZED on a False return."""
     from sqlalchemy import delete as sa_delete
 
     from app.core.enums import BookStatus
@@ -63,12 +66,12 @@ async def _analyze_book(
 
     for i, (chapter_id, raw_text) in enumerate(chapter_data):
         # Abort if the user triggered /stop while we were processing a previous chapter
-        if i > 0:
-            with Session(engine) as _s:
-                _b = _s.get(Book, book_id)
-                if _b is None or _b.status == BookStatus.FAILED:
-                    logger.info("analyze_book: stop requested at chapter %d, aborting", i)
-                    return
+        # (or, for i==0, raced in right after PROCESSING was set — checked defensively).
+        with Session(engine) as _s:
+            _b = _s.get(Book, book_id)
+            if _b is None or _b.status == BookStatus.FAILED:
+                logger.info("analyze_book: stop requested at chapter %d, aborting", i)
+                return False
 
         known = list(char_map.keys())
         chunks = _chunk_text(raw_text, budget)
@@ -141,6 +144,15 @@ async def _analyze_book(
             session.add(book)
             session.commit()
 
+    # Abort if the user triggered /stop after the last chapter finished but before
+    # we get to merge suggestions — otherwise this non-essential LLM call would run
+    # (and, worse, its caller would then flip the book to ANALYZED regardless).
+    with Session(engine) as _s:
+        _b = _s.get(Book, book_id)
+        if _b is None or _b.status == BookStatus.FAILED:
+            logger.info("analyze_book: stop requested before suggest_merges, aborting")
+            return False
+
     # ── Suggestions de fusion de personnages (livre entier, LLM déjà chaud) ──────
     # Non bloquant : un échec ici n'empêche pas le livre de passer à ANALYZED.
     with Session(engine) as session:
@@ -177,15 +189,20 @@ async def _analyze_book(
                     ))
                 session.commit()
 
+    return True
+
 
 async def _synthesise_book(
     book_id: int,
     source_path: str,
     engine,
-) -> str:
+) -> str | None:
+    """Returns the assembled WAV path, "" if the book has no segments, or None if
+    aborted mid-synthesis (user /stop — Book.status flipped to FAILED concurrently).
+    Callers must not write audio_path/DONE on a None return."""
     from pathlib import Path as _Path
 
-    from app.core.enums import SegmentType
+    from app.core.enums import BookStatus, SegmentType
     from app.models import Book, Chapter, Character, Segment, Voice
     from app.services.audio.assembler import assemble_wav
     from app.services.tts import factory as tts_factory
@@ -227,6 +244,15 @@ async def _synthesise_book(
     wav_chunks: list[bytes] = []
 
     for i, seg in enumerate(all_segments):
+        # Abort if the user triggered /stop while we were synthesising a previous
+        # segment — otherwise a multi-hour book generation ignores /stop entirely
+        # and still writes DONE + audio_path at the end.
+        with Session(engine) as _s:
+            _b = _s.get(Book, book_id)
+            if _b is None or _b.status == BookStatus.FAILED:
+                logger.info("generate_book: stop requested at segment %d/%d, aborting", i, n)
+                return None
+
         voice_id = (
             NARRATOR_VOICE_ID
             if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
@@ -361,9 +387,14 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             already_done = 0
 
         # ── LLM analysis (progress 10% → 60%) ─────────────────────────────────
-        asyncio.run(_analyze_book(
+        completed = asyncio.run(_analyze_book(
             book_id, chapter_data, engine, resume=do_resume, already_done=already_done,
         ))
+        if not completed:
+            # Aborted by a concurrent /stop — Book.status is already FAILED (set by
+            # the stop endpoint). Never proceed to voice assignment / ANALYZED.
+            logger.info("analyze_book: aborted by stop for book_id=%d", book_id)
+            return
 
         # ── Voice assignment ───────────────────────────────────────────────────
         with Session(engine) as session:
@@ -371,11 +402,14 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
 
         with Session(engine) as session:
             book = session.get(Book, book_id)
-            book.status = BookStatus.ANALYZED
-            book.progress = 100.0
-            book.updated_at = datetime.now(timezone.utc)
-            session.add(book)
-            session.commit()
+            # Re-check: a /stop could have raced in between the check above and here.
+            # Never overwrite a FAILED status with ANALYZED.
+            if book is not None and book.status != BookStatus.FAILED:
+                book.status = BookStatus.ANALYZED
+                book.progress = 100.0
+                book.updated_at = datetime.now(timezone.utc)
+                session.add(book)
+                session.commit()
 
     except Exception as exc:
         logger.exception("analyze_book failed for book_id=%d", book_id)
@@ -417,6 +451,11 @@ def _generate_book_impl(book_id: int) -> None:
     try:
         # ── TTS synthesis + audio assembly (progress 60% → 90%) ───────────────
         audio_path = asyncio.run(_synthesise_book(book_id, source_path, engine))
+        if audio_path is None:
+            # Aborted by a concurrent /stop — Book.status is already FAILED (set by
+            # the stop endpoint). Never proceed to writing audio_path / DONE.
+            logger.info("generate_book: aborted by stop for book_id=%d", book_id)
+            return
 
         mp3_path: str | None = None
         if audio_path:
@@ -429,6 +468,11 @@ def _generate_book_impl(book_id: int) -> None:
 
         with Session(engine) as session:
             book = session.get(Book, book_id)
+            # Re-check: a /stop could have raced in between the last segment and
+            # here. Never overwrite a FAILED status with DONE.
+            if book is None or book.status == BookStatus.FAILED:
+                logger.info("generate_book: stop requested just before commit, aborting")
+                return
             book.audio_path = audio_path if audio_path else None
             book.mp3_path = mp3_path
             book.status = BookStatus.DONE
