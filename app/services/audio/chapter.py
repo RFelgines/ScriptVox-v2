@@ -71,9 +71,9 @@ async def _synthesise_segments(
     if should_abort() returned True before the last segment was synthesised —
     callers must discard everything computed so far for this chapter (nothing here
     is persisted; the whole chapter is meant to be redone from scratch on the next
-    attempt, see _generate_chapter_async). should_abort is only ever passed by
-    book-driven generation (Lot C, audit 2026-07-02); a standalone chapter
-    generation has no such concept since it never tracks Book.status.
+    attempt, see _generate_chapter_async). Passed by book-driven generation
+    (Lot C, audit 2026-07-02, polling Book.status) and by standalone chapter
+    generation (polling Chapter.cancel_requested, see _make_chapter_stop_checker).
     """
     segments = session.exec(
         select(Segment).where(Segment.chapter_id == chapter_id).order_by(Segment.position)
@@ -95,24 +95,40 @@ async def _synthesise_segments(
         v = session.exec(select(Voice).where(Voice.voice_id == vid)).first()
         ref_path[vid] = v.reference_audio_path if v else None
 
+    voice_ids: list[str] = [
+        NARRATOR_VOICE_ID
+        if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
+        else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
+        for seg in segments
+    ]
+
+    # Synthesise grouped by checkpoint (non-cloned first, then cloned) instead of
+    # narrative order. Qwen3-TTS can't keep both checkpoints loaded on a 10 Go GPU
+    # (qwen.py _ensure_model/_ensure_base_model unload one before loading the
+    # other); a chapter where cloned and preset voices alternate in narrative
+    # order was measured reloading a ~3-4 Go checkpoint 10-12 times (real HP
+    # book), fragmenting the CUDA allocator until VRAM saturated and spilled into
+    # system RAM. Grouping caps that at 1 swap per chapter regardless of playback
+    # order (2026-07-02, RAM/VRAM investigation). The final WAV/timing are
+    # reassembled in narrative order below, independent of synthesis order.
+    non_cloned = [i for i, vid in enumerate(voice_ids) if ref_path.get(vid) is None]
+    cloned = [i for i, vid in enumerate(voice_ids) if ref_path.get(vid) is not None]
+
+    chunks: dict[int, bytes] = {}
+    for i in non_cloned + cloned:
+        if should_abort is not None and should_abort():
+            return None
+        chunks[i] = await _synthesise_with_retry(
+            tts, segments[i].text, voice_ids[i],
+            emotion=segments[i].emotion,
+            reference_audio_path=ref_path.get(voice_ids[i]),
+        )
+
     wav_chunks: list[bytes] = []
     timing: list[tuple[int, int, int]] = []  # (seg_id, offset_ms, duration_ms)
     offset = 0
-
-    for seg in segments:
-        if should_abort is not None and should_abort():
-            return None
-
-        voice_id = (
-            NARRATOR_VOICE_ID
-            if seg.segment_type == SegmentType.NARRATION or seg.character_id is None
-            else char_voice.get(seg.character_id, NARRATOR_VOICE_ID)
-        )
-        chunk = await _synthesise_with_retry(
-            tts, seg.text, voice_id,
-            emotion=seg.emotion,
-            reference_audio_path=ref_path.get(voice_id),
-        )
+    for i, seg in enumerate(segments):
+        chunk = chunks[i]
         dur = _wav_duration_ms(chunk)
         timing.append((seg.id, offset, dur))
         offset += dur
