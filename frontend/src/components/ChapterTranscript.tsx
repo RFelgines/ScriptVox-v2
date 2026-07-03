@@ -89,7 +89,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <p className="text-sm font-medium">📖 Transcription — Chapitre {chapterPosition}</p>
         {!hasTiming && (
-          <p className="text-xs text-amber-400">
+          <p className="text-xs text-warning">
             ⚠️ Synchronisation indisponible — regénérez ce chapitre
           </p>
         )}

@@ -146,7 +146,7 @@ export default function PlayerBar() {
 
           {/* Scrub complet */}
           <div className="flex w-full max-w-md items-center gap-2">
-            <span className="w-10 shrink-0 text-right text-xs text-muted">{fmt(currentTime)}</span>
+            <span className="w-10 shrink-0 text-right font-mono text-xs tabular-nums text-muted">{fmt(currentTime)}</span>
             <input
               type="range"
               min={0}
@@ -157,7 +157,7 @@ export default function PlayerBar() {
               className="h-1 flex-1 cursor-pointer accent-primary"
               aria-label="Progression"
             />
-            <span className="w-10 shrink-0 text-xs text-muted">{fmt(duration)}</span>
+            <span className="w-10 shrink-0 font-mono text-xs tabular-nums text-muted">{fmt(duration)}</span>
           </div>
 
           {/* Transport */}
@@ -286,7 +286,7 @@ export default function PlayerBar() {
 
       {!expanded && (
         <div className="flex items-center gap-2 px-4 pt-1.5">
-          <span className="w-9 shrink-0 text-right text-[10px] text-muted">{fmt(currentTime)}</span>
+          <span className="w-9 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted">{fmt(currentTime)}</span>
           <input
             type="range"
             min={0}
@@ -297,7 +297,7 @@ export default function PlayerBar() {
             className="h-1 flex-1 cursor-pointer accent-primary"
             aria-label="Progression"
           />
-          <span className="w-9 shrink-0 text-[10px] text-muted">
+          <span className="w-9 shrink-0 font-mono text-[10px] tabular-nums text-muted">
             {duration ? `-${fmt(remaining)}` : fmt(duration)}
           </span>
         </div>
@@ -348,11 +348,15 @@ export default function PlayerBar() {
         <div className="flex shrink-0 items-center gap-1.5 justify-self-center">
           {!expanded && (
             <>
+              {/* Masqué sous sm : le titre du morceau n'a plus de place visible
+                  à 375px avec ce cluster au complet (mesuré à 0px de largeur
+                  visible, audit UI/UX 2026-07-03) -- ce placeholder désactivé
+                  reste disponible dans le panneau déplié. */}
               <button
                 disabled
                 aria-label="Signet (bientôt disponible)"
                 title="Signet — bientôt disponible"
-                className="flex h-8 w-8 items-center justify-center rounded-control text-muted opacity-40 disabled:cursor-not-allowed"
+                className="hidden h-8 w-8 items-center justify-center rounded-control text-muted opacity-40 disabled:cursor-not-allowed sm:flex"
               >
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4">
                   <path d="M5 3.5h10a.5.5 0 0 1 .5.5v13l-5.5-3.5L4.5 17V4a.5.5 0 0 1 .5-.5z" strokeLinejoin="round" />
@@ -404,7 +408,7 @@ export default function PlayerBar() {
                 value={rate}
                 onChange={(e) => setRate(Number(e.target.value))}
                 aria-label="Vitesse de lecture"
-                className="rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground"
+                className="hidden rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground sm:block"
               >
                 {RATES.map((r) => (
                   <option key={r} value={r}>

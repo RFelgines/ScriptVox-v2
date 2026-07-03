@@ -98,7 +98,7 @@ export default function ParametresPage() {
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
-          <p className="text-sm text-red-500">{error}</p>
+          <p className="text-sm text-danger">{error}</p>
         </Alert>
       )}
 

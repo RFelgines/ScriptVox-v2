@@ -37,6 +37,8 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import Button from "@/components/ui/Button";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
+import VoiceOrb from "@/components/VoiceOrb";
+import { buildHueMap } from "@/lib/voiceHues";
 
 const POLL_MS = 3000;
 
@@ -327,6 +329,9 @@ export default function BookDetailPage({
 
   const effectiveProvider = book?.tts_provider ?? appSettings?.default_tts_provider ?? "edgetts";
   const voiceMap = new Map(voices.map((v) => [v.id, v]));
+  // Même teinte que /voix et le player (angle d'or sur le catalogue complet) --
+  // l'orbe du casting doit être reconnaissable comme "la même voix" ailleurs.
+  const voiceHues = buildHueMap(voices);
   function isProviderCompatible(voiceId: string): boolean {
     const v = voiceMap.get(voiceId);
     if (!v) return true;
@@ -384,6 +389,14 @@ export default function BookDetailPage({
               Clone
             </span>
           )}
+          {(() => {
+            const selectedVoiceId = pendingVoices.get(c.id) ?? c.voice_id;
+            return selectedVoiceId ? (
+              <VoiceOrb hue={voiceHues.get(selectedVoiceId) ?? 0} size={22} />
+            ) : (
+              <span className="h-[22px] w-[22px] shrink-0 rounded-full bg-surface-2" aria-hidden="true" />
+            );
+          })()}
           <select
             value={pendingVoices.get(c.id) ?? c.voice_id ?? ""}
             disabled={savingId === c.id}
@@ -463,7 +476,7 @@ export default function BookDetailPage({
 
       {error && (
         <Alert title="Erreur" className="mt-6">
-          <p className="mt-1 text-sm text-red-500">{error}</p>
+          <p className="mt-1 text-sm text-danger">{error}</p>
         </Alert>
       )}
 
@@ -530,7 +543,7 @@ export default function BookDetailPage({
                 </div>
               )}
               {book.status === "FAILED" && book.error_message && (
-                <p className="mt-2 text-sm text-red-500">{book.error_message}</p>
+                <p className="mt-2 text-sm text-danger">{book.error_message}</p>
               )}
               {autoFlag && (book.status === "PENDING" || book.status === "PROCESSING") && (
                 <p className="mt-2 text-sm text-muted">
@@ -565,7 +578,7 @@ export default function BookDetailPage({
                       <span
                         title={`Échec : ${book.error_message ?? "erreur inconnue"}`}
                         aria-label="L'analyse a échoué suite à une erreur"
-                        className="text-amber-400"
+                        className="text-warning"
                       >
                         ⚠️
                       </span>
@@ -830,7 +843,7 @@ export default function BookDetailPage({
                     <div className="flex-1">
                       <p className="text-sm">{ch.title ?? `Chapitre ${ch.position}`}</p>
                       {ch.status === "FAILED" && ch.error_message && (
-                        <p className="text-xs text-red-500">{ch.error_message}</p>
+                        <p className="text-xs text-danger">{ch.error_message}</p>
                       )}
                     </div>
                     <StatusBadge status={ch.status} className="text-xs" />

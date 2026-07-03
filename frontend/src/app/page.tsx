@@ -263,7 +263,7 @@ export default function Home() {
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
-          <p className="text-sm text-red-500 mt-1">{error}</p>
+          <p className="text-sm text-danger mt-1">{error}</p>
           <p className="text-sm text-muted mt-2">
             Vérifiez que l&apos;API tourne sur{" "}
             <code className="bg-surface-2 px-1 rounded">

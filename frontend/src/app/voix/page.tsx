@@ -312,7 +312,7 @@ export default function VoixPage() {
               />
             </label>
           </div>
-          {cloneError && <p className="mt-3 text-sm text-red-500">{cloneError}</p>}
+          {cloneError && <p className="mt-3 text-sm text-danger">{cloneError}</p>}
           <div className="mt-4 flex justify-end">
             <Button type="submit" variant="primary" disabled={cloning}>
               {cloning ? "Création en cours…" : "Créer la voix clonée"}
@@ -335,7 +335,7 @@ export default function VoixPage() {
 
       {error && (
         <Alert title="Impossible de joindre l'API" className="mt-6">
-          <p className="text-sm text-red-500">{error}</p>
+          <p className="text-sm text-danger">{error}</p>
         </Alert>
       )}
 
@@ -413,7 +413,7 @@ export default function VoixPage() {
                   disabled={savingId === v.id}
                   aria-label={v.is_favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
                   className={`absolute -top-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-surface text-sm shadow disabled:opacity-50 ${
-                    v.is_favorite ? "text-amber-400" : "text-muted hover:text-foreground"
+                    v.is_favorite ? "text-warning" : "text-muted hover:text-foreground"
                   }`}
                 >
                   {v.is_favorite ? "★" : "☆"}
@@ -423,7 +423,7 @@ export default function VoixPage() {
                   disabled={deletingId === v.id}
                   aria-label={`Supprimer la voix ${v.name}`}
                   title={v.kind === "CLONED" ? "Supprimer cette voix clonée" : "Retirer du catalogue"}
-                  className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-xs text-muted shadow hover:bg-red-900/60 hover:text-red-300 disabled:opacity-50"
+                  className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-xs text-muted shadow hover:bg-danger/15 hover:text-danger disabled:opacity-50"
                 >
                   {deletingId === v.id ? "…" : "×"}
                 </button>

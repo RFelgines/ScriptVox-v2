@@ -78,7 +78,7 @@ export default function BookCard({
         onClick={handleDelete}
         disabled={deleting}
         title="Supprimer"
-        className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-surface/80 text-xs text-muted hover:bg-red-900 hover:text-red-200 disabled:opacity-50"
+        className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-surface/80 text-xs text-muted hover:bg-danger/15 hover:text-danger disabled:opacity-50"
       >
         {deleting ? "…" : "✕"}
       </button>

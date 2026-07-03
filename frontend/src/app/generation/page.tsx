@@ -147,7 +147,7 @@ export default function GenerationPage() {
 
       {error && (
         <Alert title="Erreur" className="mt-6">
-          <p className="text-sm text-red-400">{error}</p>
+          <p className="text-sm text-danger">{error}</p>
         </Alert>
       )}
 
