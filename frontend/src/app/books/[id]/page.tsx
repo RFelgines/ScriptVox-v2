@@ -39,6 +39,7 @@ import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
 import VoiceOrb from "@/components/VoiceOrb";
 import { buildHueMap } from "@/lib/voiceHues";
+import { useT } from "@/lib/i18n/LanguageContext";
 
 const POLL_MS = 3000;
 
@@ -58,6 +59,7 @@ export default function BookDetailPage({
   const { id } = use(params);
   const bookId = Number(id);
   const { play } = usePlayer();
+  const t = useT();
 
   const [book, setBook] = useState<BookSummary | null>(null);
   const [coverOk, setCoverOk] = useState(true);
@@ -245,9 +247,7 @@ export default function BookDetailPage({
 
   function handleAnalyzeBook() {
     const destructive = book?.status === "ANALYZED" || book?.status === "DONE";
-    if (destructive && !window.confirm(
-      "Ré-analyser ce livre effacera les personnages, segments et suggestions de fusion existants. Continuer ?"
-    )) return;
+    if (destructive && !window.confirm(t.book.reanalyzeConfirm)) return;
     setAnalyzingBook(true);
     setError(null);
     analyzeBook(bookId)
@@ -257,7 +257,7 @@ export default function BookDetailPage({
   }
 
   function handleStopBook() {
-    if (!window.confirm("Arrêter la tâche en cours ? Le livre passera en échec.")) return;
+    if (!window.confirm(t.book.stopConfirm)) return;
     setStoppingBook(true);
     setError(null);
     stopBook(bookId)
@@ -268,9 +268,7 @@ export default function BookDetailPage({
 
   function handleGenerateBook() {
     const destructive = book?.status === "DONE";
-    if (destructive && !window.confirm(
-      "Regénérer l'audio effacera l'export existant. Continuer ?"
-    )) return;
+    if (destructive && !window.confirm(t.book.regenerateAudioConfirm)) return;
     setGenerating(true);
     setError(null);
     generateBook(bookId)
@@ -366,9 +364,7 @@ export default function BookDetailPage({
           <p className="text-xs text-muted">
             {c.gender}
             {c.age_category && c.age_category !== "UNKNOWN" ? ` · ${c.age_category}` : ""}
-            {c.segment_count > 0
-              ? ` · ${c.segment_count} réplique${c.segment_count > 1 ? "s" : ""}`
-              : ""}
+            {c.segment_count > 0 ? ` · ${t.book.segmentCount(c.segment_count)}` : ""}
           </p>
           {c.description && (
             <p className="mt-1 line-clamp-2 text-xs text-muted">{c.description}</p>
@@ -377,7 +373,7 @@ export default function BookDetailPage({
         <div className="flex items-center gap-2">
           {c.voice_id && !isProviderCompatible(c.voice_id) && (
             <span
-              title={`Voix clonée incompatible avec le provider "${effectiveProvider}" — passer sur Qwen ou changer la voix.`}
+              title={t.book.clonedVoiceIncompatible(effectiveProvider)}
               className="text-amber-600"
             >
               <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
@@ -387,7 +383,7 @@ export default function BookDetailPage({
           )}
           {c.voice_id && voiceMap.get(c.voice_id)?.kind === "CLONED" && (
             <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted whitespace-nowrap">
-              Clone
+              {t.book.clonedBadge}
             </span>
           )}
           {(() => {
@@ -407,7 +403,7 @@ export default function BookDetailPage({
             className="rounded-control border border-border bg-surface-2 px-2 py-1 text-sm disabled:opacity-50"
           >
             <option value="" disabled>
-              Choisir…
+              {t.book.chooseVoice}
             </option>
             {assignable.filter((v) => v.kind === "CATALOGUE").map((v) => (
               <option key={v.id} value={v.id}>
@@ -415,7 +411,7 @@ export default function BookDetailPage({
               </option>
             ))}
             {assignable.some((v) => v.kind === "CLONED") && (
-              <optgroup label="— Voix clonées —">
+              <optgroup label={t.book.clonedVoicesGroup}>
                 {assignable.filter((v) => v.kind === "CLONED").map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}{v.gender ? ` — ${v.gender}` : ""}
@@ -428,10 +424,10 @@ export default function BookDetailPage({
             <button
               onClick={() => {
                 const id = pendingVoices.get(c.id) ?? c.voice_id!;
-                play({ title: `Aperçu — ${id}`, src: voiceSampleUrl(id) });
+                play({ title: t.book.previewTitle(id), src: voiceSampleUrl(id) });
               }}
-              title="Écouter un aperçu de cette voix"
-              aria-label="Écouter un aperçu de cette voix"
+              title={t.book.previewVoice}
+              aria-label={t.book.previewVoice}
               className="rounded-control p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
             >
               <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 ml-0.5">
@@ -443,8 +439,8 @@ export default function BookDetailPage({
             <button
               onClick={() => handleVoiceChange(c.id, pendingVoices.get(c.id)!)}
               disabled={savingId === c.id}
-              title="Confirmer cette voix"
-              aria-label="Confirmer cette voix"
+              title={t.book.confirmVoice}
+              aria-label={t.book.confirmVoice}
               className="rounded-control p-1.5 text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
             >
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
@@ -461,7 +457,7 @@ export default function BookDetailPage({
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
       <Link href="/" className="text-sm text-muted hover:text-foreground">
-        ← Bibliothèque
+        {t.book.backToLibrary}
       </Link>
 
       {loading && !book && (
@@ -476,7 +472,7 @@ export default function BookDetailPage({
       )}
 
       {error && (
-        <Alert title="Erreur" className="mt-6">
+        <Alert title={t.book.errorTitle} className="mt-6">
           <p className="mt-1 text-sm text-danger">{error}</p>
         </Alert>
       )}
@@ -489,7 +485,7 @@ export default function BookDetailPage({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={coverUrl(book.id)}
-                  alt={`Couverture de ${book.title}`}
+                  alt={t.book.coverAlt(book.title)}
                   className="h-full w-full object-cover"
                   onError={() => setCoverOk(false)}
                 />
@@ -511,8 +507,8 @@ export default function BookDetailPage({
                   defaultValue={book.genre ?? ""}
                   onBlur={(e) => handleGenreBlur(e.target.value)}
                   disabled={savingGenre}
-                  placeholder="Genre (ex. Fantasy)"
-                  aria-label="Genre du livre"
+                  placeholder={t.book.genrePlaceholder}
+                  aria-label={t.book.genreAriaLabel}
                   className="rounded-control border border-border bg-surface-2 px-2 py-0.5 text-xs text-muted placeholder:text-muted/60 disabled:opacity-50"
                 />
                 <input
@@ -521,8 +517,8 @@ export default function BookDetailPage({
                   defaultValue={book.language ?? ""}
                   onBlur={(e) => handleLanguageBlur(e.target.value)}
                   disabled={savingLanguage}
-                  placeholder="Langue (ex. fr)"
-                  aria-label="Langue du livre"
+                  placeholder={t.book.languagePlaceholder}
+                  aria-label={t.book.languageAriaLabel}
                   className="w-28 rounded-control border border-border bg-surface-2 px-2 py-0.5 text-xs text-muted placeholder:text-muted/60 disabled:opacity-50"
                 />
                 <input
@@ -531,8 +527,8 @@ export default function BookDetailPage({
                   defaultValue={book.published_at ?? ""}
                   onChange={(e) => handlePublishedAtChange(e.target.value)}
                   disabled={savingPublishedAt}
-                  aria-label="Date de publication"
-                  title="Date de publication"
+                  aria-label={t.book.publishedAtLabel}
+                  title={t.book.publishedAtLabel}
                   className="rounded-control border border-border bg-surface-2 px-2 py-0.5 text-xs text-muted disabled:opacity-50"
                 />
               </div>
@@ -549,7 +545,7 @@ export default function BookDetailPage({
               )}
               {autoFlag && (book.status === "PENDING" || book.status === "PROCESSING") && (
                 <p className="mt-2 text-sm text-muted">
-                  Analyse en cours — le casting s&apos;ouvrira automatiquement.
+                  {t.book.analysisInProgressHint}
                 </p>
               )}
 
@@ -563,7 +559,7 @@ export default function BookDetailPage({
                     disabled={analyzingBook}
                     onClick={handleAnalyzeBook}
                   >
-                    {analyzingBook ? "Lancement…" : "Analyser"}
+                    {analyzingBook ? t.book.launching : t.book.analyze}
                   </Button>
                 )}
                 {book.status === "FAILED" && (
@@ -574,12 +570,12 @@ export default function BookDetailPage({
                       disabled={analyzingBook}
                       onClick={handleAnalyzeBook}
                     >
-                      {analyzingBook ? "Lancement…" : "Reprendre l'analyse"}
+                      {analyzingBook ? t.book.launching : t.book.resumeAnalysis}
                     </Button>
                     {book.error_message !== "Arrêté par l'utilisateur." && (
                       <span
-                        title={`Échec : ${book.error_message ?? "erreur inconnue"}`}
-                        aria-label="L'analyse a échoué suite à une erreur"
+                        title={t.book.analysisFailedTitle(book.error_message ?? "erreur inconnue")}
+                        aria-label={t.book.analysisFailedAriaLabel}
                         className="text-warning"
                       >
                         ⚠️
@@ -593,7 +589,7 @@ export default function BookDetailPage({
                     disabled={analyzingBook}
                     onClick={handleAnalyzeBook}
                   >
-                    {analyzingBook ? "Lancement…" : "Ré-analyser"}
+                    {analyzingBook ? t.book.launching : t.book.reanalyze}
                   </Button>
                 )}
 
@@ -606,10 +602,10 @@ export default function BookDetailPage({
                     onClick={handleGenerateBook}
                   >
                     {generating
-                      ? "Lancement…"
+                      ? t.book.launching
                       : book.status === "DONE"
-                      ? "Regénérer l'audio"
-                      : "Générer l'audio"}
+                      ? t.book.regenerateAudio
+                      : t.book.generateAudio}
                   </Button>
                 )}
 
@@ -621,7 +617,7 @@ export default function BookDetailPage({
                     disabled={stoppingBook}
                     onClick={handleStopBook}
                   >
-                    {stoppingBook ? "Arrêt…" : "Arrêter"}
+                    {stoppingBook ? t.book.stopping : t.book.stop}
                   </Button>
                 )}
 
@@ -632,7 +628,7 @@ export default function BookDetailPage({
                       className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${castingExpanded ? "rotate-90" : ""}`}>
                       <path d="M6 4l4 4-4 4" />
                     </svg>
-                    Casting
+                    {t.book.casting}
                   </Button>
                 )}
 
@@ -655,7 +651,7 @@ export default function BookDetailPage({
                     <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
                       <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
                     </svg>
-                    Écouter
+                    {t.book.listen}
                   </Button>
                 )}
               </div>
@@ -670,14 +666,13 @@ export default function BookDetailPage({
             // ajoutée pour gérer un état "en cours de fermeture").
             <section className="mt-6 rounded-card border border-border bg-surface p-4 transition-all duration-200 ease-out starting:translate-y-1 starting:opacity-0">
               {castingLoading && !castingLoaded && (
-                <p className="text-muted">Chargement du casting…</p>
+                <p className="text-muted">{t.book.loadingCasting}</p>
               )}
 
               {castingLoaded && book.status !== "ANALYZED" && book.status !== "GENERATING" && book.status !== "DONE" && (
-                <Alert title="Casting indisponible">
+                <Alert title={t.book.castingUnavailableTitle}>
                   <p className="text-sm text-muted">
-                    Le casting n&apos;est disponible qu&apos;une fois le livre analysé (statut
-                    actuel : {book.status}).
+                    {t.book.castingUnavailableBody(book.status)}
                   </p>
                 </Alert>
               )}
@@ -686,7 +681,7 @@ export default function BookDetailPage({
                 <div className="mb-4 rounded-control border border-amber-500/40 bg-amber-500/10 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-sm font-semibold text-amber-600">
-                      Fusions de personnages suggérées
+                      {t.book.mergeSuggestionsTitle}
                     </p>
                     <Button
                       variant="warning"
@@ -694,7 +689,7 @@ export default function BookDetailPage({
                       onClick={handleAcceptAllMerges}
                       disabled={acceptingAll}
                     >
-                      {acceptingAll ? "…" : "Tout accepter"}
+                      {acceptingAll ? "…" : t.book.acceptAll}
                     </Button>
                   </div>
                   <ul className="space-y-2">
@@ -716,14 +711,14 @@ export default function BookDetailPage({
                           onClick={() => handleResolveMerge(s.id, "accept")}
                           disabled={resolvingId === s.id || acceptingAll}
                         >
-                          Accepter
+                          {t.book.accept}
                         </Button>
                         <Button
                           size="sm"
                           onClick={() => handleResolveMerge(s.id, "reject")}
                           disabled={resolvingId === s.id || acceptingAll}
                         >
-                          Rejeter
+                          {t.book.reject}
                         </Button>
                       </li>
                     ))}
@@ -732,7 +727,7 @@ export default function BookDetailPage({
               )}
 
               {castingLoaded && characters.length === 0 && (
-                <p className="text-muted">Aucun personnage détecté.</p>
+                <p className="text-muted">{t.book.noCharactersDetected}</p>
               )}
 
               {characters.length > 0 && (
@@ -741,14 +736,14 @@ export default function BookDetailPage({
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Rechercher un personnage…"
+                    placeholder={t.book.searchCharacterPlaceholder}
                     className="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted"
                   />
 
                   {mainCharacters.length > 0 ? (
                     <ul className="mt-4 space-y-3">{mainCharacters.map(renderCharacterRow)}</ul>
                   ) : (
-                    <p className="mt-4 text-sm text-muted">Aucun personnage ne correspond.</p>
+                    <p className="mt-4 text-sm text-muted">{t.book.noCharacterMatches}</p>
                   )}
 
                   {secondaryCharacters.length > 0 && (
@@ -761,7 +756,7 @@ export default function BookDetailPage({
                           className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${showSecondary ? "rotate-90" : ""}`}>
                           <path d="M6 4l4 4-4 4" />
                         </svg>
-                        Personnages secondaires sans réplique ({secondaryCharacters.length})
+                        {t.book.secondaryCharacters(secondaryCharacters.length)}
                       </button>
                       {showSecondary && (
                         <ul className="mt-3 space-y-3">
@@ -778,19 +773,19 @@ export default function BookDetailPage({
                   <div className="flex items-center gap-3">
                     <p className="text-xs text-muted">
                       {voices[0]?.locale
-                        ? `Langue : ${voices[0].locale}`
-                        : "Langue : selon le provider TTS"}
+                        ? t.book.localeKnown(voices[0].locale)
+                        : t.book.localeUnknown}
                     </p>
                     {appSettings && (
                       <label className="flex items-center gap-1.5 text-xs text-muted">
-                        Moteur :
+                        {t.book.engineLabel}
                         <select
                           value={book.tts_provider ?? ""}
                           disabled={savingProvider}
                           onChange={(e) => handleProviderChange(e.target.value)}
                           className="rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground disabled:opacity-50"
                         >
-                          <option value="">Par défaut ({appSettings.default_tts_provider})</option>
+                          <option value="">{t.book.defaultProvider(appSettings.default_tts_provider)}</option>
                           {appSettings.available_tts_providers.map((p) => (
                             <option key={p} value={p}>
                               {p}
@@ -808,10 +803,10 @@ export default function BookDetailPage({
                     title={
                       book.status === "ANALYZED"
                         ? undefined
-                        : "Génération possible uniquement quand le livre est ANALYZED"
+                        : t.book.generateOnlyWhenAnalyzed
                     }
                   >
-                    {generating ? "Lancement…" : "Générer l'audio"}
+                    {generating ? t.book.launching : t.book.generateAudio}
                   </Button>
                 </div>
               )}
@@ -821,7 +816,7 @@ export default function BookDetailPage({
           <section className="mt-8">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-xl font-semibold">
-                Chapitres ({chapters.length})
+                {t.book.chaptersTitle(chapters.length)}
               </h2>
               {book.status === "ANALYZED" &&
                 chapters.some((c) => c.status !== "DONE") && (
@@ -830,12 +825,12 @@ export default function BookDetailPage({
                     onClick={handleGenerateAllChapters}
                     disabled={generatingAll}
                   >
-                    {generatingAll ? "…" : "Générer tout l'audio"}
+                    {generatingAll ? "…" : t.book.generateAllAudio}
                   </Button>
                 )}
             </div>
             {chapters.length === 0 ? (
-              <p className="text-muted">Aucun chapitre pour l&apos;instant.</p>
+              <p className="text-muted">{t.book.noChaptersYet}</p>
             ) : (
               <ul className="space-y-2">
                 {chapters.map((ch) => (
@@ -847,7 +842,7 @@ export default function BookDetailPage({
                       {ch.position}
                     </span>
                     <div className="flex-1">
-                      <p className="text-sm">{ch.title ?? `Chapitre ${ch.position}`}</p>
+                      <p className="text-sm">{ch.title ?? t.book.chapterFallback(ch.position)}</p>
                       {ch.status === "FAILED" && ch.error_message && (
                         <p className="text-xs text-danger">{ch.error_message}</p>
                       )}
@@ -859,7 +854,7 @@ export default function BookDetailPage({
                         onClick={() => handleGenerateChapter(ch.position)}
                         disabled={generatingPos === ch.position || ch.status === "GENERATING"}
                       >
-                        {generatingPos === ch.position ? "…" : "Générer"}
+                        {generatingPos === ch.position ? "…" : t.book.generateChapter}
                       </Button>
                     )}
                     {ch.status === "DONE" && (
@@ -869,7 +864,7 @@ export default function BookDetailPage({
                           size="sm"
                           onClick={() =>
                             play({
-                              title: `${book.title} — ${ch.title ?? `Chapitre ${ch.position}`}`,
+                              title: `${book.title} — ${ch.title ?? t.book.chapterFallback(ch.position)}`,
                               src: chapterAudioUrl(book.id, ch.position),
                               bookId: book.id,
                               bookTitle: book.title,
@@ -882,14 +877,14 @@ export default function BookDetailPage({
                           <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
                             <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
                           </svg>
-                          Écouter
+                          {t.book.listen}
                         </Button>
                         {book.status === "ANALYZED" && (
                           <Button
                             size="sm"
                             onClick={() => handleGenerateChapter(ch.position)}
                             disabled={generatingPos === ch.position}
-                            title="Regénérer ce chapitre"
+                            title={t.book.regenerateChapter}
                           >
                             {generatingPos === ch.position ? "…" : "↺"}
                           </Button>

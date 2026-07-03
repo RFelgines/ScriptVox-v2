@@ -101,6 +101,62 @@ export interface Dictionary {
     clonedVoicesHintAvailable: string;
     clonedVoicesHintNone: string;
   };
+  book: {
+    backToLibrary: string;
+    errorTitle: string;
+    coverAlt: (title: string) => string;
+    genrePlaceholder: string;
+    genreAriaLabel: string;
+    languagePlaceholder: string;
+    languageAriaLabel: string;
+    publishedAtLabel: string;
+    analysisInProgressHint: string;
+    launching: string;
+    analyze: string;
+    resumeAnalysis: string;
+    analysisFailedAriaLabel: string;
+    analysisFailedTitle: (detail: string) => string;
+    reanalyze: string;
+    reanalyzeConfirm: string;
+    generateAudio: string;
+    regenerateAudio: string;
+    regenerateAudioConfirm: string;
+    stopping: string;
+    stop: string;
+    stopConfirm: string;
+    casting: string;
+    listen: string;
+    loadingCasting: string;
+    castingUnavailableTitle: string;
+    castingUnavailableBody: (status: string) => string;
+    mergeSuggestionsTitle: string;
+    acceptAll: string;
+    accept: string;
+    reject: string;
+    noCharactersDetected: string;
+    searchCharacterPlaceholder: string;
+    noCharacterMatches: string;
+    secondaryCharacters: (n: number) => string;
+    localeKnown: (locale: string) => string;
+    localeUnknown: string;
+    engineLabel: string;
+    defaultProvider: (name: string) => string;
+    generateOnlyWhenAnalyzed: string;
+    segmentCount: (n: number) => string;
+    clonedVoiceIncompatible: (provider: string) => string;
+    clonedBadge: string;
+    chooseVoice: string;
+    clonedVoicesGroup: string;
+    previewVoice: string;
+    previewTitle: (id: string) => string;
+    confirmVoice: string;
+    chaptersTitle: (n: number) => string;
+    generateAllAudio: string;
+    noChaptersYet: string;
+    chapterFallback: (position: number) => string;
+    generateChapter: string;
+    regenerateChapter: string;
+  };
 }
 
 const fr: Dictionary = {
@@ -223,6 +279,65 @@ const fr: Dictionary = {
     clonedVoicesHintAvailable: "Utilisables avec Qwen3-TTS uniquement — assignées en priorité lors de l'analyse.",
     clonedVoicesHintNone: "Ajoutez des voix depuis l'onglet Voix pour activer le clonage.",
   },
+  book: {
+    backToLibrary: "← Bibliothèque",
+    errorTitle: "Erreur",
+    coverAlt: (title) => `Couverture de ${title}`,
+    genrePlaceholder: "Genre (ex. Fantasy)",
+    genreAriaLabel: "Genre du livre",
+    languagePlaceholder: "Langue (ex. fr)",
+    languageAriaLabel: "Langue du livre",
+    publishedAtLabel: "Date de publication",
+    analysisInProgressHint: "Analyse en cours — le casting s'ouvrira automatiquement.",
+    launching: "Lancement…",
+    analyze: "Analyser",
+    resumeAnalysis: "Reprendre l'analyse",
+    analysisFailedAriaLabel: "L'analyse a échoué suite à une erreur",
+    analysisFailedTitle: (detail) => `Échec : ${detail}`,
+    reanalyze: "Ré-analyser",
+    reanalyzeConfirm:
+      "Ré-analyser ce livre effacera les personnages, segments et suggestions de fusion existants. Continuer ?",
+    generateAudio: "Générer l'audio",
+    regenerateAudio: "Regénérer l'audio",
+    regenerateAudioConfirm: "Regénérer l'audio effacera l'export existant. Continuer ?",
+    stopping: "Arrêt…",
+    stop: "Arrêter",
+    stopConfirm: "Arrêter la tâche en cours ? Le livre passera en échec.",
+    casting: "Casting",
+    listen: "Écouter",
+    loadingCasting: "Chargement du casting…",
+    castingUnavailableTitle: "Casting indisponible",
+    castingUnavailableBody: (status) =>
+      `Le casting n'est disponible qu'une fois le livre analysé (statut actuel : ${status}).`,
+    mergeSuggestionsTitle: "Fusions de personnages suggérées",
+    acceptAll: "Tout accepter",
+    accept: "Accepter",
+    reject: "Rejeter",
+    noCharactersDetected: "Aucun personnage détecté.",
+    searchCharacterPlaceholder: "Rechercher un personnage…",
+    noCharacterMatches: "Aucun personnage ne correspond.",
+    secondaryCharacters: (n) => `Personnages secondaires sans réplique (${n})`,
+    localeKnown: (locale) => `Langue : ${locale}`,
+    localeUnknown: "Langue : selon le provider TTS",
+    engineLabel: "Moteur :",
+    defaultProvider: (name) => `Par défaut (${name})`,
+    generateOnlyWhenAnalyzed: "Génération possible uniquement quand le livre est ANALYZED",
+    segmentCount: (n) => `${n} réplique${n > 1 ? "s" : ""}`,
+    clonedVoiceIncompatible: (provider) =>
+      `Voix clonée incompatible avec le provider "${provider}" — passer sur Qwen ou changer la voix.`,
+    clonedBadge: "Clone",
+    chooseVoice: "Choisir…",
+    clonedVoicesGroup: "— Voix clonées —",
+    previewVoice: "Écouter un aperçu de cette voix",
+    previewTitle: (id) => `Aperçu — ${id}`,
+    confirmVoice: "Confirmer cette voix",
+    chaptersTitle: (n) => `Chapitres (${n})`,
+    generateAllAudio: "Générer tout l'audio",
+    noChaptersYet: "Aucun chapitre pour l'instant.",
+    chapterFallback: (position) => `Chapitre ${position}`,
+    generateChapter: "Générer",
+    regenerateChapter: "Regénérer ce chapitre",
+  },
 };
 
 const en: Dictionary = {
@@ -344,6 +459,65 @@ const en: Dictionary = {
     clonedVoicesNone: "No cloned voice",
     clonedVoicesHintAvailable: "Usable with Qwen3-TTS only — assigned as priority during analysis.",
     clonedVoicesHintNone: "Add voices from the Voices tab to enable cloning.",
+  },
+  book: {
+    backToLibrary: "← Library",
+    errorTitle: "Error",
+    coverAlt: (title) => `Cover of ${title}`,
+    genrePlaceholder: "Genre (e.g. Fantasy)",
+    genreAriaLabel: "Book genre",
+    languagePlaceholder: "Language (e.g. en)",
+    languageAriaLabel: "Book language",
+    publishedAtLabel: "Publication date",
+    analysisInProgressHint: "Analysis in progress — casting will open automatically.",
+    launching: "Starting…",
+    analyze: "Analyse",
+    resumeAnalysis: "Resume analysis",
+    analysisFailedAriaLabel: "Analysis failed due to an error",
+    analysisFailedTitle: (detail) => `Failed: ${detail}`,
+    reanalyze: "Re-analyse",
+    reanalyzeConfirm:
+      "Re-analysing this book will erase existing characters, segments and merge suggestions. Continue?",
+    generateAudio: "Generate audio",
+    regenerateAudio: "Regenerate audio",
+    regenerateAudioConfirm: "Regenerating audio will erase the existing export. Continue?",
+    stopping: "Stopping…",
+    stop: "Stop",
+    stopConfirm: "Stop the current task? The book will be marked as failed.",
+    casting: "Casting",
+    listen: "Listen",
+    loadingCasting: "Loading casting…",
+    castingUnavailableTitle: "Casting unavailable",
+    castingUnavailableBody: (status) =>
+      `Casting is only available once the book is analysed (current status: ${status}).`,
+    mergeSuggestionsTitle: "Suggested character merges",
+    acceptAll: "Accept all",
+    accept: "Accept",
+    reject: "Reject",
+    noCharactersDetected: "No character detected.",
+    searchCharacterPlaceholder: "Search for a character…",
+    noCharacterMatches: "No character matches.",
+    secondaryCharacters: (n) => `Secondary characters with no lines (${n})`,
+    localeKnown: (locale) => `Language: ${locale}`,
+    localeUnknown: "Language: depends on the TTS provider",
+    engineLabel: "Engine:",
+    defaultProvider: (name) => `Default (${name})`,
+    generateOnlyWhenAnalyzed: "Generation only possible once the book is ANALYZED",
+    segmentCount: (n) => `${n} line${n > 1 ? "s" : ""}`,
+    clonedVoiceIncompatible: (provider) =>
+      `Cloned voice incompatible with provider "${provider}" — switch to Qwen or change the voice.`,
+    clonedBadge: "Clone",
+    chooseVoice: "Choose…",
+    clonedVoicesGroup: "— Cloned voices —",
+    previewVoice: "Listen to a preview of this voice",
+    previewTitle: (id) => `Preview — ${id}`,
+    confirmVoice: "Confirm this voice",
+    chaptersTitle: (n) => `Chapters (${n})`,
+    generateAllAudio: "Generate all audio",
+    noChaptersYet: "No chapters yet.",
+    chapterFallback: (position) => `Chapter ${position}`,
+    generateChapter: "Generate",
+    regenerateChapter: "Regenerate this chapter",
   },
 };
 
