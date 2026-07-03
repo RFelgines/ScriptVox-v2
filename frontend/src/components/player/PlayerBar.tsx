@@ -50,9 +50,18 @@ export default function PlayerBar() {
   const [expanded, setExpanded] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
+  const [coverOk, setCoverOk] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const bookId = track?.bookId;
+
+  // Reset le fallback à chaque nouvelle piste -- une couverture cassée sur le
+  // morceau précédent ne doit pas s'appliquer au suivant. setState différé en
+  // microtâche (règle react-hooks/set-state-in-effect, même convention
+  // qu'ailleurs dans ce projet).
+  useEffect(() => {
+    Promise.resolve().then(() => setCoverOk(true));
+  }, [track?.coverUrl]);
 
   // Clic en dehors du bandeau (déplié) = replie le player.
   useEffect(() => {
@@ -125,13 +134,21 @@ export default function PlayerBar() {
   return (
     <div ref={rootRef} className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-surface">
       {expanded && (
-        <div className="flex max-h-[70vh] flex-col items-center gap-4 overflow-y-auto border-b border-border p-6">
-          {track.coverUrl ? (
+        // flex-col + overflow-hidden sur le conteneur, scroll délégué au SEUL
+        // bloc "contenu déroulant" ci-dessous (chapitres + transcription) --
+        // en-tête (couverture/scrub/transport) toujours visible, ne défile pas.
+        // Avant : ce conteneur ET la transcription (ChapterTranscript) avaient
+        // chacun leur propre overflow-y-auto, un scroll-dans-scroll qui se
+        // volait les gestes tactiles en mobile (audit UI/UX 2026-07-03).
+        <div className="flex max-h-[70vh] flex-col overflow-hidden border-b border-border">
+        <div className="flex flex-col items-center gap-4 p-6 pb-0">
+          {track.coverUrl && coverOk ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={track.coverUrl}
               alt=""
               className="h-40 w-40 rounded-control object-cover shadow-lg sm:h-48 sm:w-48"
+              onError={() => setCoverOk(false)}
             />
           ) : (
             <div className="h-40 w-40 rounded-control bg-surface-2 sm:h-48 sm:w-48" />
@@ -180,7 +197,7 @@ export default function PlayerBar() {
                 <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
                 <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="absolute text-[8px] font-bold">15</span>
+              <span className="absolute text-[10px] font-bold">15</span>
             </button>
 
             <button
@@ -209,7 +226,7 @@ export default function PlayerBar() {
                 <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
                 <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="absolute text-[8px] font-bold">15</span>
+              <span className="absolute text-[10px] font-bold">15</span>
             </button>
 
             <button
@@ -250,37 +267,43 @@ export default function PlayerBar() {
               label="Signet"
             />
           </div>
+        </div>
 
-          {/* Liste des chapitres — masquée par défaut, dépliée via "Chapitres" */}
-          {bookId && chaptersOpen && (
-            <ul className="w-full max-w-md space-y-1 overflow-y-auto">
-              {chapters.map((ch) => {
-                const active = ch.position === track.chapterPosition;
-                const playableCh = ch.status === "DONE";
-                return (
-                  <li key={ch.id}>
-                    <button
-                      onClick={() => playableCh && playChapter(ch)}
-                      disabled={!playableCh}
-                      className={`w-full rounded-control px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
-                        active
-                          ? "bg-surface-2 font-medium text-foreground"
-                          : "text-foreground/80 hover:bg-surface-2/60"
-                      }`}
-                    >
-                      {ch.title ?? `Chapitre ${ch.position}`}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+        {/* Seul bloc scrollable du panneau déplié -- chapitres + transcription. */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-4">
+          <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4">
+            {/* Liste des chapitres — masquée par défaut, dépliée via "Chapitres" */}
+            {bookId && chaptersOpen && (
+              <ul className="w-full space-y-1">
+                {chapters.map((ch) => {
+                  const active = ch.position === track.chapterPosition;
+                  const playableCh = ch.status === "DONE";
+                  return (
+                    <li key={ch.id}>
+                      <button
+                        onClick={() => playableCh && playChapter(ch)}
+                        disabled={!playableCh}
+                        className={`w-full rounded-control px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                          active
+                            ? "bg-surface-2 font-medium text-foreground"
+                            : "text-foreground/80 hover:bg-surface-2/60"
+                        }`}
+                      >
+                        {ch.title ?? `Chapitre ${ch.position}`}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
-          {bookId && track.chapterPosition !== undefined && (
-            <div className="w-full max-w-md">
-              <ChapterTranscript bookId={bookId} chapterPosition={track.chapterPosition} />
-            </div>
-          )}
+            {bookId && track.chapterPosition !== undefined && (
+              <div className="w-full">
+                <ChapterTranscript bookId={bookId} chapterPosition={track.chapterPosition} />
+              </div>
+            )}
+          </div>
+        </div>
         </div>
       )}
 
@@ -315,12 +338,13 @@ export default function PlayerBar() {
             className="flex w-full min-w-0 items-center gap-2 text-left hover:text-muted"
             title={track.title}
           >
-            {track.coverUrl ? (
+            {track.coverUrl && coverOk ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={track.coverUrl}
                 alt=""
                 className="h-9 w-9 shrink-0 rounded-control object-cover"
+                onError={() => setCoverOk(false)}
               />
             ) : (
               <div className="h-9 w-9 shrink-0 rounded-control bg-surface-2" />
@@ -372,7 +396,7 @@ export default function PlayerBar() {
                   <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
                   <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <span className="absolute text-[7px] font-bold">15</span>
+                <span className="absolute text-[10px] font-bold">15</span>
               </button>
 
               <button
@@ -401,7 +425,7 @@ export default function PlayerBar() {
                   <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
                   <path d="M18 2.5v4.5h-4.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <span className="absolute text-[7px] font-bold">15</span>
+                <span className="absolute text-[10px] font-bold">15</span>
               </button>
 
               <select
@@ -433,7 +457,7 @@ export default function PlayerBar() {
                 />
               )}
               <div className="flex flex-col leading-tight overflow-hidden">
-                <span className="text-[9px] uppercase tracking-wide text-muted/60">Lu par</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted/60">Lu par</span>
                 <span className="truncate text-xs font-medium text-muted max-w-28">
                   {currentSegment.voice_id === "narrator"
                     ? "Narrateur"

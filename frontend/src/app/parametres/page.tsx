@@ -82,8 +82,8 @@ export default function ParametresPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <h1 className="text-2xl font-bold text-foreground">Paramètres</h1>
+    <main className="mx-auto max-w-4xl px-6 py-8">
+      <h1 className="text-3xl font-bold text-foreground">Paramètres</h1>
       <p className="mt-2 text-muted">
         État des services. Le moteur de synthèse par livre se choisit dans la page Casting.
       </p>

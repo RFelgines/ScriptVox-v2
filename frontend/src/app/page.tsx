@@ -134,7 +134,7 @@ export default function Home() {
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-8">
       <div className="mb-6 flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="text-2xl font-bold">Bibliothèque</h1>
+        <h1 className="text-3xl font-bold">Bibliothèque</h1>
         {!loading && !error && books.length > 0 && (
           <span className="text-sm text-muted">
             {visibleBooks.length} livre{visibleBooks.length > 1 ? "s" : ""}

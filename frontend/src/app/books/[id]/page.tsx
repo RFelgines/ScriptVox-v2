@@ -60,6 +60,7 @@ export default function BookDetailPage({
   const { play } = usePlayer();
 
   const [book, setBook] = useState<BookSummary | null>(null);
+  const [coverOk, setCoverOk] = useState(true);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -482,14 +483,15 @@ export default function BookDetailPage({
 
       {book && (
         <>
-          <header className="mt-6 flex gap-6">
+          <header className="mt-6 flex flex-col items-center gap-4 text-center sm:flex-row sm:items-start sm:gap-6 sm:text-left">
             <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-control bg-surface-2">
-              {book.cover_path ? (
+              {book.cover_path && coverOk ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={coverUrl(book.id)}
                   alt={`Couverture de ${book.title}`}
                   className="h-full w-full object-cover"
+                  onError={() => setCoverOk(false)}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted">
@@ -498,10 +500,10 @@ export default function BookDetailPage({
               )}
             </div>
 
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold">{book.title}</h1>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-3xl font-bold">{book.title}</h1>
               {book.author && <p className="text-muted">{book.author}</p>}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <StatusBadge status={book.status} />
                 <input
                   key={`genre-${book.genre ?? ""}`}
@@ -552,7 +554,7 @@ export default function BookDetailPage({
               )}
 
               {/* ── Barre d'actions ──────────────────────────────────────────── */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 {/* Analyser / Reprendre l'analyse */}
                 {book.status === "PENDING" && (
                   <Button
@@ -814,7 +816,7 @@ export default function BookDetailPage({
 
           <section className="mt-8">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">
+              <h2 className="text-xl font-semibold">
                 Chapitres ({chapters.length})
               </h2>
               {book.status === "ANALYZED" &&

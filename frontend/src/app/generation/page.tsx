@@ -139,8 +139,8 @@ export default function GenerationPage() {
   const pending = queue.filter((item) => item.status === "PENDING");
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-2xl font-bold text-foreground">Génération</h1>
+    <main className="mx-auto max-w-4xl px-6 py-8">
+      <h1 className="text-3xl font-bold text-foreground">Génération</h1>
       <p className="mt-1 text-sm text-muted">
         File d&apos;attente de génération audio, tous livres confondus.
       </p>
@@ -160,7 +160,7 @@ export default function GenerationPage() {
       ) : (
         <>
           <section className="mt-8">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            <h2 className="text-xl font-semibold text-foreground">
               En cours
             </h2>
             {generating ? (
@@ -193,7 +193,7 @@ export default function GenerationPage() {
           </section>
 
           <section className="mt-8">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            <h2 className="text-xl font-semibold text-foreground">
               En attente ({pending.length})
             </h2>
             {pending.length === 0 ? (

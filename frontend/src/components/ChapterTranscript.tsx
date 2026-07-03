@@ -95,7 +95,14 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
         )}
       </div>
 
-      <div ref={setScrollRoot} className="max-h-[50vh] overflow-y-auto">
+      {/* Plus de scroll propre ici : le vrai conteneur scrollable est le
+          panneau déplié de PlayerBar -- éviter le scroll-dans-scroll (audit
+          UI/UX 2026-07-03). `scrollRoot` (non clippant désormais) reste passé
+          en `root` à l'IntersectionObserver de LazySegmentOrb : sans clip
+          propre, la spec IntersectionObserver retombe sur le rect de cet
+          élément intersecté avec les ancêtres qui clippent réellement (donc
+          le panneau scrollable), le calcul de visibilité reste donc correct. */}
+      <div ref={setScrollRoot}>
         {segments.map((seg) => {
           const isCurrent = currentSegment?.id === seg.id;
           const voiceId = seg.voice_id;

@@ -176,9 +176,9 @@ export default function VoixPage() {
   const orbHues = buildHueMap(voices);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-8">
+    <main className="mx-auto max-w-6xl px-6 py-8">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="text-2xl font-bold">Voix</h1>
+        <h1 className="text-3xl font-bold">Voix</h1>
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
