@@ -36,7 +36,7 @@ function UtilBlock({
       disabled={disabled}
       aria-label={ariaLabel}
       title={title}
-      className="flex flex-col items-center gap-1 rounded-control px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+      className="flex flex-col items-center gap-1 rounded-control px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
     >
       {icon}
       <span className="text-[11px]">{label}</span>
@@ -140,7 +140,9 @@ export default function PlayerBar() {
         // Avant : ce conteneur ET la transcription (ChapterTranscript) avaient
         // chacun leur propre overflow-y-auto, un scroll-dans-scroll qui se
         // volait les gestes tactiles en mobile (audit UI/UX 2026-07-03).
-        <div className="flex max-h-[70vh] flex-col overflow-hidden border-b border-border">
+        // transition d'entrée seule (starting:, Tailwind v4) -- apparaissait
+        // sans mouvement avant (même constat que la section Casting).
+        <div className="flex max-h-[70vh] flex-col overflow-hidden border-b border-border transition-all duration-200 ease-out starting:translate-y-2 starting:opacity-0">
         <div className="flex flex-col items-center gap-4 p-6 pb-0">
           {track.coverUrl && coverOk ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -183,9 +185,11 @@ export default function PlayerBar() {
               onClick={() => hasPrev && playChapter(playable[currentIndex - 1])}
               disabled={!hasPrev}
               aria-label="Chapitre précédent"
-              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
+              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
             >
-              ⏮
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M6 4a1 1 0 0 0-1 1v10a1 1 0 1 0 2 0v-4.1l7.4 4.94A1 1 0 0 0 16 15V5a1 1 0 0 0-1.6-.8L7 8.1V5a1 1 0 0 0-1-1z" />
+              </svg>
             </button>
 
             <button
@@ -233,9 +237,11 @@ export default function PlayerBar() {
               onClick={() => hasNext && playChapter(playable[currentIndex + 1])}
               disabled={!hasNext}
               aria-label="Chapitre suivant"
-              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-30"
+              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
             >
-              ⏭
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M14 4a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0v-4.1l-7.4 4.94A1 1 0 0 1 4 15V5a1 1 0 0 1 1.6-.8L13 8.1V5a1 1 0 0 1 1-1z" />
+              </svg>
             </button>
           </div>
 
@@ -251,7 +257,11 @@ export default function PlayerBar() {
               <UtilBlock
                 onClick={() => setChaptersOpen((v) => !v)}
                 ariaLabel={chaptersOpen ? "Masquer les chapitres" : "Afficher les chapitres"}
-                icon={<span className="text-base">☰</span>}
+                icon={
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-4 w-4">
+                    <path d="M3 5.5h14M3 10h14M3 14.5h14" />
+                  </svg>
+                }
                 label="Chapitres"
               />
             )}
@@ -274,7 +284,7 @@ export default function PlayerBar() {
           <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4">
             {/* Liste des chapitres — masquée par défaut, dépliée via "Chapitres" */}
             {bookId && chaptersOpen && (
-              <ul className="w-full space-y-1">
+              <ul className="w-full space-y-1 transition-all duration-200 ease-out starting:translate-y-1 starting:opacity-0">
                 {chapters.map((ch) => {
                   const active = ch.position === track.chapterPosition;
                   const playableCh = ch.status === "DONE";
@@ -283,7 +293,7 @@ export default function PlayerBar() {
                       <button
                         onClick={() => playableCh && playChapter(ch)}
                         disabled={!playableCh}
-                        className={`w-full rounded-control px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                        className={`w-full rounded-control px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
                           active
                             ? "bg-surface-2 font-medium text-foreground"
                             : "text-foreground/80 hover:bg-surface-2/60"
@@ -473,7 +483,9 @@ export default function PlayerBar() {
             aria-label="Fermer le lecteur"
             className="shrink-0 text-muted hover:text-foreground"
           >
-            ✕
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
           </button>
         </div>
       </div>

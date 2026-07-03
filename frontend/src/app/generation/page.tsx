@@ -233,7 +233,14 @@ export default function GenerationPage() {
                       aria-hidden="true"
                       title="Glisser pour réordonner"
                     >
-                      ⠿
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                        <circle cx="5" cy="4" r="1.3" />
+                        <circle cx="11" cy="4" r="1.3" />
+                        <circle cx="5" cy="8" r="1.3" />
+                        <circle cx="11" cy="8" r="1.3" />
+                        <circle cx="5" cy="12" r="1.3" />
+                        <circle cx="11" cy="12" r="1.3" />
+                      </svg>
                     </span>
                     <CoverThumb bookId={item.book_id} title={item.book_title} />
                     <div className="min-w-0 flex-1">
@@ -253,7 +260,9 @@ export default function GenerationPage() {
                         onClick={() => movePending(pending, index, -1)}
                         aria-label="Monter dans la file"
                       >
-                        ↑
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                          <path d="M8 12.5V3.5M4 7l4-4 4 4" />
+                        </svg>
                       </Button>
                       <Button
                         variant="secondary"
@@ -262,7 +271,9 @@ export default function GenerationPage() {
                         onClick={() => movePending(pending, index, 1)}
                         aria-label="Descendre dans la file"
                       >
-                        ↓
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                          <path d="M8 3.5v9M4 9l4 4 4-4" />
+                        </svg>
                       </Button>
                     </div>
                   </li>

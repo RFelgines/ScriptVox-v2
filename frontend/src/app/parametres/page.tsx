@@ -127,7 +127,7 @@ export default function ParametresPage() {
                   value={settings.preferred_tts_provider ?? ""}
                   onChange={(e) => handlePreferredProviderChange(e.target.value)}
                   disabled={saving}
-                  className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-60"
+                  className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-50"
                   aria-label="Modèle TTS préféré"
                 >
                   <option value="">Par défaut ({settings.default_tts_provider})</option>

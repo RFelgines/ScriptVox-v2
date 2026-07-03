@@ -663,7 +663,12 @@ export default function BookDetailPage({
           </header>
 
           {castingExpanded && (
-            <section className="mt-6 rounded-card border border-border bg-surface p-4">
+            // Transition d'entrée seule (starting:, Tailwind v4) : la section
+            // apparaissait sans aucun mouvement (audit UI/UX 2026-07-03).
+            // Pas de transition de sortie -- démontage React instantané au clic,
+            // cohérent avec le reste de l'app (pas de dépendance d'animation
+            // ajoutée pour gérer un état "en cours de fermeture").
+            <section className="mt-6 rounded-card border border-border bg-surface p-4 transition-all duration-200 ease-out starting:translate-y-1 starting:opacity-0">
               {castingLoading && !castingLoaded && (
                 <p className="text-muted">Chargement du casting…</p>
               )}
@@ -805,7 +810,6 @@ export default function BookDetailPage({
                         ? undefined
                         : "Génération possible uniquement quand le livre est ANALYZED"
                     }
-                    className="disabled:opacity-40!"
                   >
                     {generating ? "Lancement…" : "Générer l'audio"}
                   </Button>

@@ -236,7 +236,7 @@ export default function VoixPage() {
           </select>
           <button
             onClick={() => setFavoritesOnly((v) => !v)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`rounded-control px-3 py-1.5 text-sm font-medium transition-colors ${
               favoritesOnly
                 ? "bg-surface-2 text-foreground"
                 : "text-muted hover:bg-surface-2/60 hover:text-foreground"
@@ -262,7 +262,7 @@ export default function VoixPage() {
       {cloneOpen && (
         <form
           onSubmit={handleCloneSubmit}
-          className="mt-6 rounded border border-border bg-surface p-4"
+          className="mt-6 rounded-card border border-border bg-surface p-4"
         >
           <h2 className="mb-4 text-base font-semibold">Cloner une voix</h2>
           <div className="flex flex-wrap gap-4">
@@ -282,7 +282,7 @@ export default function VoixPage() {
               <select
                 value={cloneGender}
                 onChange={(e) => setCloneGender(e.target.value as Gender | "")}
-                className="rounded border border-border bg-surface-2 px-3 py-1.5 text-sm"
+                className="rounded-control border border-border bg-surface-2 px-3 py-1.5 text-sm"
               >
                 <option value="">— Non précisé —</option>
                 <option value="MALE">Masculin</option>
