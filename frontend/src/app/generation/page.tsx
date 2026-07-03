@@ -7,16 +7,18 @@ import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/ui/StatusBadge";
+import { useT } from "@/lib/i18n/LanguageContext";
+import type { Dictionary } from "@/lib/i18n/translations";
 
 const POLL_MS = 3000;
 
-function chapterLabel(item: QueueItem): string {
-  return item.title ? item.title : `Chapitre ${item.position}`;
+function chapterLabel(item: QueueItem, t: Dictionary): string {
+  return item.title ? item.title : t.generation.chapterFallback(item.position);
 }
 
 // Vignette de couverture — même repli que BookCard.tsx (initiale du titre si
 // pas de couverture ou 404), mais en petit format pour tenir à côté du texte.
-function CoverThumb({ bookId, title }: { bookId: number; title: string }) {
+function CoverThumb({ bookId, title, t }: { bookId: number; title: string; t: Dictionary }) {
   const [imgOk, setImgOk] = useState(true);
   return (
     <div className="h-14 w-10 shrink-0 overflow-hidden rounded-control bg-surface-2">
@@ -24,7 +26,7 @@ function CoverThumb({ bookId, title }: { bookId: number; title: string }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={coverUrl(bookId)}
-          alt={`Couverture de ${title}`}
+          alt={t.generation.coverAlt(title)}
           className="h-full w-full object-cover"
           onError={() => setImgOk(false)}
         />
@@ -38,6 +40,7 @@ function CoverThumb({ bookId, title }: { bookId: number; title: string }) {
 }
 
 export default function GenerationPage() {
+  const t = useT();
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,13 +143,13 @@ export default function GenerationPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
-      <h1 className="text-3xl font-bold text-foreground">Génération</h1>
+      <h1 className="text-3xl font-bold text-foreground">{t.generation.title}</h1>
       <p className="mt-1 text-sm text-muted">
-        File d&apos;attente de génération audio, tous livres confondus.
+        {t.generation.subtitle}
       </p>
 
       {error && (
-        <Alert title="Erreur" className="mt-6">
+        <Alert title={t.generation.errorTitle} className="mt-6">
           <p className="text-sm text-danger">{error}</p>
         </Alert>
       )}
@@ -161,12 +164,12 @@ export default function GenerationPage() {
         <>
           <section className="mt-8">
             <h2 className="text-xl font-semibold text-foreground">
-              En cours
+              {t.generation.inProgress}
             </h2>
             {generating ? (
               <div className="mt-3 flex items-center justify-between rounded-card border border-border bg-surface p-4">
                 <div className="flex items-center gap-3">
-                  <CoverThumb bookId={generating.book_id} title={generating.book_title} />
+                  <CoverThumb bookId={generating.book_id} title={generating.book_title} t={t} />
                   <div>
                     <Link
                       href={`/books/${generating.book_id}`}
@@ -174,7 +177,7 @@ export default function GenerationPage() {
                     >
                       {generating.book_title}
                     </Link>
-                    <p className="text-sm text-muted">{chapterLabel(generating)}</p>
+                    <p className="text-sm text-muted">{chapterLabel(generating, t)}</p>
                     <StatusBadge status={generating.status} className="mt-1" />
                   </div>
                 </div>
@@ -184,20 +187,20 @@ export default function GenerationPage() {
                   disabled={stoppingId === generating.chapter_id}
                   onClick={() => handleStop(generating)}
                 >
-                  {stoppingId === generating.chapter_id ? "Arrêt…" : "Arrêter"}
+                  {stoppingId === generating.chapter_id ? t.generation.stopping : t.generation.stop}
                 </Button>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-muted">Aucune génération en cours.</p>
+              <p className="mt-3 text-sm text-muted">{t.generation.noneInProgress}</p>
             )}
           </section>
 
           <section className="mt-8">
             <h2 className="text-xl font-semibold text-foreground">
-              En attente ({pending.length})
+              {t.generation.pending(pending.length)}
             </h2>
             {pending.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">La file d&apos;attente est vide.</p>
+              <p className="mt-3 text-sm text-muted">{t.generation.queueEmpty}</p>
             ) : (
               <ol className="mt-3 space-y-2">
                 {pending.map((item, index) => (
@@ -231,7 +234,7 @@ export default function GenerationPage() {
                     <span
                       className="shrink-0 select-none text-muted/50"
                       aria-hidden="true"
-                      title="Glisser pour réordonner"
+                      title={t.generation.dragToReorder}
                     >
                       <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
                         <circle cx="5" cy="4" r="1.3" />
@@ -242,7 +245,7 @@ export default function GenerationPage() {
                         <circle cx="11" cy="12" r="1.3" />
                       </svg>
                     </span>
-                    <CoverThumb bookId={item.book_id} title={item.book_title} />
+                    <CoverThumb bookId={item.book_id} title={item.book_title} t={t} />
                     <div className="min-w-0 flex-1">
                       <Link
                         href={`/books/${item.book_id}`}
@@ -250,7 +253,7 @@ export default function GenerationPage() {
                       >
                         {item.book_title}
                       </Link>
-                      <p className="truncate text-sm text-muted">{chapterLabel(item)}</p>
+                      <p className="truncate text-sm text-muted">{chapterLabel(item, t)}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <Button
@@ -258,7 +261,7 @@ export default function GenerationPage() {
                         size="sm"
                         disabled={index === 0 || movingId !== null}
                         onClick={() => movePending(pending, index, -1)}
-                        aria-label="Monter dans la file"
+                        aria-label={t.generation.moveUp}
                       >
                         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
                           <path d="M8 12.5V3.5M4 7l4-4 4 4" />
@@ -269,7 +272,7 @@ export default function GenerationPage() {
                         size="sm"
                         disabled={index === pending.length - 1 || movingId !== null}
                         onClick={() => movePending(pending, index, 1)}
-                        aria-label="Descendre dans la file"
+                        aria-label={t.generation.moveDown}
                       >
                         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
                           <path d="M8 3.5v9M4 9l4 4 4-4" />

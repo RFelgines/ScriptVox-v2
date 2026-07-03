@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { AppSettings, AppStatus, getAppSettings, getAppStatus, updateAppSettings } from "@/lib/api";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
+import { useT } from "@/lib/i18n/LanguageContext";
+import type { Dictionary } from "@/lib/i18n/translations";
 
 type StatusLevel = "ok" | "warning" | "error";
 
@@ -26,17 +28,14 @@ function ProviderCard({
   name,
   status,
   detail,
+  t,
 }: {
   label: string;
   name: string;
   status: StatusLevel;
   detail: string | null;
+  t: Dictionary;
 }) {
-  const labels: Record<StatusLevel, string> = {
-    ok: "Opérationnel",
-    warning: "Attention",
-    error: "Erreur",
-  };
   return (
     <div className="rounded-card border border-border bg-surface p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
@@ -45,7 +44,7 @@ function ProviderCard({
         <p className="font-medium text-foreground">{name}</p>
       </div>
       <div className="mt-1 flex items-center gap-2">
-        <span className="text-xs text-muted">{labels[status]}</span>
+        <span className="text-xs text-muted">{t.settings.statusLevels[status]}</span>
         {detail && <span className="text-xs text-muted">— {detail}</span>}
       </div>
     </div>
@@ -53,6 +52,7 @@ function ProviderCard({
 }
 
 export default function ParametresPage() {
+  const t = useT();
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,9 +83,9 @@ export default function ParametresPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
-      <h1 className="text-3xl font-bold text-foreground">Paramètres</h1>
+      <h1 className="text-3xl font-bold text-foreground">{t.settings.title}</h1>
       <p className="mt-2 text-muted">
-        État des services. Le moteur de synthèse par livre se choisit dans la page Casting.
+        {t.settings.subtitle}
       </p>
 
       {loading && (
@@ -97,7 +97,7 @@ export default function ParametresPage() {
       )}
 
       {error && (
-        <Alert title="Impossible de joindre l'API" className="mt-6">
+        <Alert title={t.settings.apiUnreachableTitle} className="mt-6">
           <p className="text-sm text-danger">{error}</p>
         </Alert>
       )}
@@ -105,22 +105,24 @@ export default function ParametresPage() {
       {status && (
         <div className="mt-6 space-y-3">
           <ProviderCard
-            label="Analyse LLM"
+            label={t.settings.llmLabel}
             name={status.llm.name}
             status={status.llm.status}
             detail={status.llm.detail}
+            t={t}
           />
           <ProviderCard
-            label="Synthèse vocale TTS"
+            label={t.settings.ttsLabel}
             name={status.tts.name}
             status={status.tts.status}
             detail={status.tts.detail}
+            t={t}
           />
 
           {settings && (
             <div className="rounded-card border border-border bg-surface p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                Modèle TTS préféré
+                {t.settings.preferredProviderLabel}
               </p>
               <div className="mt-2 flex items-center gap-2">
                 <select
@@ -128,40 +130,39 @@ export default function ParametresPage() {
                   onChange={(e) => handlePreferredProviderChange(e.target.value)}
                   disabled={saving}
                   className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-50"
-                  aria-label="Modèle TTS préféré"
+                  aria-label={t.settings.preferredProviderLabel}
                 >
-                  <option value="">Par défaut ({settings.default_tts_provider})</option>
+                  <option value="">{t.settings.defaultOption(settings.default_tts_provider)}</option>
                   {settings.available_tts_providers.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
                   ))}
                 </select>
-                {saving && <span className="text-xs text-muted">Enregistrement…</span>}
+                {saving && <span className="text-xs text-muted">{t.settings.saving}</span>}
               </div>
               <p className="mt-2 text-xs text-muted">
-                Préférence enregistrée, pas encore appliquée à la génération — le moteur réel reste
-                celui choisi par livre (page Casting) ou la valeur par défaut du serveur.
+                {t.settings.preferredHint}
               </p>
             </div>
           )}
 
           <div className="rounded-card border border-border bg-surface p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">
-              Voix clonées
+              {t.settings.clonedVoicesLabel}
             </p>
             <div className="mt-2 flex items-center gap-2">
               <StatusDot level={status.cloned_voices_count > 0 ? "ok" : "warning"} />
               <p className="font-medium text-foreground">
                 {status.cloned_voices_count > 0
-                  ? `${status.cloned_voices_count} voix clonée${status.cloned_voices_count > 1 ? "s" : ""} disponible${status.cloned_voices_count > 1 ? "s" : ""}`
-                  : "Aucune voix clonée"}
+                  ? t.settings.clonedVoicesAvailable(status.cloned_voices_count)
+                  : t.settings.clonedVoicesNone}
               </p>
             </div>
             <p className="mt-1 text-xs text-muted">
               {status.cloned_voices_count > 0
-                ? "Utilisables avec Qwen3-TTS uniquement — assignées en priorité lors de l'analyse."
-                : "Ajoutez des voix depuis l'onglet Voix pour activer le clonage."}
+                ? t.settings.clonedVoicesHintAvailable
+                : t.settings.clonedVoicesHintNone}
             </p>
           </div>
         </div>

@@ -7,15 +7,7 @@ import UploadDropzone from "@/components/UploadDropzone";
 import BookCard from "@/components/BookCard";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
-
-const STATUS_LABELS: Record<BookStatus, string> = {
-  PENDING: "En attente",
-  PROCESSING: "Analyse en cours",
-  ANALYZED: "Analysé",
-  GENERATING: "Génération en cours",
-  DONE: "Terminé",
-  FAILED: "Échec",
-};
+import { useT } from "@/lib/i18n/LanguageContext";
 
 const DEFAULT_PROVIDER_KEY = "__default__";
 
@@ -26,15 +18,6 @@ type SortKey =
   | "ADDED_ASC"
   | "PUBLISHED_DESC"
   | "PUBLISHED_ASC";
-
-const SORT_LABELS: Record<SortKey, string> = {
-  NONE: "Tri par défaut",
-  TITLE_ASC: "Titre (A→Z)",
-  ADDED_DESC: "Date d'ajout (récent d'abord)",
-  ADDED_ASC: "Date d'ajout (ancien d'abord)",
-  PUBLISHED_DESC: "Date de publication (récent d'abord)",
-  PUBLISHED_ASC: "Date de publication (ancien d'abord)",
-};
 
 function sortBooks(books: BookSummary[], sortKey: SortKey): BookSummary[] {
   const sorted = [...books];
@@ -58,6 +41,7 @@ function sortBooks(books: BookSummary[], sortKey: SortKey): BookSummary[] {
 
 export default function Home() {
   const router = useRouter();
+  const t = useT();
   const [books, setBooks] = useState<BookSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,11 +118,11 @@ export default function Home() {
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-8">
       <div className="mb-6 flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="text-3xl font-bold">Bibliothèque</h1>
+        <h1 className="text-3xl font-bold">{t.library.title}</h1>
         {!loading && !error && books.length > 0 && (
           <span className="text-sm text-muted">
-            {visibleBooks.length} livre{visibleBooks.length > 1 ? "s" : ""}
-            {filtersActive && ` sur ${books.length}`}
+            {t.library.bookCount(visibleBooks.length)}
+            {filtersActive && t.library.filteredOf(books.length)}
           </span>
         )}
       </div>
@@ -149,20 +133,20 @@ export default function Home() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher un titre ou un auteur…"
-            aria-label="Rechercher un livre"
+            placeholder={t.library.searchPlaceholder}
+            aria-label={t.library.searchAriaLabel}
             className="min-w-48 flex-1 rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm placeholder:text-muted"
           />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as BookStatus | "ALL")}
-            aria-label="Filtrer par statut"
+            aria-label={t.library.filterStatusAriaLabel}
             className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
           >
-            <option value="ALL">Tous statuts</option>
-            {(Object.keys(STATUS_LABELS) as BookStatus[]).map((s) => (
+            <option value="ALL">{t.library.allStatuses}</option>
+            {(Object.keys(t.library.statusLabels) as BookStatus[]).map((s) => (
               <option key={s} value={s}>
-                {STATUS_LABELS[s]}
+                {t.library.statusLabels[s]}
               </option>
             ))}
           </select>
@@ -170,12 +154,12 @@ export default function Home() {
             <select
               value={providerFilter}
               onChange={(e) => setProviderFilter(e.target.value)}
-              aria-label="Filtrer par modèle TTS"
+              aria-label={t.library.filterProviderAriaLabel}
               className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
             >
-              <option value="ALL">Tous moteurs TTS</option>
+              <option value="ALL">{t.library.allProviders}</option>
               <option value={DEFAULT_PROVIDER_KEY}>
-                Par défaut ({appSettings.default_tts_provider})
+                {t.library.defaultProvider(appSettings.default_tts_provider)}
               </option>
               {appSettings.available_tts_providers.map((p) => (
                 <option key={p} value={p}>
@@ -188,10 +172,10 @@ export default function Home() {
             <select
               value={genreFilter}
               onChange={(e) => setGenreFilter(e.target.value)}
-              aria-label="Filtrer par genre"
+              aria-label={t.library.filterGenreAriaLabel}
               className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
             >
-              <option value="ALL">Tous genres</option>
+              <option value="ALL">{t.library.allGenres}</option>
               {genreOptions.map((g) => (
                 <option key={g} value={g}>
                   {g}
@@ -203,10 +187,10 @@ export default function Home() {
             <select
               value={authorFilter}
               onChange={(e) => setAuthorFilter(e.target.value)}
-              aria-label="Filtrer par auteur"
+              aria-label={t.library.filterAuthorAriaLabel}
               className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
             >
-              <option value="ALL">Tous auteurs</option>
+              <option value="ALL">{t.library.allAuthors}</option>
               {authorOptions.map((a) => (
                 <option key={a} value={a}>
                   {a}
@@ -218,10 +202,10 @@ export default function Home() {
             <select
               value={languageFilter}
               onChange={(e) => setLanguageFilter(e.target.value)}
-              aria-label="Filtrer par langue"
+              aria-label={t.library.filterLanguageAriaLabel}
               className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
             >
-              <option value="ALL">Toutes langues</option>
+              <option value="ALL">{t.library.allLanguages}</option>
               {languageOptions.map((l) => (
                 <option key={l} value={l}>
                   {l}
@@ -232,12 +216,12 @@ export default function Home() {
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
-            aria-label="Trier par"
+            aria-label={t.library.sortAriaLabel}
             className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
           >
-            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+            {(Object.keys(t.library.sortLabels) as SortKey[]).map((k) => (
               <option key={k} value={k}>
-                {SORT_LABELS[k]}
+                {t.library.sortLabels[k]}
               </option>
             ))}
           </select>
@@ -262,10 +246,10 @@ export default function Home() {
       )}
 
       {error && (
-        <Alert title="Impossible de joindre l'API" className="mt-6">
+        <Alert title={t.library.apiUnreachableTitle} className="mt-6">
           <p className="text-sm text-danger mt-1">{error}</p>
           <p className="text-sm text-muted mt-2">
-            Vérifiez que l&apos;API tourne sur{" "}
+            {t.library.apiUnreachableHint}{" "}
             <code className="bg-surface-2 px-1 rounded">
               {process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}
             </code>
@@ -279,8 +263,8 @@ export default function Home() {
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
           </svg>
-          <p className="text-base font-medium text-foreground">Bibliothèque vide</p>
-          <p className="text-sm">Glissez un fichier EPUB ci-dessus pour commencer.</p>
+          <p className="text-base font-medium text-foreground">{t.library.emptyTitle}</p>
+          <p className="text-sm">{t.library.emptyHint}</p>
         </div>
       )}
 
@@ -289,8 +273,8 @@ export default function Home() {
           <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
-          <p className="text-base font-medium text-foreground">Aucun livre ne correspond</p>
-          <p className="text-sm">Essayez d&apos;élargir les filtres ci-dessus.</p>
+          <p className="text-base font-medium text-foreground">{t.library.noMatchTitle}</p>
+          <p className="text-sm">{t.library.noMatchHint}</p>
         </div>
       )}
 
