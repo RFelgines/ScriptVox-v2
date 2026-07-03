@@ -2,14 +2,16 @@ from app.config import VALID_TTS_PROVIDERS, Settings
 from app.services.tts.base import BaseTTSProvider
 
 
-def get_tts_provider(settings: Settings, override: str | None = None) -> BaseTTSProvider:
+def get_tts_provider(
+    settings: Settings, override: str | None = None, language: str | None = None,
+) -> BaseTTSProvider:
     provider = override or settings.tts_provider
     if provider == "edgetts":
         from app.services.tts.edgetts import EdgeTTSProvider
-        return EdgeTTSProvider(settings)
+        return EdgeTTSProvider(settings, language=language)
     if provider == "qwen":
         from app.services.tts.qwen import QwenTTSProvider
-        return QwenTTSProvider(settings)
+        return QwenTTSProvider(settings, language=language)
     if provider == "piper":
         from app.services.tts.piper import PiperProvider
         return PiperProvider(settings)

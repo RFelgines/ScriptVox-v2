@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover — current venv pins Python 3.11
 
 from app.config import Settings
 from app.core.exceptions import TTSError
+from app.services.llm.language_profiles import resolve_profile
 from app.services.tts.base import BaseTTSProvider
 
 # Logical voice_id -> Qwen3-TTS speaker preset (CustomVoice variants).
@@ -44,6 +45,9 @@ _MODEL_IDS_BASE: dict[str, str] = {
     "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
     "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
 }
+
+# Profile code (language_profiles.resolve_profile) -> Qwen3-TTS language string.
+_PROFILE_LANGUAGE: dict[str, str] = {"en": "English", "fr": "French"}
 
 _MODEL_SAMPLE_RATE = 24000   # what Qwen3-TTS always returns (verified by tests/spike_qwen_tts.py)
 _OUTPUT_SAMPLE_RATE = 22050  # ScriptVox's shared WAV format (assemble_wav's format guard)
@@ -119,11 +123,19 @@ def _load_ref_audio(path: str):
 
 
 class QwenTTSProvider(BaseTTSProvider):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, language: str | None = None) -> None:
         size = getattr(settings, "qwen_model", "1.7b")
         self._model_id = _MODEL_IDS.get(size, _MODEL_IDS["1.7b"])
         self._base_model_id = _MODEL_IDS_BASE.get(size, _MODEL_IDS_BASE["1.7b"])
-        self._language = getattr(settings, "qwen_language", "French")
+        # `language` is Book.language (raw EPUB metadata) -- resolved through the same
+        # profile logic as LLM segmentation / EdgeTTS so a book's locale is consistent
+        # across the whole pipeline. Falls back to the global QWEN_LANGUAGE when the
+        # book has no usable language (zero regression on books analysed before this
+        # per-book resolution existed).
+        if language:
+            self._language = _PROFILE_LANGUAGE[resolve_profile(language).code]
+        else:
+            self._language = getattr(settings, "qwen_language", "French")
         self._device = getattr(settings, "qwen_device", "cuda:0")
         self._attn = getattr(settings, "qwen_attn", "sdpa")
         self._model = None       # CustomVoice — lazy-loaded on first preset call

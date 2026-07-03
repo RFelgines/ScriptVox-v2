@@ -667,7 +667,9 @@ async def _synthesise_chapter_worker(
         chapter = session.get(Chapter, chapter_id)
         book = session.get(Book, chapter.book_id) if chapter else None
         provider = tts_factory.get_tts_provider(
-            settings, override=book.tts_provider if book else None
+            settings,
+            override=book.tts_provider if book else None,
+            language=book.language if book else None,
         )
         try:
             return await _synthesise_segments(
