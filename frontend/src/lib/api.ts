@@ -1,4 +1,10 @@
+import { getStoredLocale, translations, type Dictionary } from "@/lib/i18n/translations";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+function t() {
+  return translations[getStoredLocale()];
+}
 
 export type BookStatus =
   | "PENDING"
@@ -123,7 +129,7 @@ export async function uploadBook(file: File): Promise<BookSummary> {
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Upload échoué : ${detail}`);
+    throw new Error(t().errors.upload(detail));
   }
   return res.json();
 }
@@ -138,7 +144,7 @@ async function _patchBookField(
   bookId: number,
   field: string,
   value: string | null,
-  errorLabel: string,
+  fieldKey: keyof Dictionary["errors"]["fields"],
 ): Promise<BookSummary> {
   const res = await fetch(`${API_URL}/books/${bookId}`, {
     method: "PATCH",
@@ -155,28 +161,29 @@ async function _patchBookField(
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`${errorLabel} échoué : ${detail}`);
+    const dict = t();
+    throw new Error(dict.errors.fieldChange(dict.errors.fields[fieldKey], detail));
   }
   return res.json();
 }
 
 export function patchBookProvider(bookId: number, ttsProvider: string | null): Promise<BookSummary> {
-  return _patchBookField(bookId, "tts_provider", ttsProvider, "Changement de provider");
+  return _patchBookField(bookId, "tts_provider", ttsProvider, "ttsProvider");
 }
 
 export function patchBookGenre(bookId: number, genre: string | null): Promise<BookSummary> {
-  return _patchBookField(bookId, "genre", genre, "Changement de genre");
+  return _patchBookField(bookId, "genre", genre, "genre");
 }
 
 export function patchBookLanguage(bookId: number, language: string | null): Promise<BookSummary> {
-  return _patchBookField(bookId, "language", language, "Changement de langue");
+  return _patchBookField(bookId, "language", language, "language");
 }
 
 export function patchBookPublishedAt(
   bookId: number,
   publishedAt: string | null,
 ): Promise<BookSummary> {
-  return _patchBookField(bookId, "published_at", publishedAt, "Changement de date de publication");
+  return _patchBookField(bookId, "published_at", publishedAt, "publishedAt");
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -265,7 +272,7 @@ export async function createVoice(
     } catch {
       // non-JSON
     }
-    throw new Error(`Création de voix échouée : ${detail}`);
+    throw new Error(t().errors.voiceCreate(detail));
   }
   return res.json();
 }
@@ -280,7 +287,7 @@ export async function deleteVoice(voiceId: string): Promise<void> {
     } catch {
       // non-JSON
     }
-    throw new Error(`Suppression de voix échouée : ${detail}`);
+    throw new Error(t().errors.voiceDelete(detail));
   }
 }
 
@@ -316,31 +323,36 @@ export async function patchCharacterVoice(
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Override voix échoué : ${detail}`);
+    throw new Error(t().errors.voiceOverride(detail));
   }
   return res.json();
 }
 
-async function _postBook(bookId: number, action: string, errorLabel: string): Promise<BookSummary> {
+async function _postBook(
+  bookId: number,
+  action: string,
+  actionKey: keyof Dictionary["errors"]["actions"],
+): Promise<BookSummary> {
   const res = await fetch(`${API_URL}/books/${bookId}/${action}`, { method: "POST" });
   if (!res.ok) {
     let detail = String(res.status);
     try { const b = await res.json(); if (b?.detail) detail = b.detail; } catch { /* ignore */ }
-    throw new Error(`${errorLabel} : ${detail}`);
+    const dict = t();
+    throw new Error(dict.errors.bookAction(dict.errors.actions[actionKey], detail));
   }
   return res.json();
 }
 
 export function analyzeBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "analyze", "Analyse échouée");
+  return _postBook(bookId, "analyze", "analyze");
 }
 
 export function generateBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "generate", "Génération échouée");
+  return _postBook(bookId, "generate", "generate");
 }
 
 export function stopBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "stop", "Arrêt échoué");
+  return _postBook(bookId, "stop", "stop");
 }
 
 export async function deleteBook(id: number): Promise<void> {
@@ -353,7 +365,7 @@ export async function deleteBook(id: number): Promise<void> {
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Suppression échouée : ${detail}`);
+    throw new Error(t().errors.bookDelete(detail));
   }
 }
 
@@ -388,7 +400,7 @@ export async function generateChapter(
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Génération du chapitre échouée : ${detail}`);
+    throw new Error(t().errors.chapterGenerate(detail));
   }
   return res.json();
 }
@@ -414,7 +426,7 @@ async function _resolveMergeSuggestion(
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Fusion (${action}) échouée : ${detail}`);
+    throw new Error(t().errors.mergeResolve(action, detail));
   }
   return res.json();
 }
@@ -445,7 +457,7 @@ export async function stopChapter(bookId: number, position: number): Promise<Cha
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Arrêt du chapitre échoué : ${detail}`);
+    throw new Error(t().errors.chapterStop(detail));
   }
   return res.json();
 }
@@ -468,7 +480,7 @@ export async function patchChapterPriority(
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Changement de priorité échoué : ${detail}`);
+    throw new Error(t().errors.chapterPriority(detail));
   }
   return res.json();
 }
@@ -485,7 +497,7 @@ export async function generateAllChapters(bookId: number): Promise<ChapterSummar
     } catch {
       // réponse non-JSON : on garde le code HTTP
     }
-    throw new Error(`Génération de tous les chapitres échouée : ${detail}`);
+    throw new Error(t().errors.allChaptersGenerate(detail));
   }
   return res.json();
 }

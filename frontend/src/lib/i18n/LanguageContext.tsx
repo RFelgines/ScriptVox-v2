@@ -1,12 +1,38 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { translations, type Dictionary, type Locale } from "@/lib/i18n/translations";
+import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
+import {
+  LOCALE_STORAGE_KEY,
+  translations,
+  type Dictionary,
+  type Locale,
+} from "@/lib/i18n/translations";
 
-const STORAGE_KEY = "language";
 // Français par défaut : cohérent avec le fallback backend (resolve_profile,
 // language_profiles.py) -- zéro régression pour un visiteur sans préférence.
 const DEFAULT_LOCALE: Locale = "fr";
+
+// L'event "storage" natif ne se déclenche que pour les AUTRES onglets, jamais
+// celui qui vient d'écrire la valeur -- un event custom couvre le cas local
+// (clic sur le toggle dans cet onglet).
+const LOCALE_CHANGE_EVENT = "scriptvox:locale-change";
+
+function subscribe(callback: () => void): () => void {
+  window.addEventListener(LOCALE_CHANGE_EVENT, callback);
+  window.addEventListener("storage", callback);
+  return () => {
+    window.removeEventListener(LOCALE_CHANGE_EVENT, callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function getSnapshot(): Locale {
+  return localStorage.getItem(LOCALE_STORAGE_KEY) === "en" ? "en" : DEFAULT_LOCALE;
+}
+
+function getServerSnapshot(): Locale {
+  return DEFAULT_LOCALE;
+}
 
 type LanguageContextValue = {
   locale: Locale;
@@ -17,23 +43,18 @@ type LanguageContextValue = {
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
-
-  // Lu après hydratation seulement (pas de flash critique à éviter ici,
-  // contrairement au thème : le texte n'affecte pas le layout/CSS avant
-  // paint) -- corrige le SSR "fr" par défaut vers la préférence stockée.
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "fr" || stored === "en") setLocaleState(stored);
-  }, []);
+  // useSyncExternalStore -- pas de setState dans un effet (évite l'anti-pattern
+  // "cascading renders" signalé par eslint react-hooks) : localStorage EST la
+  // source de vérité, lue directement, avec un snapshot serveur explicite (fr).
+  const locale = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
 
   function setLocale(next: Locale) {
-    localStorage.setItem(STORAGE_KEY, next);
-    setLocaleState(next);
+    localStorage.setItem(LOCALE_STORAGE_KEY, next);
+    window.dispatchEvent(new Event(LOCALE_CHANGE_EVENT));
   }
 
   return (

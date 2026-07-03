@@ -1,4 +1,7 @@
+"use client";
+
 import { isActiveStatus, statusDot, statusLabel } from "@/lib/status";
+import { useT } from "@/lib/i18n/LanguageContext";
 
 export default function StatusBadge({
   status,
@@ -7,6 +10,7 @@ export default function StatusBadge({
   status: string;
   className?: string;
 }) {
+  const t = useT();
   return (
     <p className={`flex items-center gap-1.5 ${className}`}>
       <span
@@ -14,7 +18,7 @@ export default function StatusBadge({
           isActiveStatus(status) ? "animate-pulse" : ""
         }`}
       />
-      <span className="font-medium text-muted">{statusLabel(status)}</span>
+      <span className="font-medium text-muted">{statusLabel(status, t)}</span>
     </p>
   );
 }

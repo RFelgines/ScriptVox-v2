@@ -1,3 +1,5 @@
+import type { Dictionary } from "@/lib/i18n/translations";
+
 export const STATUS_DOT: Record<string, string> = {
   PENDING: "bg-stone-400",
   PROCESSING: "bg-blue-400",
@@ -7,21 +9,12 @@ export const STATUS_DOT: Record<string, string> = {
   FAILED: "bg-red-400",
 };
 
-export const STATUS_LABEL: Record<string, string> = {
-  PENDING: "En attente",
-  PROCESSING: "Analyse…",
-  ANALYZED: "Analysé",
-  GENERATING: "Génération…",
-  DONE: "Prêt",
-  FAILED: "Échec",
-};
-
 export function statusDot(status: string): string {
   return STATUS_DOT[status] ?? "bg-stone-400";
 }
 
-export function statusLabel(status: string): string {
-  return STATUS_LABEL[status] ?? status;
+export function statusLabel(status: string, t: Dictionary): string {
+  return t.status[status as keyof Dictionary["status"]] ?? status;
 }
 
 // "En cours" seulement (PROCESSING/GENERATING) -- PENDING est une file
