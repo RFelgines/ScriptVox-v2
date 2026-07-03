@@ -4,6 +4,7 @@ import "./globals.css";
 import Nav from "@/components/Nav";
 import PlayerProvider from "@/components/player/PlayerProvider";
 import PlayerBar from "@/components/player/PlayerBar";
+import { LanguageProvider } from "@/lib/i18n/LanguageContext";
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -56,11 +57,13 @@ export default function RootLayout({
           suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
-        <Nav />
-        <PlayerProvider>
-          {children}
-          <PlayerBar />
-        </PlayerProvider>
+        <LanguageProvider>
+          <Nav />
+          <PlayerProvider>
+            {children}
+            <PlayerBar />
+          </PlayerProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

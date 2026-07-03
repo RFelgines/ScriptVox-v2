@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ThemeToggle from "./ThemeToggle";
+import LanguageToggle from "./LanguageToggle";
+import { useT } from "@/lib/i18n/LanguageContext";
+import type { Dictionary } from "@/lib/i18n/translations";
 
-type Tab = { href: string; label: string };
+type Tab = { href: string; key: keyof Dictionary["nav"] };
 
 const TABS: Tab[] = [
-  { href: "/", label: "Bibliothèque" },
-  { href: "/voix", label: "Voix" },
-  { href: "/generation", label: "Génération" },
-  { href: "/parametres", label: "Paramètres" },
+  { href: "/", key: "library" },
+  { href: "/voix", key: "voices" },
+  { href: "/generation", key: "generation" },
+  { href: "/parametres", key: "settings" },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -23,6 +26,7 @@ function isActive(pathname: string, href: string): boolean {
 
 export default function Nav() {
   const pathname = usePathname();
+  const t = useT();
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur">
@@ -45,11 +49,12 @@ export default function Nav() {
                     : "text-muted hover:bg-surface-2/60 hover:text-foreground"
                 }`}
               >
-                {tab.label}
+                {t.nav[tab.key]}
               </Link>
             );
           })}
         </nav>
+        <LanguageToggle />
         <ThemeToggle />
       </div>
     </header>
