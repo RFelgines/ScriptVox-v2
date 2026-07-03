@@ -157,6 +157,53 @@ export interface Dictionary {
     generateChapter: string;
     regenerateChapter: string;
   };
+  voices: {
+    title: string;
+    searchPlaceholder: string;
+    searchAriaLabel: string;
+    genderFilterAriaLabel: string;
+    allGenders: string;
+    genderLabels: Record<"MALE" | "FEMALE" | "NEUTRAL", string>;
+    kindFilterAriaLabel: string;
+    allKinds: string;
+    catalogueKind: string;
+    clonedKind: string;
+    sampleFilterAriaLabel: string;
+    allSamples: string;
+    sampleAvailable: string;
+    sampleMissing: string;
+    favoritesOnly: string;
+    cancelClone: string;
+    startClone: string;
+    subtitle: string;
+    cloneFormTitle: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    genderLabel: string;
+    genderUnspecified: string;
+    referenceAudioLabel: string;
+    chooseFile: string;
+    creating: string;
+    createClonedVoice: string;
+    nameRequired: string;
+    referenceAudioRequired: string;
+    apiUnreachableTitle: string;
+    noMatchTitle: string;
+    noneAvailableTitle: string;
+    noMatchHint: string;
+    catalogueEmptyHint: string;
+    deleteClonedConfirm: (name: string) => string;
+    deleteCatalogueConfirm: (name: string) => string;
+    generateSampleAriaLabel: (name: string) => string;
+    sampleUnavailableTitle: string;
+    previewAriaLabel: (name: string) => string;
+    removeFavorite: string;
+    addFavorite: string;
+    deleteVoiceAriaLabel: (name: string) => string;
+    deleteClonedTitle: string;
+    removeFromCatalogueTitle: string;
+    clonedBadge: string;
+  };
 }
 
 const fr: Dictionary = {
@@ -338,6 +385,58 @@ const fr: Dictionary = {
     generateChapter: "Générer",
     regenerateChapter: "Regénérer ce chapitre",
   },
+  voices: {
+    title: "Voix",
+    searchPlaceholder: "Rechercher par nom…",
+    searchAriaLabel: "Rechercher une voix",
+    genderFilterAriaLabel: "Filtrer par genre",
+    allGenders: "Tous genres",
+    genderLabels: {
+      MALE: "Masculin",
+      FEMALE: "Féminin",
+      NEUTRAL: "Neutre",
+    },
+    kindFilterAriaLabel: "Filtrer par type",
+    allKinds: "Tous types",
+    catalogueKind: "Catalogue",
+    clonedKind: "Clonées",
+    sampleFilterAriaLabel: "Filtrer par aperçu",
+    allSamples: "Tous aperçus",
+    sampleAvailable: "Aperçu disponible",
+    sampleMissing: "Sans aperçu",
+    favoritesOnly: "★ Favoris",
+    cancelClone: "✕ Annuler",
+    startClone: "+ Cloner une voix",
+    subtitle: "Le catalogue de voix disponibles. Cliquez sur un cercle pour écouter un aperçu.",
+    cloneFormTitle: "Cloner une voix",
+    nameLabel: "Nom *",
+    namePlaceholder: "ex. Patrick Baud",
+    genderLabel: "Genre",
+    genderUnspecified: "— Non précisé —",
+    referenceAudioLabel: "Audio de référence * (MP3 / WAV / FLAC)",
+    chooseFile: "Choisir un fichier…",
+    creating: "Création en cours…",
+    createClonedVoice: "Créer la voix clonée",
+    nameRequired: "Le nom est requis.",
+    referenceAudioRequired: "Un fichier audio de référence est requis.",
+    apiUnreachableTitle: "Impossible de joindre l'API",
+    noMatchTitle: "Aucune voix ne correspond",
+    noneAvailableTitle: "Aucune voix disponible",
+    noMatchHint: "Essayez d'élargir les filtres ci-dessus.",
+    catalogueEmptyHint: "Le catalogue de voix est vide.",
+    deleteClonedConfirm: (name) => `Supprimer la voix « ${name} » ? Cette action est irréversible.`,
+    deleteCatalogueConfirm: (name) =>
+      `Retirer « ${name} » du catalogue ? Elle sera restaurée au prochain redémarrage du serveur.`,
+    generateSampleAriaLabel: (name) => `Générer un aperçu pour ${name}`,
+    sampleUnavailableTitle: "Sample non disponible — cliquer pour générer",
+    previewAriaLabel: (name) => `Écouter un aperçu de ${name}`,
+    removeFavorite: "Retirer des favoris",
+    addFavorite: "Ajouter aux favoris",
+    deleteVoiceAriaLabel: (name) => `Supprimer la voix ${name}`,
+    deleteClonedTitle: "Supprimer cette voix clonée",
+    removeFromCatalogueTitle: "Retirer du catalogue",
+    clonedBadge: "🎙 cloné",
+  },
 };
 
 const en: Dictionary = {
@@ -518,6 +617,58 @@ const en: Dictionary = {
     chapterFallback: (position) => `Chapter ${position}`,
     generateChapter: "Generate",
     regenerateChapter: "Regenerate this chapter",
+  },
+  voices: {
+    title: "Voices",
+    searchPlaceholder: "Search by name…",
+    searchAriaLabel: "Search for a voice",
+    genderFilterAriaLabel: "Filter by gender",
+    allGenders: "All genders",
+    genderLabels: {
+      MALE: "Male",
+      FEMALE: "Female",
+      NEUTRAL: "Neutral",
+    },
+    kindFilterAriaLabel: "Filter by type",
+    allKinds: "All types",
+    catalogueKind: "Catalogue",
+    clonedKind: "Cloned",
+    sampleFilterAriaLabel: "Filter by preview",
+    allSamples: "All previews",
+    sampleAvailable: "Preview available",
+    sampleMissing: "No preview",
+    favoritesOnly: "★ Favourites",
+    cancelClone: "✕ Cancel",
+    startClone: "+ Clone a voice",
+    subtitle: "The catalogue of available voices. Click a circle to hear a preview.",
+    cloneFormTitle: "Clone a voice",
+    nameLabel: "Name *",
+    namePlaceholder: "e.g. Patrick Baud",
+    genderLabel: "Gender",
+    genderUnspecified: "— Unspecified —",
+    referenceAudioLabel: "Reference audio * (MP3 / WAV / FLAC)",
+    chooseFile: "Choose a file…",
+    creating: "Creating…",
+    createClonedVoice: "Create cloned voice",
+    nameRequired: "Name is required.",
+    referenceAudioRequired: "A reference audio file is required.",
+    apiUnreachableTitle: "Cannot reach the API",
+    noMatchTitle: "No voice matches",
+    noneAvailableTitle: "No voice available",
+    noMatchHint: "Try widening the filters above.",
+    catalogueEmptyHint: "The voice catalogue is empty.",
+    deleteClonedConfirm: (name) => `Delete voice "${name}"? This action is irreversible.`,
+    deleteCatalogueConfirm: (name) =>
+      `Remove "${name}" from the catalogue? It will be restored on the next server restart.`,
+    generateSampleAriaLabel: (name) => `Generate a preview for ${name}`,
+    sampleUnavailableTitle: "Sample not available — click to generate",
+    previewAriaLabel: (name) => `Listen to a preview of ${name}`,
+    removeFavorite: "Remove from favourites",
+    addFavorite: "Add to favourites",
+    deleteVoiceAriaLabel: (name) => `Delete voice ${name}`,
+    deleteClonedTitle: "Delete this cloned voice",
+    removeFromCatalogueTitle: "Remove from catalogue",
+    clonedBadge: "🎙 cloned",
   },
 };
 

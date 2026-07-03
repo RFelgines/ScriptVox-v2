@@ -18,6 +18,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
 import VoiceOrb from "@/components/VoiceOrb";
 import { buildHueMap } from "@/lib/voiceHues";
+import { useT } from "@/lib/i18n/LanguageContext";
 
 function localeToFlag(locale: string): string | null {
   const region = locale.split("-")[1];
@@ -43,6 +44,7 @@ const SAMPLE_POLL_INTERVAL_MS = 3000;
 const SAMPLE_POLL_MAX_ATTEMPTS = 20; // ~1 min
 
 export default function VoixPage() {
+  const t = useT();
   const { play, track, isPlaying } = usePlayer();
   const [voices, setVoices] = useState<VoiceSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +92,8 @@ export default function VoixPage() {
   function handleDeleteVoice(voice: VoiceSummary) {
     const msg =
       voice.kind === "CLONED"
-        ? `Supprimer la voix « ${voice.name} » ? Cette action est irréversible.`
-        : `Retirer « ${voice.name} » du catalogue ? Elle sera restaurée au prochain redémarrage du serveur.`;
+        ? t.voices.deleteClonedConfirm(voice.name)
+        : t.voices.deleteCatalogueConfirm(voice.name);
     if (!window.confirm(msg)) return;
     setDeletingId(voice.id);
     deleteVoice(voice.id)
@@ -125,8 +127,8 @@ export default function VoixPage() {
 
   async function handleCloneSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!cloneName.trim()) { setCloneError("Le nom est requis."); return; }
-    if (!cloneFile) { setCloneError("Un fichier audio de référence est requis."); return; }
+    if (!cloneName.trim()) { setCloneError(t.voices.nameRequired); return; }
+    if (!cloneFile) { setCloneError(t.voices.referenceAudioRequired); return; }
     setCloneError(null);
     setCloning(true);
     try {
@@ -178,45 +180,45 @@ export default function VoixPage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="text-3xl font-bold">Voix</h1>
+        <h1 className="text-3xl font-bold">{t.voices.title}</h1>
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher par nom…"
-            aria-label="Rechercher une voix"
+            placeholder={t.voices.searchPlaceholder}
+            aria-label={t.voices.searchAriaLabel}
             className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm placeholder:text-muted"
           />
           <select
             value={genderFilter}
             onChange={(e) => setGenderFilter(e.target.value as Gender | "ALL")}
-            aria-label="Filtrer par genre"
+            aria-label={t.voices.genderFilterAriaLabel}
             className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
           >
-            <option value="ALL">Tous genres</option>
-            <option value="MALE">Masculin</option>
-            <option value="FEMALE">Féminin</option>
-            <option value="NEUTRAL">Neutre</option>
+            <option value="ALL">{t.voices.allGenders}</option>
+            <option value="MALE">{t.voices.genderLabels.MALE}</option>
+            <option value="FEMALE">{t.voices.genderLabels.FEMALE}</option>
+            <option value="NEUTRAL">{t.voices.genderLabels.NEUTRAL}</option>
           </select>
           <select
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as VoiceKind | "ALL")}
-            aria-label="Filtrer par type"
+            aria-label={t.voices.kindFilterAriaLabel}
             className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
           >
-            <option value="ALL">Tous types</option>
-            <option value="CATALOGUE">Catalogue</option>
-            <option value="CLONED">Clonées</option>
+            <option value="ALL">{t.voices.allKinds}</option>
+            <option value="CATALOGUE">{t.voices.catalogueKind}</option>
+            <option value="CLONED">{t.voices.clonedKind}</option>
           </select>
           {localeOptions.length > 0 && (
             <select
               value={localeFilter}
               onChange={(e) => setLocaleFilter(e.target.value)}
-              aria-label="Filtrer par langue"
+              aria-label={t.library.filterLanguageAriaLabel}
               className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
             >
-              <option value="ALL">Toutes langues</option>
+              <option value="ALL">{t.library.allLanguages}</option>
               {localeOptions.map((l) => (
                 <option key={l} value={l}>
                   {l}
@@ -227,12 +229,12 @@ export default function VoixPage() {
           <select
             value={sampleFilter}
             onChange={(e) => setSampleFilter(e.target.value as "ALL" | "WITH" | "WITHOUT")}
-            aria-label="Filtrer par aperçu"
+            aria-label={t.voices.sampleFilterAriaLabel}
             className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-muted"
           >
-            <option value="ALL">Tous aperçus</option>
-            <option value="WITH">Aperçu disponible</option>
-            <option value="WITHOUT">Sans aperçu</option>
+            <option value="ALL">{t.voices.allSamples}</option>
+            <option value="WITH">{t.voices.sampleAvailable}</option>
+            <option value="WITHOUT">{t.voices.sampleMissing}</option>
           </select>
           <button
             onClick={() => setFavoritesOnly((v) => !v)}
@@ -242,7 +244,7 @@ export default function VoixPage() {
                 : "text-muted hover:bg-surface-2/60 hover:text-foreground"
             }`}
           >
-            ★ Favoris
+            {t.voices.favoritesOnly}
           </button>
           <Button
             size="sm"
@@ -251,12 +253,12 @@ export default function VoixPage() {
               setCloneError(null);
             }}
           >
-            {cloneOpen ? "✕ Annuler" : "+ Cloner une voix"}
+            {cloneOpen ? t.voices.cancelClone : t.voices.startClone}
           </Button>
         </div>
       </div>
       <p className="mt-2 text-muted">
-        Le catalogue de voix disponibles. Cliquez sur un cercle pour écouter un aperçu.
+        {t.voices.subtitle}
       </p>
 
       {cloneOpen && (
@@ -264,40 +266,40 @@ export default function VoixPage() {
           onSubmit={handleCloneSubmit}
           className="mt-6 rounded-card border border-border bg-surface p-4"
         >
-          <h2 className="mb-4 text-base font-semibold">Cloner une voix</h2>
+          <h2 className="mb-4 text-base font-semibold">{t.voices.cloneFormTitle}</h2>
           <div className="flex flex-wrap gap-4">
             <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm">
-              Nom *
+              {t.voices.nameLabel}
               <input
                 type="text"
                 value={cloneName}
                 onChange={(e) => setCloneName(e.target.value)}
-                placeholder="ex. Patrick Baud"
+                placeholder={t.voices.namePlaceholder}
                 className="rounded-control border border-border bg-surface-2 px-3 py-1.5 text-sm placeholder:text-muted"
                 required
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              Genre
+              {t.voices.genderLabel}
               <select
                 value={cloneGender}
                 onChange={(e) => setCloneGender(e.target.value as Gender | "")}
                 className="rounded-control border border-border bg-surface-2 px-3 py-1.5 text-sm"
               >
-                <option value="">— Non précisé —</option>
-                <option value="MALE">Masculin</option>
-                <option value="FEMALE">Féminin</option>
-                <option value="NEUTRAL">Neutre</option>
+                <option value="">{t.voices.genderUnspecified}</option>
+                <option value="MALE">{t.voices.genderLabels.MALE}</option>
+                <option value="FEMALE">{t.voices.genderLabels.FEMALE}</option>
+                <option value="NEUTRAL">{t.voices.genderLabels.NEUTRAL}</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              Audio de référence * (MP3 / WAV / FLAC)
+              {t.voices.referenceAudioLabel}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-control border border-dashed border-border bg-surface-2 px-4 py-1.5 text-sm text-muted hover:border-muted hover:text-foreground"
               >
-                {cloneFile ? cloneFile.name : "Choisir un fichier…"}
+                {cloneFile ? cloneFile.name : t.voices.chooseFile}
               </button>
               <input
                 ref={fileInputRef}
@@ -315,7 +317,7 @@ export default function VoixPage() {
           {cloneError && <p className="mt-3 text-sm text-danger">{cloneError}</p>}
           <div className="mt-4 flex justify-end">
             <Button type="submit" variant="primary" disabled={cloning}>
-              {cloning ? "Création en cours…" : "Créer la voix clonée"}
+              {cloning ? t.voices.creating : t.voices.createClonedVoice}
             </Button>
           </div>
         </form>
@@ -334,7 +336,7 @@ export default function VoixPage() {
       )}
 
       {error && (
-        <Alert title="Impossible de joindre l'API" className="mt-6">
+        <Alert title={t.voices.apiUnreachableTitle} className="mt-6">
           <p className="text-sm text-danger">{error}</p>
         </Alert>
       )}
@@ -354,12 +356,12 @@ export default function VoixPage() {
             </svg>
           )}
           <p className="text-base font-medium text-foreground">
-            {filtersActive ? "Aucune voix ne correspond" : "Aucune voix disponible"}
+            {filtersActive ? t.voices.noMatchTitle : t.voices.noneAvailableTitle}
           </p>
           <p className="text-sm">
             {filtersActive
-              ? "Essayez d'élargir les filtres ci-dessus."
-              : "Le catalogue de voix est vide."}
+              ? t.voices.noMatchHint
+              : t.voices.catalogueEmptyHint}
           </p>
         </div>
       )}
@@ -381,8 +383,8 @@ export default function VoixPage() {
                           setRequestingId(null);
                         });
                     }}
-                    aria-label={`Générer un aperçu pour ${v.name}`}
-                    title="Sample non disponible — cliquer pour générer"
+                    aria-label={t.voices.generateSampleAriaLabel(v.name)}
+                    title={t.voices.sampleUnavailableTitle}
                     className="group grayscale opacity-50 transition-all hover:opacity-70"
                   >
                     <VoiceOrb hue={orbHues.get(v.id) ?? 0} size={ORB_SIZE}>
@@ -393,8 +395,8 @@ export default function VoixPage() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => play({ title: `Aperçu — ${v.name}`, src: voiceSampleUrl(v.id) })}
-                    aria-label={`Écouter un aperçu de ${v.name}`}
+                    onClick={() => play({ title: t.book.previewTitle(v.name), src: voiceSampleUrl(v.id) })}
+                    aria-label={t.voices.previewAriaLabel(v.name)}
                     className="group transition-transform hover:scale-105"
                   >
                     <VoiceOrb
@@ -411,7 +413,7 @@ export default function VoixPage() {
                 <button
                   onClick={() => toggleFavorite(v)}
                   disabled={savingId === v.id}
-                  aria-label={v.is_favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
+                  aria-label={v.is_favorite ? t.voices.removeFavorite : t.voices.addFavorite}
                   className={`absolute -top-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-surface text-sm shadow disabled:opacity-50 ${
                     v.is_favorite ? "text-warning" : "text-muted hover:text-foreground"
                   }`}
@@ -421,8 +423,8 @@ export default function VoixPage() {
                 <button
                   onClick={() => handleDeleteVoice(v)}
                   disabled={deletingId === v.id}
-                  aria-label={`Supprimer la voix ${v.name}`}
-                  title={v.kind === "CLONED" ? "Supprimer cette voix clonée" : "Retirer du catalogue"}
+                  aria-label={t.voices.deleteVoiceAriaLabel(v.name)}
+                  title={v.kind === "CLONED" ? t.voices.deleteClonedTitle : t.voices.removeFromCatalogueTitle}
                   className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-xs text-muted shadow hover:bg-danger/15 hover:text-danger disabled:opacity-50"
                 >
                   {deletingId === v.id ? "…" : "×"}
@@ -434,7 +436,7 @@ export default function VoixPage() {
               <div className="flex flex-wrap items-center justify-center gap-1">
                 {v.kind === "CLONED" && (
                   <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
-                    🎙 cloné
+                    {t.voices.clonedBadge}
                   </span>
                 )}
                 {v.locale && (
