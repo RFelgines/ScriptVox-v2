@@ -5,8 +5,8 @@ from pydantic import BaseModel
 
 class SettingsResponse(BaseModel):
     default_tts_provider: str
-    # Préférence éditable en Paramètres -- PAS ENCORE utilisée pour piloter la
-    # génération réelle (câblage différé, voir app_setting.py).
+    # Préférence éditable en Paramètres, appliquée par app.workers.tasks
+    # ._effective_tts_provider entre l'override par livre et le défaut usine.
     preferred_tts_provider: str | None
     available_tts_providers: list[str]
 

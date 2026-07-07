@@ -14,6 +14,19 @@ huey = SqliteHuey(filename=get_settings().huey_db_path)
 DATA_DIR = Path(get_settings().data_dir)
 
 
+def _effective_tts_provider(session: Session, book_tts_provider: str | None) -> str | None:
+    """Résout le provider TTS effectif : override par livre > préférence globale
+    (AppSetting.preferred_tts_provider) > défaut usine (Settings.tts_provider, .env).
+    Retourne None si aucun override/préférence n'est défini -- get_tts_provider()
+    et assign_voices() retombent alors eux-mêmes sur Settings.tts_provider."""
+    from app.models import AppSetting
+
+    if book_tts_provider:
+        return book_tts_provider
+    row = session.get(AppSetting, 1)
+    return row.preferred_tts_provider if row else None
+
+
 async def _analyze_book(
     book_id: int,
     chapter_data: list[tuple[int, str]],
@@ -525,9 +538,9 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
         # (audit 2026-07-02, finding M4).
         with Session(engine) as session:
             book = session.get(Book, book_id)
-            effective_tts_provider = (
-                book.tts_provider if book and book.tts_provider else get_settings().tts_provider
-            )
+            effective_tts_provider = _effective_tts_provider(
+                session, book.tts_provider if book else None,
+            ) or get_settings().tts_provider
             assign_voices(book_id, session, tts_provider=effective_tts_provider)
 
         with Session(engine) as session:
@@ -668,7 +681,7 @@ async def _synthesise_chapter_worker(
         book = session.get(Book, chapter.book_id) if chapter else None
         provider = tts_factory.get_tts_provider(
             settings,
-            override=book.tts_provider if book else None,
+            override=_effective_tts_provider(session, book.tts_provider if book else None),
             language=book.language if book else None,
         )
         try:

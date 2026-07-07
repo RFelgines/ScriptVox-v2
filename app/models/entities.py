@@ -148,7 +148,7 @@ class AppSetting(SQLModel, table=True):
     # métier, juste un point d'ancrage pour des préférences app-wide qui ne
     # justifient pas encore une table dédiée par réglage.
     id: int = Field(default=1, primary_key=True)
-    # Préférence affichable/éditable en Paramètres. PAS ENCORE consultée par
-    # le pipeline de génération (qui reste sur Settings.tts_provider, .env) --
-    # câblage réel différé à une étape séparée.
+    # Préférence globale éditable en Paramètres. Résolue par
+    # app.workers.tasks._effective_tts_provider entre l'override par livre
+    # (Book.tts_provider) et le défaut usine (Settings.tts_provider, .env).
     preferred_tts_provider: Optional[str] = None
