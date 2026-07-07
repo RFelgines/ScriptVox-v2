@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.core.db import get_session
 from app.core.enums import Gender, VoiceKind
 from app.core.exceptions import TTSError
+from app.core.uploads import read_upload_capped
 from app.models.entities import Voice
 from app.schemas.voice import VoiceResponse, VoiceUpdate
 from app.services.tts.base import BaseTTSProvider
@@ -21,6 +22,9 @@ router = APIRouter()
 DATA_DIR = Path(get_settings().data_dir)
 SAMPLES_DIR = DATA_DIR / "voice_samples"
 _SAMPLE_TEXT = "Bonjour, ceci est un aperçu de cette voix."
+
+_MAX_REFERENCE_AUDIO_BYTES = 20 * 1024 * 1024  # generous for a 3-15s reference clip
+_ALLOWED_REFERENCE_AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac"}  # what _load_ref_audio can decode
 
 
 def get_tts_provider_dep(settings: Settings = Depends(get_settings)) -> BaseTTSProvider:
@@ -76,11 +80,21 @@ async def create_voice(
         raise HTTPException(status_code=409, detail=f"A voice with id {slug!r} already exists.")
 
     ext = Path(file.filename or "ref.wav").suffix.lower() or ".wav"
+    if ext not in _ALLOWED_REFERENCE_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unsupported audio type {ext!r}. "
+                f"Allowed: {', '.join(sorted(_ALLOWED_REFERENCE_AUDIO_EXTENSIONS))}."
+            ),
+        )
+    audio_bytes = await read_upload_capped(file, _MAX_REFERENCE_AUDIO_BYTES)
+
     ref_dir = DATA_DIR / "voices" / slug
     ref_dir.mkdir(parents=True, exist_ok=True)
     ref_path = ref_dir / f"ref{ext}"
     try:
-        ref_path.write_bytes(await file.read())
+        ref_path.write_bytes(audio_bytes)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save reference audio: {exc}") from exc
 

@@ -11,6 +11,7 @@ from sqlmodel import Session, func, select
 from app.config import VALID_TTS_PROVIDERS, get_settings
 from app.core.db import get_session
 from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus, SegmentType
+from app.core.uploads import read_upload_capped
 from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment
 from app.schemas.book import (
     BookResponse,
@@ -33,6 +34,9 @@ _ALLOWED_COVER_TYPES: dict[str, str] = {
     "image/webp": ".webp",
 }
 
+_MAX_EPUB_BYTES = 200 * 1024 * 1024  # generous for a novel-length EPUB with embedded images
+_MAX_COVER_BYTES = 20 * 1024 * 1024  # generous for a single cover image
+
 router = APIRouter()
 
 
@@ -46,8 +50,10 @@ async def upload_book(
         raise HTTPException(status_code=422, detail="Only .epub files are accepted.")
 
     DATA_DIR.mkdir(exist_ok=True)
-    dest = DATA_DIR / f"{uuid.uuid4().hex}_{file.filename}"
-    dest.write_bytes(await file.read())
+    # The client-supplied filename is never used in the disk path (only as the book
+    # title, below) -- it's untrusted input (audit 2026-07-07, P1).
+    dest = DATA_DIR / f"{uuid.uuid4().hex}.epub"
+    dest.write_bytes(await read_upload_capped(file, _MAX_EPUB_BYTES))
 
     book = Book(
         title=file.filename.removesuffix(".epub"),
@@ -225,7 +231,7 @@ async def upload_book_cover(
     cover_dir = DATA_DIR / str(book_id)
     cover_dir.mkdir(parents=True, exist_ok=True)
     cover_path = cover_dir / f"cover{ext}"
-    cover_path.write_bytes(await file.read())
+    cover_path.write_bytes(await read_upload_capped(file, _MAX_COVER_BYTES))
     book.cover_path = str(cover_path)
     session.add(book)
     session.commit()
