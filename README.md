@@ -282,3 +282,9 @@ curl -X POST http://localhost:8000/books/1/chapters/1/generate
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design reference (strategy patterns, token budgeting, job state machine).
+
+---
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, hobby, and other noncommercial use. Commercial use requires a separate agreement with the author.

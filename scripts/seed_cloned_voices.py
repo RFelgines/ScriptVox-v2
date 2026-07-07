@@ -24,15 +24,12 @@ from app.models.entities import Voice
 
 UPLOADS_DIR = ROOT / "data" / "voice_uploads"
 
-# Explicit mapping: filename (without extension) → (display name, gender)
-# Only add entries you're confident about — ambiguous audiobook excerpts are excluded.
-KNOWN_VOICES: dict[str, tuple[str, Gender]] = {
-    "David Attenborough":    ("David Attenborough", Gender.MALE),
-    "Emmanuel Macron":       ("Emmanuel Macron",    Gender.MALE),
-    "Jean Marc Jancovici":   ("Jean Marc Jancovici",Gender.MALE),
-    "Nicolas Sarkozy":       ("Nicolas Sarkozy",    Gender.MALE),
-    "Axolot - Patrick Baud": ("Axolot (Patrick Baud)", Gender.MALE),
-}
+# Explicit mapping: filename (without extension, matching a file in UPLOADS_DIR)
+# → (display name, gender). Populate this locally with your own reference
+# recordings — left empty here since this file is committed to a public repo.
+# Example:
+#   "my_recording": ("My Voice", Gender.MALE),
+KNOWN_VOICES: dict[str, tuple[str, Gender]] = {}
 
 
 def _name_to_voice_id(name: str) -> str:
