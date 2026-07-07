@@ -3,9 +3,26 @@
 Convert an EPUB book into a full multi-voice audiobook.  
 Runs with **EdgeTTS** (free, no key, internet required — default), **locally** (Ollama + Piper), or with **Qwen3-TTS** (local GPU, emotion per line) — no code change required, only environment variables.
 
+> ⚠️ **Local, single-user tool — no authentication.** Every route (upload, delete, generate) is open
+> to anyone who can reach the API. It's built to run on `localhost` for yourself; **do not expose it
+> to the internet** without adding your own auth layer in front of it (reverse proxy, VPN, etc.).
+>
+> **Privacy note.** With the default `TTS_PROVIDER=edgetts` and/or `LLM_PROVIDER=gemini`, your book's
+> text is sent to Microsoft's / Google's cloud APIs for synthesis/analysis. Use `LLM_PROVIDER=ollama`
+> with `TTS_PROVIDER=piper` or `qwen` if you need everything to stay fully local.
+>
+> **Known limitations** (low impact for personal/local use, listed for transparency): no CSRF
+> protection, so a malicious page you visit could submit a form to your local API while it's running;
+> EPUB parsing has no upper bound on decompressed size (uploads are capped at 200 MB, but a crafted
+> zip within that limit could still decompress to several GB of text).
+
 ---
 
 ## Setup
+
+Requires **Python 3.11+** (developed and tested on 3.11.9). Note for Python 3.13+: the stdlib
+`audioop` module used by `QwenTTSProvider` was removed (PEP 594) — install the `audioop-lts` backport
+if you use `TTS_PROVIDER=qwen` there. The other three providers are unaffected.
 
 ```bash
 python -m venv .venv
@@ -30,6 +47,10 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `OLLAMA_BASE_URL` | `LLM_PROVIDER=ollama` | Ollama server URL, e.g. `http://localhost:11434` |
 | `OLLAMA_MODEL` | `LLM_PROVIDER=ollama` | Model name, e.g. `llama3` |
 | `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size — **32768 recommended** (8192 truncates responses on real novel chapters) |
+| `OLLAMA_CHUNK_TOKENS` | `LLM_PROVIDER=ollama` | Per-request chunk budget (tokens), decoupled from context size above — see `.env.example` |
+| `OLLAMA_CONNECT_TIMEOUT` | `LLM_PROVIDER=ollama` | Connect timeout in seconds, default `60` |
+| `OLLAMA_READ_TIMEOUT` | `LLM_PROVIDER=ollama` | Read timeout floor in seconds, default `600` |
+| `OLLAMA_TIMEOUT_PER_1K_TOKENS` | `LLM_PROVIDER=ollama` | Extra read-timeout seconds per 1k prompt tokens, scales with chapter size |
 | `GEMINI_API_KEY` | `LLM_PROVIDER=gemini` | Gemini API key |
 | `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
 | `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `qwen` (local GPU, emotion) |
@@ -42,6 +63,8 @@ Copy `.env.example` to `.env` and fill in the values for your chosen providers.
 | `QWEN_ATTN` | `TTS_PROVIDER=qwen` | `sdpa` (default, no FlashAttention 2) or `flash_attention_2` |
 | `DATABASE_URL` | always | SQLite path, e.g. `sqlite:///./scriptvox.db` |
 | `HUEY_DB_PATH` | always | Huey task queue DB path, e.g. `./huey.db` |
+| `DATA_DIR` | always | Storage folder for uploads, covers, generated audio and cloned-voice references, e.g. `data` |
+| `FRONTEND_ORIGINS` | always | Comma-separated browser origins allowed by CORS, default `http://localhost:3000` |
 
 The app **fails at startup** if any required variable for the active provider is missing, if `PIPER_VOICES_DIR` does not point to an existing directory, or if `PIPER_BINARY_PATH` does not point to an existing file. EdgeTTS requires no file on disk — only an internet connection at synthesis time.
 
@@ -199,26 +222,58 @@ and roughly **11× slower per line than EdgeTTS** (measured by `tests/spike_qwen
 
 ## Tests
 
-Each phase has its own test suite. Run them in order to verify the full stack:
+Each phase has its own standalone test suite (`tests/check_phaseN.py`), all mocking external
+providers (LLM, TTS, network) and running fully offline. Run them all in numeric order:
 
-```bash
-.venv\Scripts\python tests\check_phase1.py   # Config, models, DB
-.venv\Scripts\python tests\check_phase2.py   # EPUB ingestion, Huey wiring
-.venv\Scripts\python tests\check_phase3.py   # LLM pipeline
-.venv\Scripts\python tests\check_phase4.py   # TTS, audio assembly, /audio endpoint
-.venv\Scripts\python tests\check_phase5.py   # End-to-end worker pipeline (mocked LLM + TTS)
-.venv\Scripts\python tests\check_phase6.py   # Per-chapter audio endpoint
-.venv\Scripts\python tests\check_phase7.py   # Decoupled pipeline (ANALYZED / GENERATING statuses)
-.venv\Scripts\python tests\check_phase8.py   # EdgeTTS provider (config, voice mapping, synthesis)
-.venv\Scripts\python tests\check_phase9.py   # Voice casting & PATCH /characters/{id}
-.venv\Scripts\python tests\check_phase10.py  # Cover image extraction & endpoints
-.venv\Scripts\python tests\check_phase11.py  # MP3 output (wav_to_mp3, GET /audio/mp3)
-.venv\Scripts\python tests\check_phase12.py  # CORS (Settings.frontend_origins, middleware)
-.venv\Scripts\python tests\check_phase14.py  # Character persistence across chapters (known_characters)
-.venv\Scripts\python tests\check_phase15.py  # QwenTTSProvider (config, voice mapping, mocked synthesis)
+```powershell
+# Windows (PowerShell)
+Get-ChildItem tests\check_phase*.py | Sort-Object { [int]($_.BaseName -replace 'check_phase','') } |
+    ForEach-Object { .venv\Scripts\python.exe $_.FullName }
 ```
 
-All suites mock external providers (LLM, TTS, network) and run fully offline.
+```bash
+# macOS / Linux
+for f in $(ls tests/check_phase*.py | sort -V); do .venv/bin/python "$f"; done
+```
+
+| Suite | Covers |
+|---|---|
+| `check_phase1.py` | Config, models, DB |
+| `check_phase2.py` | EPUB ingestion, Huey wiring |
+| `check_phase3.py` | LLM pipeline |
+| `check_phase4.py` | TTS scaffold, audio assembly, `/audio` endpoint |
+| `check_phase5.py` | End-to-end worker pipeline (mocked LLM + TTS) |
+| `check_phase6.py` | Per-chapter audio endpoint |
+| `check_phase7.py` | Decoupled pipeline (`ANALYZED` / `GENERATING` statuses) |
+| `check_phase8.py` | EdgeTTS provider (config, voice mapping, synthesis) |
+| `check_phase9.py` | Voice casting & `PATCH /characters/{id}` |
+| `check_phase10.py` | Cover image extraction & endpoints |
+| `check_phase11.py` | MP3 output (`wav_to_mp3`, `GET /audio/mp3`) |
+| `check_phase12.py` | CORS (`Settings.frontend_origins`, middleware) |
+| `check_phase14.py` | Character persistence across chapters (known characters) |
+| `check_phase15.py` | QwenTTSProvider (config, voice mapping, mocked synthesis) |
+| `check_phase16.py` | Character merge suggestions (schema + LLM) |
+| `check_phase17.py` | Voice cloning (contract, providers, pipeline, API) |
+| `check_phase19.py` | Resume analysis after stop/crash |
+| `check_phase21.py` | Per-segment audio timing |
+| `check_phase23.py` | Honoring `/stop` mid-analysis/generation |
+| `check_phase24.py` | VRAM release after Qwen synthesis + Piper overridable without crash |
+| `check_phase25.py` | ElevenLabs removal (dead-code guard) |
+| `check_phase26.py` | Per-book TTS provider override |
+| `check_phase27.py` | Unified book generation on the chapter code path |
+| `check_phase28.py` | Per-segment TTS retry |
+| `check_phase29.py` | Streaming WAV→MP3 encoding |
+| `check_phase30.py` | Alembic migrations (auto-upgrade / auto-stamp) |
+| `check_phase31.py` | Voice sample generation dispatched via Huey |
+| `check_phase32.py` | Segments grouped by TTS checkpoint (VRAM swap minimisation) |
+| `check_phase33.py` | Chapter generation cancellation + priority queue |
+| `check_phase34.py` | Language profiles for segmentation (FR/EN) |
+| `check_phase35.py` | `DATA_DIR` isolation (regression guard for a real data-loss incident) |
+| `check_phase36.py` | Per-book TTS locale resolution (i18n) |
+
+Suite numbers aren't contiguous (`13`, `18`, `20`, `22` are missing) — some phases were verified by
+extending an existing suite instead of adding a new one, and a few were frontend-only work with no
+backend suite to add. See `TASKS.md` for what each phase actually shipped.
 
 ---
 
