@@ -79,7 +79,18 @@ ebook.add_item(c2)
 nav = epub.EpubNav()
 ebook.add_item(nav)
 ebook.spine = ["nav", c1, c2]
-epub.write_epub(epub_path, ebook)
+
+# Round-trip verified against a throwaway temp copy, never against the tracked
+# fixture directly: ebooklib stamps a fresh dcterms:modified timestamp on every
+# write_epub() call, which showed up as a permanent byte-level diff under git on
+# every test run even though the fixture's actual content never changes (audit
+# 2026-07-07, P2). The tracked fixture is written once, only if missing --
+# downstream tests (and this file, further down) read it as a static asset.
+with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as _tmp_f:
+    _tmp_epub_path = _tmp_f.name
+epub.write_epub(_tmp_epub_path, ebook)
+if not Path(epub_path).exists():
+    shutil.copy(_tmp_epub_path, epub_path)
 ok(f"Fixture created: {epub_path}")
 
 
@@ -87,7 +98,8 @@ ok(f"Fixture created: {epub_path}")
 section("EpubParser -- spine order + metadata")
 from app.services.epub.parser import EpubParser, ParsedBook  # noqa: E402
 
-parsed = EpubParser().parse(epub_path)
+parsed = EpubParser().parse(_tmp_epub_path)
+os.unlink(_tmp_epub_path)
 assert isinstance(parsed, ParsedBook)
 assert parsed.title == "Alice in Wonderland", f"title={parsed.title!r}"
 assert parsed.author == "Lewis Carroll", f"author={parsed.author!r}"
@@ -119,9 +131,17 @@ ws_book.add_item(ws_chapter)
 ws_nav = epub.EpubNav()
 ws_book.add_item(ws_nav)
 ws_book.spine = ["nav", ws_chapter]
-epub.write_epub(ws_path, ws_book)
 
-ws_parsed = EpubParser().parse(ws_path)
+# Same reasoning as the test.epub fixture above (section 1): round-trip against a
+# temp copy, write the tracked fixture only once, if missing.
+with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as _tmp_ws_f:
+    _tmp_ws_path = _tmp_ws_f.name
+epub.write_epub(_tmp_ws_path, ws_book)
+if not Path(ws_path).exists():
+    shutil.copy(_tmp_ws_path, ws_path)
+
+ws_parsed = EpubParser().parse(_tmp_ws_path)
+os.unlink(_tmp_ws_path)
 ws_chapters = [c for c in ws_parsed.chapters if "Sacr" in c.raw_text]
 assert len(ws_chapters) == 1, f"chapitre de test introuvable parmi {len(ws_parsed.chapters)}"
 ws_text = ws_chapters[0].raw_text
