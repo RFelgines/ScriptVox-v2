@@ -11,7 +11,7 @@ from app.core.db import get_session
 from app.core.enums import Gender, VoiceKind
 from app.core.exceptions import TTSError
 from app.core.uploads import read_upload_capped
-from app.models.entities import Voice
+from app.models.entities import Character, Voice
 from app.schemas.voice import VoiceResponse, VoiceUpdate
 from app.services.tts.base import BaseTTSProvider
 from app.services.tts.edgetts import EdgeTTSProvider
@@ -140,6 +140,19 @@ def delete_voice(
     voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
     if voice is None:
         raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
+
+    # Characters cast to this voice fall back to the narrator instead of being left
+    # pointing at a Voice row that no longer exists -- both the segments API and the
+    # TTS synthesis path already treat voice_id=None as "use NARRATOR_VOICE_ID"
+    # (books.py get_chapter_segments, audio/chapter.py _synthesise_segments), so
+    # nullifying here reuses that existing fallback instead of adding a new one.
+    # Without this, the next generation raised TTSError: Unknown voice_id (audit
+    # 2026-07-07, P2).
+    orphaned = session.exec(select(Character).where(Character.voice_id == voice_id)).all()
+    for char in orphaned:
+        char.voice_id = None
+        session.add(char)
+
     if voice.reference_audio_path:
         ref = Path(voice.reference_audio_path)
         if ref.exists():

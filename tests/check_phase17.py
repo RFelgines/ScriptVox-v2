@@ -492,6 +492,42 @@ with _tempfile.TemporaryDirectory() as _tmp17:
 ok("204 + fichier supprime + Voice retiree de la DB")
 
 
+# ── 17b. DELETE /voices/{id} — les personnages castés dessus retombent au narrateur ──
+section("DELETE /voices/{id} -- Character.voice_id nullifie (pas d'orpheline)")
+
+with _tempfile.TemporaryDirectory() as _tmp17b:
+    _tmp17b_path = Path(_tmp17b)
+    with _mpatch.object(_voices_mod, "DATA_DIR", _tmp17b_path):
+        with _TC(_app, raise_server_exceptions=False) as _tc17bset:
+            _tc17bset.post("/voices",
+                data={"name": "Orphan Source"},
+                files={"file": ("r.wav", _silence_wav(), "audio/wav")})
+    with _Sess(_v_engine) as _s:
+        _book17b = _Book(title="T", source_path="x.epub")
+        _s.add(_book17b)
+        _s.commit()
+        _s.refresh(_book17b)
+        _char17b = _Char(book_id=_book17b.id, name="Cast On Orphan", voice_id="orphan-source")
+        _other17b = _Char(book_id=_book17b.id, name="Not Cast", voice_id="male_0")
+        _s.add(_char17b)
+        _s.add(_other17b)
+        _s.commit()
+        _char17b_id, _other17b_id = _char17b.id, _other17b.id
+    with _mpatch.object(_voices_mod, "DATA_DIR", _tmp17b_path):
+        with _TC(_app, raise_server_exceptions=False) as _tc17bdel:
+            _r17b = _tc17bdel.delete("/voices/orphan-source")
+    if _r17b.status_code != 204:
+        die(f"Expected 204, got {_r17b.status_code}: {_r17b.text}")
+    with _Sess(_v_engine) as _s:
+        _reloaded = _s.get(_Char, _char17b_id)
+        if _reloaded.voice_id is not None:
+            die(f"Character.voice_id should be nullified, got {_reloaded.voice_id!r}")
+        _untouched = _s.get(_Char, _other17b_id)
+        if _untouched.voice_id != "male_0":
+            die(f"Unrelated Character.voice_id should be untouched, got {_untouched.voice_id!r}")
+ok("Character caste sur la voix supprimee -> voice_id=None, personnage non lie inchange")
+
+
 # ── 18. DELETE /voices/{id} — voix CATALOGUE -> 204 (autorisé, re-seedé au restart) ───
 # N.B. On utilise male_0 (pas narrator) pour ne pas casser le §19 qui l'inspecte.
 section("DELETE /voices/{id} -- voix CATALOGUE -> 204 (autorise, re-seede au restart)")
