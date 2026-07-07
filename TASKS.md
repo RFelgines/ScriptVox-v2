@@ -2384,3 +2384,55 @@ exposée en UI). Détail complet : mémoire [[audit-2026-07-02-remediation-plan]
 maintenant livrés** (A, B, C, D, E, F1, F2, F3, F4). Il ne reste que des points explicitement
 différés par choix (voice_tone, synthesise_chapter) et le follow-up frontend "reprendre
 génération" — aucun n'est bloquant, tous documentés ci-dessus et dans la mémoire.
+
+## Phase 24 — Hardening pré-publication Reddit (2026-07-07)
+
+> **Contexte.** Le dépôt (`github.com/RFelgines/ScriptVox-v2`) est **déjà public** — Romain prépare
+> un post Reddit annonçant ScriptVox comme projet perso (pas commercial). Audit dédié à cette
+> publication (2026-07-07), distinct de l'audit de hardening général de la Phase 23. Rapport complet
+> en mémoire ([[reddit-publication-audit]]). Rien n'est encore traité — tous les points ci-dessous
+> sont 🔲 à faire.
+
+### P0 — Bloquant avant le post
+
+- 🔲 **Aucune `LICENSE`** sur un repo public (= tous droits réservés par défaut, aucun fork/réutilisation
+  légale possible). Ajouter MIT ou Apache-2.0. Piper (GPL-3.0) n'est pas bundlé — pas de contamination
+  du code du projet.
+- 🔲 **`scripts/seed_cloned_voices.py` nomme des personnalités réelles** (Macron, Sarkozy, Attenborough,
+  Jancovici, Patrick Baud) comme cibles de clonage vocal — déjà public via le commit `608b581` sur
+  `origin/main`. Anonymiser les entrées (placeholders génériques) ; décider si un simple commit de
+  retrait suffit ou si une réécriture d'historique (`git filter-repo` + force-push) est voulue.
+
+### P1 — Uniquement si une *instance* (pas juste le code) est exposée à des inconnus
+
+- 🔲 **Aucune authentification** — choix assumé pour du mono-utilisateur local, mais à documenter
+  explicitement en README ("ne pas exposer sur Internet").
+  - 🔲 Upload sans limite de taille, lu entièrement en RAM (`books.py:50` et upload voix/couverture) —
+    ajouter un plafond (ex. 50 Mo).
+  - 🔲 `file.filename` client non assaini dans le chemin de destination (`books.py:49`) — bug de
+    robustesse (500 sur nom exotique) plus qu'une faille grâce au préfixe uuid, mais à corriger
+    proprement (nom original conservé seulement comme titre, jamais dans le chemin).
+  - 🔲 EPUB = zip + XML non fiables en entrée non contrôlée (zip bomb, quadratic blowup) — pas
+    d'exploit connu ebooklib/lxml par défaut, mais aucune limite de taille en amont.
+  - 🔲 CSRF vers localhost — sans auth ni vérification d'`Origin`, un formulaire multipart externe
+    peut soumettre vers `http://localhost:8000/books` (contourne CORS). Impact réel faible en usage
+    perso.
+  - 🔲 Extension non whitelistée sur l'upload de voix (`voices.py:78`) — whitelister
+    `{.mp3, .wav, .flac}`.
+
+### P2 — Hygiène et robustesse (non bloquant)
+
+- 🔲 `tests/fixtures/test.epub` / `test_whitespace.epub` se régénèrent (diff binaire) à chaque run —
+  soit les générer dans `data_test/`, soit ne plus les réécrire une fois committées.
+- 🔲 `DELETE /voices/{id}` laisse `Character.voice_id` orphelin — nullifier ou réassigner au
+  narrateur à la suppression (sinon `TTSError: Unknown voice_id` à la génération suivante).
+- 🔲 README à compléter pour un public externe : `DATA_DIR`/`FRONTEND_ORIGINS`/timeouts manquants
+  dans la table de config (présents dans `.env.example` seulement), tests listés seulement jusqu'à
+  `check_phase15` (36 suites existent), version Python non indiquée (garde `audioop` ⇒ <3.13 ou
+  `audioop-lts`), avertissement "local, sans auth, ne pas exposer", note de confidentialité
+  (EdgeTTS envoie le texte à Microsoft, Gemini à Google).
+- 🔲 Publier depuis un `main` propre — travail UI en cours sur `poc/ui-visual-refresh` (non commité)
+  à merger ou laisser de côté avant le post.
+
+**Optionnel le jour J** : `pip-audit` + `npm audit` (versions actuelles épinglées, rien d'alarmant
+relevé lors de l'audit, mais bon réflexe juste avant publication).
