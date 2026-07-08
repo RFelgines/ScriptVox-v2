@@ -67,6 +67,44 @@ export interface Dictionary {
     emptyHint: string;
     noMatchTitle: string;
     noMatchHint: string;
+    deleteConfirm: (title: string) => string;
+    deleteAriaLabel: string;
+  };
+  upload: {
+    invalidFile: string;
+    uploading: string;
+    dropHint: string;
+    clickHint: string;
+  };
+  // Chaînes partagées par PlayerBar et ChapterTranscript (bandeau lecteur +
+  // panneau déplié).
+  player: {
+    narrator: string;
+    transcript: {
+      title: (position: number) => string;
+      loading: string;
+      empty: string;
+      syncUnavailable: string;
+      seekAriaLabel: (label: string) => string;
+    };
+    progressAriaLabel: string;
+    prevChapterAriaLabel: string;
+    rewind15AriaLabel: string;
+    pauseAriaLabel: string;
+    playAriaLabel: string;
+    forward15AriaLabel: string;
+    nextChapterAriaLabel: string;
+    rateAriaLabel: string;
+    rateLabel: string;
+    showChaptersAriaLabel: string;
+    hideChaptersAriaLabel: string;
+    chaptersLabel: string;
+    bookmarkAriaLabel: string;
+    bookmarkTitle: string;
+    bookmarkLabel: string;
+    rateSelectAriaLabel: string;
+    readByLabel: string;
+    closePlayerAriaLabel: string;
   };
   generation: {
     title: string;
@@ -95,6 +133,10 @@ export interface Dictionary {
     defaultOption: (name: string) => string;
     saving: string;
     preferredHint: string;
+    preferredLanguageLabel: string;
+    languageOptionNone: string;
+    languageNames: Record<string, string>;
+    preferredLanguageHint: string;
     clonedVoicesLabel: string;
     clonedVoicesAvailable: (n: number) => string;
     clonedVoicesNone: string;
@@ -286,6 +328,42 @@ const fr: Dictionary = {
     emptyHint: "Glissez un fichier EPUB ci-dessus pour commencer.",
     noMatchTitle: "Aucun livre ne correspond",
     noMatchHint: "Essayez d'élargir les filtres ci-dessus.",
+    deleteConfirm: (title) => `Supprimer « ${title} » ?`,
+    deleteAriaLabel: "Supprimer",
+  },
+  upload: {
+    invalidFile: "Seuls les fichiers .epub sont acceptés.",
+    uploading: "Upload en cours…",
+    dropHint: "Glissez un EPUB ici",
+    clickHint: "ou cliquez pour choisir un fichier .epub",
+  },
+  player: {
+    narrator: "Narrateur",
+    transcript: {
+      title: (position) => `Transcription — Chapitre ${position}`,
+      loading: "Chargement de la transcription…",
+      empty: "Aucun segment disponible pour ce chapitre.",
+      syncUnavailable: "Synchronisation indisponible — regénérez ce chapitre",
+      seekAriaLabel: (label) => `Aller à ce passage — ${label}`,
+    },
+    progressAriaLabel: "Progression",
+    prevChapterAriaLabel: "Chapitre précédent",
+    rewind15AriaLabel: "Reculer de 15 secondes",
+    pauseAriaLabel: "Pause",
+    playAriaLabel: "Lire",
+    forward15AriaLabel: "Avancer de 15 secondes",
+    nextChapterAriaLabel: "Chapitre suivant",
+    rateAriaLabel: "Changer la vitesse de lecture",
+    rateLabel: "Vitesse",
+    showChaptersAriaLabel: "Afficher les chapitres",
+    hideChaptersAriaLabel: "Masquer les chapitres",
+    chaptersLabel: "Chapitres",
+    bookmarkAriaLabel: "Signet (bientôt disponible)",
+    bookmarkTitle: "Signet — bientôt disponible",
+    bookmarkLabel: "Signet",
+    rateSelectAriaLabel: "Vitesse de lecture",
+    readByLabel: "Lu par",
+    closePlayerAriaLabel: "Fermer le lecteur",
   },
   generation: {
     title: "Génération",
@@ -318,8 +396,15 @@ const fr: Dictionary = {
     defaultOption: (name) => `Par défaut (${name})`,
     saving: "Enregistrement…",
     preferredHint:
-      "Préférence enregistrée, pas encore appliquée à la génération — le moteur réel reste " +
-      "celui choisi par livre (page Casting) ou la valeur par défaut du serveur.",
+      "Utilisé quand aucun moteur n'est choisi pour ce livre (page Casting) — sinon, " +
+      "l'override par livre reste prioritaire.",
+    preferredLanguageLabel: "Langue de préférence (repli de détection)",
+    languageOptionNone: "Aucune (repli historique : français)",
+    languageNames: { fr: "Français", en: "English" },
+    preferredLanguageHint:
+      "Utilisée uniquement quand la langue d'un livre ne peut pas être détectée à l'import " +
+      "— n'affecte jamais un livre déjà identifié ou modifié manuellement. Distincte de la " +
+      "langue d'affichage de l'interface (sélecteur en haut de l'écran).",
     clonedVoicesLabel: "Voix clonées",
     clonedVoicesAvailable: (n) => `${n} voix clonée${n > 1 ? "s" : ""} disponible${n > 1 ? "s" : ""}`,
     clonedVoicesNone: "Aucune voix clonée",
@@ -519,6 +604,42 @@ const en: Dictionary = {
     emptyHint: "Drop an EPUB file above to get started.",
     noMatchTitle: "No book matches",
     noMatchHint: "Try widening the filters above.",
+    deleteConfirm: (title) => `Delete "${title}"?`,
+    deleteAriaLabel: "Delete",
+  },
+  upload: {
+    invalidFile: "Only .epub files are accepted.",
+    uploading: "Uploading…",
+    dropHint: "Drop an EPUB here",
+    clickHint: "or click to choose an .epub file",
+  },
+  player: {
+    narrator: "Narrator",
+    transcript: {
+      title: (position) => `Transcript — Chapter ${position}`,
+      loading: "Loading transcript…",
+      empty: "No segment available for this chapter.",
+      syncUnavailable: "Sync unavailable — regenerate this chapter",
+      seekAriaLabel: (label) => `Jump to this passage — ${label}`,
+    },
+    progressAriaLabel: "Progress",
+    prevChapterAriaLabel: "Previous chapter",
+    rewind15AriaLabel: "Rewind 15 seconds",
+    pauseAriaLabel: "Pause",
+    playAriaLabel: "Play",
+    forward15AriaLabel: "Forward 15 seconds",
+    nextChapterAriaLabel: "Next chapter",
+    rateAriaLabel: "Change playback speed",
+    rateLabel: "Speed",
+    showChaptersAriaLabel: "Show chapters",
+    hideChaptersAriaLabel: "Hide chapters",
+    chaptersLabel: "Chapters",
+    bookmarkAriaLabel: "Bookmark (coming soon)",
+    bookmarkTitle: "Bookmark — coming soon",
+    bookmarkLabel: "Bookmark",
+    rateSelectAriaLabel: "Playback speed",
+    readByLabel: "Read by",
+    closePlayerAriaLabel: "Close player",
   },
   generation: {
     title: "Generation",
@@ -551,8 +672,15 @@ const en: Dictionary = {
     defaultOption: (name) => `Default (${name})`,
     saving: "Saving…",
     preferredHint:
-      "Preference saved, not yet applied to generation — the actual engine remains " +
-      "the one chosen per book (Casting page) or the server's default value.",
+      "Used when no engine is chosen for this book (Casting page) — otherwise, " +
+      "the per-book override still takes priority.",
+    preferredLanguageLabel: "Preferred language (detection fallback)",
+    languageOptionNone: "None (historical fallback: French)",
+    languageNames: { fr: "Français", en: "English" },
+    preferredLanguageHint:
+      "Only used when a book's language can't be detected at import time — never " +
+      "affects a book that was already identified or manually edited. Distinct from " +
+      "the UI display language (selector at the top of the screen).",
     clonedVoicesLabel: "Cloned voices",
     clonedVoicesAvailable: (n) => `${n} cloned voice${n > 1 ? "s" : ""} available`,
     clonedVoicesNone: "No cloned voice",

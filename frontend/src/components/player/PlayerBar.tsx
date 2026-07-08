@@ -5,6 +5,8 @@ import { ChapterSummary, chapterAudioUrl, listChapters } from "@/lib/api";
 import { usePlayer } from "./PlayerProvider";
 import VoiceOrb from "@/components/VoiceOrb";
 import ChapterTranscript from "@/components/ChapterTranscript";
+import Select from "@/components/ui/Select";
+import { useT } from "@/lib/i18n/LanguageContext";
 
 const RATES = [0.5, 1, 1.25, 1.5, 2] as const;
 
@@ -36,7 +38,7 @@ function UtilBlock({
       disabled={disabled}
       aria-label={ariaLabel}
       title={title}
-      className="flex flex-col items-center gap-1 rounded-control px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+      className="flex flex-col items-center gap-1 rounded-2xl px-3.5 py-2 text-muted transition-colors hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
     >
       {icon}
       <span className="text-[11px]">{label}</span>
@@ -45,6 +47,7 @@ function UtilBlock({
 }
 
 export default function PlayerBar() {
+  const t = useT();
   const { track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close,
           currentSegment, voiceHues, voiceNames } = usePlayer();
   const [expanded, setExpanded] = useState(false);
@@ -95,7 +98,7 @@ export default function PlayerBar() {
   function playChapter(ch: ChapterSummary) {
     if (!bookId || !track) return;
     play({
-      title: `${track.bookTitle ?? track.title} — ${ch.title ?? `Chapitre ${ch.position}`}`,
+      title: `${track.bookTitle ?? track.title} — ${ch.title ?? t.book.chapterFallback(ch.position)}`,
       src: chapterAudioUrl(bookId, ch.position),
       bookId,
       bookTitle: track.bookTitle,
@@ -128,11 +131,14 @@ export default function PlayerBar() {
   const currentChapter = chapters.find((c) => c.position === track.chapterPosition);
   const chapterLabel =
     track.chapterPosition !== undefined
-      ? currentChapter?.title ?? `Chapitre ${track.chapterPosition}`
+      ? currentChapter?.title ?? t.book.chapterFallback(track.chapterPosition)
       : null;
 
   return (
-    <div ref={rootRef} className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-surface">
+    <div
+      ref={rootRef}
+      className="fixed right-0 bottom-0 left-0 z-50 bg-surface shadow-[0_-8px_24px_-8px_rgba(0,0,0,0.5),0_-1px_0_rgba(245,243,241,0.04)]"
+    >
       {expanded && (
         // flex-col + overflow-hidden sur le conteneur, scroll délégué au SEUL
         // bloc "contenu déroulant" ci-dessous (chapitres + transcription) --
@@ -149,11 +155,11 @@ export default function PlayerBar() {
             <img
               src={track.coverUrl}
               alt=""
-              className="h-40 w-40 rounded-control object-cover shadow-lg sm:h-48 sm:w-48"
+              className="h-40 w-40 rounded-2xl object-cover shadow-[0_20px_40px_-12px_rgba(0,0,0,0.7),0_0_0_1px_rgba(245,243,241,0.05)] sm:h-48 sm:w-48"
               onError={() => setCoverOk(false)}
             />
           ) : (
-            <div className="h-40 w-40 rounded-control bg-surface-2 sm:h-48 sm:w-48" />
+            <div className="h-40 w-40 rounded-2xl bg-surface-2 sm:h-48 sm:w-48" />
           )}
 
           <div className="flex flex-col items-center gap-0.5 text-center">
@@ -174,7 +180,7 @@ export default function PlayerBar() {
               value={currentTime}
               onChange={(e) => seek(Number(e.target.value))}
               className="h-1 flex-1 cursor-pointer accent-primary"
-              aria-label="Progression"
+              aria-label={t.player.progressAriaLabel}
             />
             <span className="w-10 shrink-0 font-mono text-xs tabular-nums text-muted">{fmt(duration)}</span>
           </div>
@@ -184,8 +190,8 @@ export default function PlayerBar() {
             <button
               onClick={() => hasPrev && playChapter(playable[currentIndex - 1])}
               disabled={!hasPrev}
-              aria-label="Chapitre précédent"
-              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
+              aria-label={t.player.prevChapterAriaLabel}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                 <path d="M6 4a1 1 0 0 0-1 1v10a1 1 0 1 0 2 0v-4.1l7.4 4.94A1 1 0 0 0 16 15V5a1 1 0 0 0-1.6-.8L7 8.1V5a1 1 0 0 0-1-1z" />
@@ -194,8 +200,8 @@ export default function PlayerBar() {
 
             <button
               onClick={() => skip(-15)}
-              aria-label="Reculer de 15 secondes"
-              className="relative flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+              aria-label={t.player.rewind15AriaLabel}
+              className="relative flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6 -scale-x-100">
                 <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
@@ -206,7 +212,7 @@ export default function PlayerBar() {
 
             <button
               onClick={toggle}
-              aria-label={isPlaying ? "Pause" : "Lire"}
+              aria-label={isPlaying ? t.player.pauseAriaLabel : t.player.playAriaLabel}
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 hover:opacity-90"
             >
               {isPlaying ? (
@@ -223,8 +229,8 @@ export default function PlayerBar() {
 
             <button
               onClick={() => skip(15)}
-              aria-label="Avancer de 15 secondes"
-              className="relative flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+              aria-label={t.player.forward15AriaLabel}
+              className="relative flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
                 <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
@@ -236,8 +242,8 @@ export default function PlayerBar() {
             <button
               onClick={() => hasNext && playChapter(playable[currentIndex + 1])}
               disabled={!hasNext}
-              aria-label="Chapitre suivant"
-              className="flex h-9 w-9 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
+              aria-label={t.player.nextChapterAriaLabel}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                 <path d="M14 4a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0v-4.1l-7.4 4.94A1 1 0 0 1 4 15V5a1 1 0 0 1 1.6-.8L13 8.1V5a1 1 0 0 1 1-1z" />
@@ -249,32 +255,32 @@ export default function PlayerBar() {
           <div className="flex items-center gap-2">
             <UtilBlock
               onClick={cycleRate}
-              ariaLabel="Changer la vitesse de lecture"
+              ariaLabel={t.player.rateAriaLabel}
               icon={<span className="text-sm font-semibold">{rate}×</span>}
-              label="Vitesse"
+              label={t.player.rateLabel}
             />
             {bookId && (
               <UtilBlock
                 onClick={() => setChaptersOpen((v) => !v)}
-                ariaLabel={chaptersOpen ? "Masquer les chapitres" : "Afficher les chapitres"}
+                ariaLabel={chaptersOpen ? t.player.hideChaptersAriaLabel : t.player.showChaptersAriaLabel}
                 icon={
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-4 w-4">
                     <path d="M3 5.5h14M3 10h14M3 14.5h14" />
                   </svg>
                 }
-                label="Chapitres"
+                label={t.player.chaptersLabel}
               />
             )}
             <UtilBlock
               disabled
-              ariaLabel="Signet (bientôt disponible)"
-              title="Signet — bientôt disponible"
+              ariaLabel={t.player.bookmarkAriaLabel}
+              title={t.player.bookmarkTitle}
               icon={
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4">
                   <path d="M5 3.5h10a.5.5 0 0 1 .5.5v13l-5.5-3.5L4.5 17V4a.5.5 0 0 1 .5-.5z" strokeLinejoin="round" />
                 </svg>
               }
-              label="Signet"
+              label={t.player.bookmarkLabel}
             />
           </div>
         </div>
@@ -293,13 +299,13 @@ export default function PlayerBar() {
                       <button
                         onClick={() => playableCh && playChapter(ch)}
                         disabled={!playableCh}
-                        className={`w-full rounded-control px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+                        className={`w-full rounded-xl px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                           active
                             ? "bg-surface-2 font-medium text-foreground"
                             : "text-foreground/80 hover:bg-surface-2/60"
                         }`}
                       >
-                        {ch.title ?? `Chapitre ${ch.position}`}
+                        {ch.title ?? t.book.chapterFallback(ch.position)}
                       </button>
                     </li>
                   );
@@ -328,7 +334,7 @@ export default function PlayerBar() {
             value={currentTime}
             onChange={(e) => seek(Number(e.target.value))}
             className="h-1 flex-1 cursor-pointer accent-primary"
-            aria-label="Progression"
+            aria-label={t.player.progressAriaLabel}
           />
           <span className="w-9 shrink-0 font-mono text-[10px] tabular-nums text-muted">
             {duration ? `-${fmt(remaining)}` : fmt(duration)}
@@ -353,11 +359,11 @@ export default function PlayerBar() {
               <img
                 src={track.coverUrl}
                 alt=""
-                className="h-9 w-9 shrink-0 rounded-control object-cover"
+                className="h-9 w-9 shrink-0 rounded-lg object-cover"
                 onError={() => setCoverOk(false)}
               />
             ) : (
-              <div className="h-9 w-9 shrink-0 rounded-control bg-surface-2" />
+              <div className="h-9 w-9 shrink-0 rounded-lg bg-surface-2" />
             )}
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
               <path d="M6 4l4 4-4 4" />
@@ -388,9 +394,9 @@ export default function PlayerBar() {
                   reste disponible dans le panneau déplié. */}
               <button
                 disabled
-                aria-label="Signet (bientôt disponible)"
-                title="Signet — bientôt disponible"
-                className="hidden h-8 w-8 items-center justify-center rounded-control text-muted opacity-40 disabled:cursor-not-allowed sm:flex"
+                aria-label={t.player.bookmarkAriaLabel}
+                title={t.player.bookmarkTitle}
+                className="hidden h-8 w-8 items-center justify-center rounded-full text-muted opacity-40 disabled:cursor-not-allowed sm:flex"
               >
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4">
                   <path d="M5 3.5h10a.5.5 0 0 1 .5.5v13l-5.5-3.5L4.5 17V4a.5.5 0 0 1 .5-.5z" strokeLinejoin="round" />
@@ -399,8 +405,8 @@ export default function PlayerBar() {
 
               <button
                 onClick={() => skip(-15)}
-                aria-label="Reculer de 15 secondes"
-                className="relative flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+                aria-label={t.player.rewind15AriaLabel}
+                className="relative flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 -scale-x-100">
                   <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
@@ -411,7 +417,7 @@ export default function PlayerBar() {
 
               <button
                 onClick={toggle}
-                aria-label={isPlaying ? "Pause" : "Lire"}
+                aria-label={isPlaying ? t.player.pauseAriaLabel : t.player.playAriaLabel}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 hover:opacity-90"
               >
                 {isPlaying ? (
@@ -428,8 +434,8 @@ export default function PlayerBar() {
 
               <button
                 onClick={() => skip(15)}
-                aria-label="Avancer de 15 secondes"
-                className="relative flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-foreground"
+                aria-label={t.player.forward15AriaLabel}
+                className="relative flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                   <path d="M12 5a7 7 0 1 0 6.06 3.5" strokeLinecap="round" />
@@ -438,18 +444,13 @@ export default function PlayerBar() {
                 <span className="absolute text-[10px] font-bold">15</span>
               </button>
 
-              <select
-                value={rate}
-                onChange={(e) => setRate(Number(e.target.value))}
-                aria-label="Vitesse de lecture"
-                className="hidden rounded-control border border-border bg-surface-2 px-1.5 py-1 text-xs text-foreground sm:block"
-              >
-                {RATES.map((r) => (
-                  <option key={r} value={r}>
-                    {r}×
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={String(rate)}
+                onChange={(v) => setRate(Number(v))}
+                ariaLabel={t.player.rateSelectAriaLabel}
+                className="hidden sm:inline-block"
+                options={RATES.map((r) => ({ value: String(r), label: `${r}×` }))}
+              />
             </>
           )}
         </div>
@@ -467,20 +468,20 @@ export default function PlayerBar() {
                 />
               )}
               <div className="flex flex-col leading-tight overflow-hidden">
-                <span className="text-[10px] uppercase tracking-wide text-muted/60">Lu par</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted/60">{t.player.readByLabel}</span>
                 <span className="truncate text-xs font-medium text-muted max-w-28">
                   {currentSegment.voice_id === "narrator"
-                    ? "Narrateur"
+                    ? t.player.narrator
                     : (currentSegment.voice_id && voiceNames.get(currentSegment.voice_id)) ??
                       currentSegment.character_name ??
-                      "Narrateur"}
+                      t.player.narrator}
                 </span>
               </div>
             </div>
           )}
           <button
             onClick={close}
-            aria-label="Fermer le lecteur"
+            aria-label={t.player.closePlayerAriaLabel}
             className="shrink-0 text-muted hover:text-foreground"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4">

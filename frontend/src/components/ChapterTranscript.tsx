@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { SegmentSummary, getChapterSegments } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import VoiceOrb from "@/components/VoiceOrb";
+import { useT } from "@/lib/i18n/LanguageContext";
 
 // Un chapitre peut avoir 50-200+ segments rendus simultanément dans la liste
 // scrollable ci-dessous. VoiceOrb est du CSS pur (plus de contexte WebGL) mais
@@ -46,6 +47,7 @@ interface Props {
 }
 
 export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
+  const t = useT();
   const { currentSegment, voiceHues, seek, isPlaying } = usePlayer();
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,27 +72,33 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
 
   if (loading) {
     return (
-      <div className="mt-6 animate-pulse rounded-card border border-border bg-surface p-4 text-sm text-muted">
-        Chargement de la transcription…
+      <div className="mt-6 animate-pulse rounded-2xl bg-surface p-4 text-sm text-muted shadow-[0_1px_2px_rgba(0,0,0,0.4),0_0_0_1px_rgba(245,243,241,0.03)]">
+        {t.player.transcript.loading}
       </div>
     );
   }
 
   if (segments.length === 0) {
     return (
-      <div className="mt-6 rounded-card border border-border bg-surface p-4 text-sm text-muted">
-        Aucun segment disponible pour ce chapitre.
+      <div className="mt-6 rounded-2xl bg-surface p-4 text-sm text-muted shadow-[0_1px_2px_rgba(0,0,0,0.4),0_0_0_1px_rgba(245,243,241,0.03)]">
+        {t.player.transcript.empty}
       </div>
     );
   }
 
   return (
-    <div className="mt-6 overflow-hidden rounded-card border border-border bg-surface">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <p className="text-sm font-medium">📖 Transcription — Chapitre {chapterPosition}</p>
+    <div className="mt-6 overflow-hidden rounded-2xl bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.4),0_0_0_1px_rgba(245,243,241,0.03)]">
+      <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+        <p className="flex items-center gap-1.5 font-display text-sm font-medium">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+          {t.player.transcript.title(chapterPosition)}
+        </p>
         {!hasTiming && (
           <p className="text-xs text-warning">
-            ⚠️ Synchronisation indisponible — regénérez ce chapitre
+            {t.player.transcript.syncUnavailable}
           </p>
         )}
       </div>
@@ -107,7 +115,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
           const isCurrent = currentSegment?.id === seg.id;
           const voiceId = seg.voice_id;
           const hue = voiceId ? (voiceHues.get(voiceId) ?? 0) : null;
-          const label = seg.character_name ?? "Narrateur";
+          const label = seg.character_name ?? t.player.narrator;
           const canSeek = seg.audio_offset_ms !== null;
 
           function seekToSegment() {
@@ -131,7 +139,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
                     }
                   : undefined
               }
-              aria-label={canSeek ? `Aller à ce passage — ${label}` : undefined}
+              aria-label={canSeek ? t.player.transcript.seekAriaLabel(label) : undefined}
               className={`flex gap-3 border-b border-border/50 px-4 py-2.5 transition-colors last:border-0 ${
                 canSeek ? "cursor-pointer" : ""
               } ${isCurrent ? "border-l-2" : "hover:bg-surface-2/40"}`}

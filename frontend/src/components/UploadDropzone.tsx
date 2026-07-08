@@ -2,12 +2,14 @@
 
 import { useRef, useState } from "react";
 import { uploadBook, BookSummary } from "@/lib/api";
+import { useT } from "@/lib/i18n/LanguageContext";
 
 export default function UploadDropzone({
   onUploaded,
 }: {
   onUploaded: (book: BookSummary) => void;
 }) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -16,7 +18,7 @@ export default function UploadDropzone({
   async function handleFile(file: File) {
     setError(null);
     if (!file.name.toLowerCase().endsWith(".epub")) {
-      setError("Seuls les fichiers .epub sont acceptés.");
+      setError(t.upload.invalidFile);
       return;
     }
     setUploading(true);
@@ -47,8 +49,10 @@ export default function UploadDropzone({
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`cursor-pointer rounded-card border-2 border-dashed p-8 text-center transition-colors ${
-          dragging ? "border-foreground bg-surface-2" : "border-border hover:border-muted"
+        className={`group cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
+          dragging
+            ? "scale-[1.01] border-primary bg-surface-2 shadow-[0_0_32px_rgba(245,243,241,0.1)]"
+            : "border-border hover:border-primary/40 hover:bg-surface/60"
         } ${uploading ? "pointer-events-none opacity-60" : ""}`}
       >
         <input
@@ -62,11 +66,27 @@ export default function UploadDropzone({
             e.target.value = "";
           }}
         />
-        <p className="font-medium text-foreground">
-          {uploading ? "Upload en cours…" : "Glissez un EPUB ici"}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="32"
+          height="32"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          className={`mx-auto mb-3 text-muted transition-transform duration-300 ${dragging ? "scale-110 text-primary" : "group-hover:-translate-y-0.5"}`}
+        >
+          <path d="M12 16V4M12 4l-4 4M12 4l4 4" />
+          <path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16" />
+        </svg>
+        <p className="font-display text-lg font-medium text-foreground">
+          {uploading ? t.upload.uploading : t.upload.dropHint}
         </p>
         <p className="mt-1 text-sm text-muted">
-          ou cliquez pour choisir un fichier .epub
+          {t.upload.clickHint}
         </p>
       </div>
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
