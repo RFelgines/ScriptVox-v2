@@ -162,6 +162,7 @@ export interface Dictionary {
     reanalyzeConfirm: string;
     generateAudio: string;
     regenerateAudio: string;
+    resumeGeneration: string;
     regenerateAudioConfirm: string;
     stopping: string;
     stop: string;
@@ -430,6 +431,7 @@ const fr: Dictionary = {
     reanalyzeConfirm:
       "Ré-analyser ce livre effacera les personnages, segments et suggestions de fusion existants. Continuer ?",
     generateAudio: "Générer l'audio",
+    resumeGeneration: "Reprendre la génération",
     regenerateAudio: "Regénérer l'audio",
     regenerateAudioConfirm: "Regénérer l'audio effacera l'export existant. Continuer ?",
     stopping: "Arrêt…",
@@ -706,6 +708,7 @@ const en: Dictionary = {
     reanalyzeConfirm:
       "Re-analysing this book will erase existing characters, segments and merge suggestions. Continue?",
     generateAudio: "Generate audio",
+    resumeGeneration: "Resume generation",
     regenerateAudio: "Regenerate audio",
     regenerateAudioConfirm: "Regenerating audio will erase the existing export. Continue?",
     stopping: "Stopping…",
