@@ -105,6 +105,10 @@ EN_PROFILE = LanguageProfile(
 
 _PROFILES: dict[str, LanguageProfile] = {"fr": FR_PROFILE, "en": EN_PROFILE}
 
+# Codes reconnus par resolve_profile, exposés pour valider/lister les choix
+# utilisateur (ex. AppSetting.preferred_language) sans dupliquer cette liste.
+AVAILABLE_LANGUAGES: tuple[str, ...] = tuple(_PROFILES.keys())
+
 
 def resolve_profile(language: str | None) -> LanguageProfile:
     """Normalise une valeur brute de ``Book.language`` (ex. ``"en-US"``, ``"eng"``,

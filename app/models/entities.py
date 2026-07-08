@@ -152,3 +152,10 @@ class AppSetting(SQLModel, table=True):
     # app.workers.tasks._effective_tts_provider entre l'override par livre
     # (Book.tts_provider) et le défaut usine (Settings.tts_provider, .env).
     preferred_tts_provider: Optional[str] = None
+    # Préférence globale éditable en Paramètres, distincte de la langue
+    # d'affichage de l'UI (LanguageContext frontend). Sert de repli quand la
+    # langue d'un livre n'a pas pu être détectée à l'import (dc:language EPUB
+    # absent/non reconnu) -- voir app.workers.tasks._analyze_book, point
+    # d'ingestion EPUB. Valeurs attendues : codes reconnus par
+    # language_profiles.resolve_profile ("fr", "en").
+    preferred_language: Optional[str] = None

@@ -27,6 +27,26 @@ def _effective_tts_provider(session: Session, book_tts_provider: str | None) -> 
     return row.preferred_tts_provider if row else None
 
 
+def _effective_book_language(
+    parsed_language: str | None, existing_book_language: str | None, session: Session,
+) -> str | None:
+    """Résout la langue à stocker sur Book.language après un (ré)import EPUB :
+    dc:language détecté (parsed_language) > langue déjà connue pour ce livre
+    (import précédent ou override manuel via PATCH /books/{id}, jamais écrasée
+    par une ré-analyse qui ne détecte rien) > préférence globale
+    (AppSetting.preferred_language) en dernier recours. Retourne None si rien
+    n'est disponible -- language_profiles.resolve_profile(None) retombe alors
+    sur le français, comportement historique inchangé."""
+    from app.models import AppSetting
+
+    if parsed_language:
+        return parsed_language
+    if existing_book_language:
+        return existing_book_language
+    row = session.get(AppSetting, 1)
+    return row.preferred_language if row else None
+
+
 async def _analyze_book(
     book_id: int,
     chapter_data: list[tuple[int, str]],
@@ -484,8 +504,7 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                 book.title = parsed.title
                 if parsed.author:
                     book.author = parsed.author
-                if parsed.language:
-                    book.language = parsed.language
+                book.language = _effective_book_language(parsed.language, book.language, session)
                 for pc in parsed.chapters:
                     session.add(Chapter(
                         book_id=book_id,

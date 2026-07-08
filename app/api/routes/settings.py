@@ -8,6 +8,7 @@ from app.config import VALID_TTS_PROVIDERS, Settings, get_settings
 from app.core.db import get_session
 from app.core.enums import VoiceKind
 from app.models.entities import AppSetting, Voice
+from app.services.llm.language_profiles import AVAILABLE_LANGUAGES
 from app.schemas.settings import (
     ProviderStatus,
     SettingsResponse,
@@ -38,6 +39,8 @@ def get_app_settings(
         default_tts_provider=settings.tts_provider,
         preferred_tts_provider=row.preferred_tts_provider,
         available_tts_providers=sorted(VALID_TTS_PROVIDERS),
+        preferred_language=row.preferred_language,
+        available_languages=sorted(AVAILABLE_LANGUAGES),
     )
 
 
@@ -55,8 +58,18 @@ def update_app_settings(
             status_code=422,
             detail=f"Invalid preferred_tts_provider={payload.preferred_tts_provider!r}",
         )
+    if (
+        payload.preferred_language is not None
+        and payload.preferred_language not in AVAILABLE_LANGUAGES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid preferred_language={payload.preferred_language!r}. "
+            f"Accepted values: {sorted(AVAILABLE_LANGUAGES)}",
+        )
     row = _get_or_create_app_setting(session)
     row.preferred_tts_provider = payload.preferred_tts_provider
+    row.preferred_language = payload.preferred_language
     session.add(row)
     session.commit()
     session.refresh(row)
@@ -64,6 +77,8 @@ def update_app_settings(
         default_tts_provider=settings.tts_provider,
         preferred_tts_provider=row.preferred_tts_provider,
         available_tts_providers=sorted(VALID_TTS_PROVIDERS),
+        preferred_language=row.preferred_language,
+        available_languages=sorted(AVAILABLE_LANGUAGES),
     )
 
 
