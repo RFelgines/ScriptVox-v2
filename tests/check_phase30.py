@@ -130,6 +130,9 @@ with tempfile.TemporaryDirectory() as _tmp2:
     check("table 'chapter' créée", "chapter" in _tables2)
     check("table 'segment' créée", "segment" in _tables2)
     check("table 'voice' créée", "voice" in _tables2)
+    _book_cols2 = {c["name"] for c in inspect(_eng2).get_columns("book")}
+    check("colonne 'book.failed_stage' créée (migration 4, audit 2026-07-11 T2.3)",
+          "failed_stage" in _book_cols2, f"got {_book_cols2}")
     check("historique alembic présent ('alembic_version')", "alembic_version" in _tables2)
     _eng2.dispose()
 
@@ -162,16 +165,26 @@ section("Données réelles préexistantes survivent intactes à l'auto-tamponnag
 with tempfile.TemporaryDirectory() as _tmp4:
     _eng4 = _pre_alembic_engine(Path(_tmp4))
 
-    with Session(_eng4) as _s:
-        _book4 = Book(
-            title="Mon Vrai Livre", author="Un Vrai Auteur",
-            source_path="/data/1/original.epub", status=BookStatus.DONE,
-            progress=100.0, audio_path="/data/1/book.wav", mp3_path="/data/1/book.mp3",
+    # INSERT SQL brut limité aux colonnes baseline (PAS Session.add(Book(...)) :
+    # l'ORM construit l'INSERT depuis le modèle SQLModel ACTUEL, qui inclut
+    # désormais book.failed_stage -- ajouté par la migration 4, absente du
+    # schéma baseline de ce fixture -- ce qui échouerait sur une vraie vieille
+    # base. Even principe que _pre_alembic_engine : rester fidèle au schéma
+    # RÉEL d'une base pré-migration 4 (audit 2026-07-11, T2.3).
+    with _eng4.begin() as _conn4:
+        _conn4.exec_driver_sql(
+            "INSERT INTO book (title, author, source_path, status, progress, "
+            "audio_path, mp3_path, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "Mon Vrai Livre", "Un Vrai Auteur", "/data/1/original.epub", "DONE", 100.0,
+                "/data/1/book.wav", "/data/1/book.mp3",
+                "2026-07-02 00:00:00", "2026-07-02 00:00:00",
+            ),
         )
-        _s.add(_book4)
-        _s.commit()
-        _s.refresh(_book4)
-        _book4_id = _book4.id
+        _book4_id = _conn4.exec_driver_sql(
+            "SELECT id FROM book WHERE title = 'Mon Vrai Livre'"
+        ).scalar_one()
 
     _ensure_schema(_eng4)  # l'opération potentiellement dangereuse
 
@@ -260,14 +273,20 @@ section("RÉGRESSION : une base pré-Alembic au schéma RÉELLEMENT ancien reço
 with tempfile.TemporaryDirectory() as _tmp8:
     _eng8 = _pre_alembic_engine(Path(_tmp8))
 
-    with Session(_eng8) as _s:
-        _book8 = Book(
-            title="Vieux Livre Pré-Migration", source_path="/data/2/x.epub",
-            status=BookStatus.DONE, progress=100.0,
+    # INSERT SQL brut, même raison qu'en section 4 : le modèle Book actuel
+    # inclut failed_stage (migration 4), absente du schéma baseline ici.
+    with _eng8.begin() as _conn8:
+        _conn8.exec_driver_sql(
+            "INSERT INTO book (title, source_path, status, progress, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "Vieux Livre Pré-Migration", "/data/2/x.epub", "DONE", 100.0,
+                "2026-07-02 00:00:00", "2026-07-02 00:00:00",
+            ),
         )
-        _s.add(_book8)
-        _s.commit()
-        _book8_id = _book8.id
+        _book8_id = _conn8.exec_driver_sql(
+            "SELECT id FROM book WHERE title = 'Vieux Livre Pré-Migration'"
+        ).scalar_one()
 
     _cols_before8 = {c["name"] for c in inspect(_eng8).get_columns("chapter")}
     check("schéma baseline confirmé : chapter.priority absente avant fix",
@@ -283,6 +302,9 @@ with tempfile.TemporaryDirectory() as _tmp8:
     _cols_setting8 = {c["name"] for c in inspect(_eng8).get_columns("app_setting")}
     check("app_setting.preferred_language ajoutée (migration 29e226c24b2d appliquée)",
           "preferred_language" in _cols_setting8, f"got {_cols_setting8}")
+    _cols_book8 = {c["name"] for c in inspect(_eng8).get_columns("book")}
+    check("book.failed_stage ajoutée (migration 67521bdee0e5 appliquée)",
+          "failed_stage" in _cols_book8, f"got {_cols_book8}")
 
     with Session(_eng8) as _s:
         _book8_after = _s.get(Book, _book8_id)

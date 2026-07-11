@@ -458,7 +458,7 @@ with Session(_gen_engine) as _s:
     _s.commit()
 
 _generate_calls: list = []
-books_module.generate_book = lambda book_id: _generate_calls.append(book_id)
+books_module.generate_book = lambda book_id, force=False: _generate_calls.append((book_id, force))
 
 with TestClient(app) as _tc:
     _r11 = _tc.post(f"/books/{_g11_book_id}/generate")
@@ -469,15 +469,31 @@ with TestClient(app) as _tc:
 
 books_module.generate_book = _generate_book_task  # restore
 
-assert _generate_calls == [_g11_book_id], (
-    f"Expected generate_book([{_g11_book_id}]), got {_generate_calls}"
+assert _generate_calls == [(_g11_book_id, False)], (
+    f"Expected generate_book(({_g11_book_id}, False)), got {_generate_calls}"
 )
-ok(f"202, generate_book called with book_id={_g11_book_id}")
+ok(f"202, generate_book(book_id={_g11_book_id}, force=False) — défaut sans query param")
+
+# Section 11b: ?force=true transmis à generate_book (audit 2026-07-11, T2.1)
+section("POST /books/{id}/generate?force=true — force=True transmis à generate_book")
+_generate_calls_force: list = []
+books_module.generate_book = lambda book_id, force=False: _generate_calls_force.append((book_id, force))
+
+with TestClient(app) as _tc:
+    _r11b = _tc.post(f"/books/{_g11_book_id}/generate?force=true")
+    assert _r11b.status_code == 202, f"Expected 202, got {_r11b.status_code} ({_r11b.text})"
+
+books_module.generate_book = _generate_book_task  # restore
+
+assert _generate_calls_force == [(_g11_book_id, True)], (
+    f"Expected generate_book(({_g11_book_id}, True)), got {_generate_calls_force}"
+)
+ok(f"202, generate_book(book_id={_g11_book_id}, force=True) — query param transmis")
 
 # Section 12: 404 if book not found
 section("POST /books/{id}/generate — 404 if book not found")
 
-books_module.generate_book = lambda book_id: None
+books_module.generate_book = lambda book_id, force=False: None
 
 with TestClient(app, raise_server_exceptions=False) as _tc:
     _r12 = _tc.post("/books/9999/generate")
@@ -500,7 +516,7 @@ with Session(_gen_engine) as _s:
         _s.refresh(_b)
         _g13_ids[_st] = _b.id
 
-books_module.generate_book = lambda book_id: None
+books_module.generate_book = lambda book_id, force=False: None
 
 with TestClient(app, raise_server_exceptions=False) as _tc:
     for _st in _g13_status_cases:

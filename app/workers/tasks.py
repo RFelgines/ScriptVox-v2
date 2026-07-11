@@ -499,6 +499,7 @@ async def _generate_book_async(book_id: int, engine) -> bool:
                 if book is not None and book.status == BookStatus.GENERATING:
                     book.status = BookStatus.FAILED
                     book.error_message = "Arrêté par l'utilisateur."
+                    book.failed_stage = "generation"
                     session.add(book)
                     session.commit()
             return False
@@ -532,6 +533,7 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
         book.status = BookStatus.PROCESSING
         book.progress = 0.0
         book.error_message = None
+        book.failed_stage = None  # nettoie une valeur périmée d'une tentative précédente
         session.add(book)
         session.commit()
 
@@ -663,11 +665,12 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             if book:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
+                book.failed_stage = "analysis"
                 session.add(book)
                 session.commit()
 
 
-def _generate_book_impl(book_id: int) -> None:
+def _generate_book_impl(book_id: int, force: bool = False) -> None:
     from app.core.db import get_engine
     from app.core.enums import BookStatus, ChapterStatus
     from app.models import Book, Chapter
@@ -686,19 +689,24 @@ def _generate_book_impl(book_id: int) -> None:
             )
             return
         source_path = book.source_path
-        previous_status = book.status
         book.status = BookStatus.GENERATING
         book.progress = 0.0
         book.error_message = None
+        book.failed_stage = None  # nettoie une valeur périmée d'une tentative précédente
         session.add(book)
         session.commit()
 
-    # Reprise (skip chapters already DONE) only applies when resuming after a
-    # failure — a fresh "Générer"/"Regénérer" click on ANALYZED/DONE must redo
-    # everything, so every chapter is reset to PENDING first (mirrors
-    # _analyze_book_impl's resume_requested/force pattern; audit 2026-07-02 Lot C).
-    resume = previous_status == BookStatus.FAILED
-    if not resume:
+    # Chapters already DONE are reset (and fully resynthesised) ONLY on an
+    # explicit force=True — otherwise ALWAYS preserved, whatever the book's
+    # previous status, and only whatever is missing gets filled in (audit
+    # 2026-07-11: a book left ANALYZED after per-chapter generation — the
+    # normal state until "Générer l'audio" is clicked once at the book level
+    # — used to have EVERY already-DONE chapter unconditionally reset and
+    # resynthesised from scratch, discarding potentially hours of TTS work
+    # the moment that button was pressed. Only a resume-after-FAILED used to
+    # preserve DONE chapters; that is now the default in every case, and
+    # force=True is the explicit separate action for a real full regeneration).
+    if force:
         with Session(engine) as session:
             chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
             for c in chapters:
@@ -765,6 +773,7 @@ def _generate_book_impl(book_id: int) -> None:
             if book:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
+                book.failed_stage = "generation"
                 session.add(book)
                 session.commit()
 
@@ -910,6 +919,9 @@ def _reconcile_zombie_state() -> None:
             select(Book).where(Book.status.in_((BookStatus.PROCESSING, BookStatus.GENERATING)))
         ).all()
         for book in zombie_books:
+            # Lire le statut D'ORIGINE avant de l'écraser -- c'est lui qui dit
+            # quelle étape était en cours (audit 2026-07-11, T2.3).
+            book.failed_stage = "analysis" if book.status == BookStatus.PROCESSING else "generation"
             book.status = BookStatus.FAILED
             book.error_message = "Worker interrompu (redémarrage) — reprendre l'analyse/génération."
             session.add(book)
@@ -943,8 +955,8 @@ def analyze_book(book_id: int, force: bool = False) -> None:
 
 
 @huey.task()
-def generate_book(book_id: int) -> None:
-    _generate_book_impl(book_id)
+def generate_book(book_id: int, force: bool = False) -> None:
+    _generate_book_impl(book_id, force)
 
 
 @huey.task()

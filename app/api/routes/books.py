@@ -144,6 +144,9 @@ def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookR
             status_code=409,
             detail=f"Book {book_id} is not in progress (status={book.status.value}).",
         )
+    # Lire le statut D'ORIGINE avant de l'écraser -- c'est lui qui dit quelle
+    # étape était en cours (audit 2026-07-11, T2.3).
+    book.failed_stage = "analysis" if book.status == BookStatus.PROCESSING else "generation"
     book.status = BookStatus.FAILED
     book.error_message = "Arrêté par l'utilisateur."
     session.add(book)
@@ -153,7 +156,9 @@ def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookR
 
 
 @router.post("/{book_id}/generate", response_model=BookResponse, status_code=202)
-def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
+def trigger_generate(
+    book_id: int, force: bool = False, session: Session = Depends(get_session)
+) -> BookResponse:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
@@ -199,7 +204,7 @@ def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> B
                 "no segments. Resume analysis (POST /analyze) before generating."
             ),
         )
-    generate_book(book.id)
+    generate_book(book.id, force)
     return BookResponse.model_validate(book)
 
 

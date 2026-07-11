@@ -241,7 +241,14 @@ with tempfile.TemporaryDirectory() as _tmp3:
 
 
 # ── 4. Régénération complète (pas resume) : TOUS les chapitres sont refaits ──
-section("Régénération complète (status=DONE, pas FAILED) : tous les chapitres sont refaits")
+section("Régénération par défaut (force=False) : chapitres DONE PRÉSERVÉS, pas resynthétisés (audit 2026-07-11)")
+# Avant fix : tout appel à _generate_book_impl sur un livre ANALYZED/DONE
+# resettait INCONDITIONNELLEMENT les chapitres déjà DONE -> "Générer l'audio"
+# cliqué après une génération par chapitre (le livre reste ANALYZED tant que
+# ce bouton n'est pas cliqué) jetait des heures de TTS déjà faites. Seul un
+# resume-après-FAILED préservait les DONE -- désormais c'est le comportement
+# PAR DÉFAUT, quel que soit le statut de départ ; force=True est l'action
+# explicite séparée pour une vraie régénération complète (section suivante).
 _e4 = _make_test_engine()
 with tempfile.TemporaryDirectory() as _tmp4:
     _src4 = str(Path(_tmp4) / "book.epub")
@@ -253,17 +260,59 @@ with tempfile.TemporaryDirectory() as _tmp4:
         patch("app.core.db.get_engine", return_value=_e4),
         patch("app.services.tts.factory.get_tts_provider", return_value=_tts4a),
     ):
-        _generate_book_impl(_bid4)  # book.status devient DONE
+        _generate_book_impl(_bid4)  # book.status devient DONE, 2 chapitres DONE
+
+    with Session(_e4) as _s:
+        _ch1_4_before, _ch2_4_before = _s.exec(
+            select(Chapter).where(Chapter.book_id == _bid4).order_by(Chapter.position)
+        ).all()
+        _ch1_4_audio_path = _ch1_4_before.audio_path
+        _ch2_4_audio_path = _ch2_4_before.audio_path
 
     _tts4b = _CountingTTS()
     with (
         patch("app.core.db.get_engine", return_value=_e4),
         patch("app.services.tts.factory.get_tts_provider", return_value=_tts4b),
     ):
-        _generate_book_impl(_bid4)  # "Regénérer l'audio" sur un livre DONE
+        _generate_book_impl(_bid4)  # "Générer l'audio" à nouveau, force=False (défaut)
 
-    check("les 2 segments sont resynthétisés (pas de no-op silencieux)",
-          _tts4b.calls == 2, f"got {_tts4b.calls}")
+    check("aucun segment resynthétisé (les 2 chapitres étaient déjà DONE)",
+          _tts4b.calls == 0, f"got {_tts4b.calls}")
+    with Session(_e4) as _s:
+        _b4 = _s.get(Book, _bid4)
+        check("livre toujours DONE", _b4.status == BookStatus.DONE, f"got {_b4.status}")
+        _ch1_4_after, _ch2_4_after = _s.exec(
+            select(Chapter).where(Chapter.book_id == _bid4).order_by(Chapter.position)
+        ).all()
+        check("chapitre 1 : même audio_path (fichier WAV jamais recréé)",
+              _ch1_4_after.audio_path == _ch1_4_audio_path, f"got {_ch1_4_after.audio_path!r}")
+        check("chapitre 2 : même audio_path (fichier WAV jamais recréé)",
+              _ch2_4_after.audio_path == _ch2_4_audio_path, f"got {_ch2_4_after.audio_path!r}")
+
+
+section("Régénération complète explicite (force=True) : tous les chapitres sont refaits")
+_e4b = _make_test_engine()
+with tempfile.TemporaryDirectory() as _tmp4b:
+    _src4b = str(Path(_tmp4b) / "book.epub")
+    _bid4b, _chids4b = _make_book_with_chapters(
+        _e4b, [["Un."], ["Deux."]], _src4b, status=BookStatus.ANALYZED,
+    )
+    _tts4c = _CountingTTS()
+    with (
+        patch("app.core.db.get_engine", return_value=_e4b),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_tts4c),
+    ):
+        _generate_book_impl(_bid4b)  # book.status devient DONE
+
+    _tts4d = _CountingTTS()
+    with (
+        patch("app.core.db.get_engine", return_value=_e4b),
+        patch("app.services.tts.factory.get_tts_provider", return_value=_tts4d),
+    ):
+        _generate_book_impl(_bid4b, force=True)  # régénération complète demandée explicitement
+
+    check("les 2 segments sont resynthétisés (force=True l'emporte)",
+          _tts4d.calls == 2, f"got {_tts4d.calls}")
 
 
 # ── 5. Échec partiel : ch.1 DONE reste DONE, ch.2 FAILED -> livre FAILED ─────

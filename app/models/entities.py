@@ -25,6 +25,10 @@ class Book(SQLModel, table=True):
     status: BookStatus = Field(default=BookStatus.PENDING, index=True)
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
     error_message: Optional[str] = None
+    # "analysis" | "generation" ; renseigné uniquement quand status=FAILED, sinon
+    # None. Distingue quelle étape a échoué (l'UI proposait parfois le mauvais
+    # bouton de reprise faute de cette info -- audit 2026-07-11, T2.3).
+    failed_stage: Optional[str] = None
     audio_path: Optional[str] = None
     mp3_path: Optional[str] = None
     cover_path: Optional[str] = None

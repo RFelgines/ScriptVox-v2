@@ -21,6 +21,7 @@ export interface BookSummary {
   status: BookStatus;
   progress: number;
   error_message: string | null;
+  failed_stage: "analysis" | "generation" | null;
   created_at: string;
   audio_path: string | null;
   mp3_path: string | null;
@@ -356,8 +357,8 @@ export function analyzeBook(bookId: number): Promise<BookSummary> {
   return _postBook(bookId, "analyze", "analyze");
 }
 
-export function generateBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "generate", "generate");
+export function generateBook(bookId: number, force = false): Promise<BookSummary> {
+  return _postBook(bookId, force ? "generate?force=true" : "generate", "generate");
 }
 
 export function stopBook(bookId: number): Promise<BookSummary> {
