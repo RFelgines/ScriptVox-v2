@@ -18,6 +18,36 @@ Runs with **EdgeTTS** (free, no key, internet required — default), **locally**
 
 ---
 
+## Quick start
+
+```bash
+./setup.sh      # first time only: venv, backend + frontend deps, scaffolds .env files
+./start.sh      # launches API + worker + frontend together
+```
+
+Windows: `setup.ps1` / `start.ps1` (PowerShell) do the same; `start.bat` also works once
+`setup.ps1` has been run at least once.
+
+Before running `start`, pick **one** LLM path in `.env` (`setup.sh` creates it from
+`.env.example`, defaulted to Ollama):
+
+- **Fastest**: set `LLM_PROVIDER=gemini` and fill in `GEMINI_API_KEY` (get one at
+  https://aistudio.google.com/apikey) — no local install, just a key.
+- **Fully local**: keep `LLM_PROVIDER=ollama`, install [Ollama](https://ollama.com/download),
+  then pull the model set in `.env` (default: `ollama pull qwen3:1.7b`).
+
+Not sure what's missing? `python scripts/doctor.py` (also runs automatically at the end of
+`setup.sh`) checks Python/Node/deps/`.env` and tells you the exact command to fix whatever's
+outstanding — it never installs anything for you.
+
+Then open http://localhost:3000 (API at http://localhost:8000, docs at `/docs`). TTS is
+EdgeTTS by default — free, cloud, zero setup; see [Piper](#piper-binary-local-tts) or
+[Qwen3-TTS](#qwen3-tts-optional-expressive-tts--local-gpu) below for fully-local/GPU options.
+
+The sections below explain what these scripts do and how to run each step by hand.
+
+---
+
 ## Setup
 
 Requires **Python 3.11+** (developed and tested on 3.11.9). Note for Python 3.13+: the stdlib
@@ -94,7 +124,8 @@ Review the generated file in `migrations/versions/` before committing — autoge
 
 ## Launch
 
-Three processes must run in parallel:
+`./start.sh` (or `start.ps1`/`start.bat` on Windows) does this for you and stops all three
+processes together on Ctrl-C. By hand, three processes must run in parallel:
 
 ```bash
 # Terminal 1 — API server
