@@ -40,7 +40,10 @@ fi
 
 if [ -f "scripts/doctor.py" ]; then
     echo
-    .venv/bin/python scripts/doctor.py
+    # doctor.py exits 1 when it has something to flag (e.g. LLM provider not
+    # reachable yet) — that's informational, not a setup failure, so it must
+    # not trip `set -e` and abort before the "Setup complete" message below.
+    .venv/bin/python scripts/doctor.py || true
 fi
 
 echo
