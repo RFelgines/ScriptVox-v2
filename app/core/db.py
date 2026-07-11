@@ -31,14 +31,18 @@ def _ensure_schema(eng: Engine) -> None:
     Self-healing for a database that predates Alembic adoption (this includes
     every scriptvox.db that already exists today, created entirely via
     create_all): if the DB already has application tables but no alembic_version
-    bookkeeping table, it is STAMPED at the baseline revision instead of
-    re-running "CREATE TABLE" (which would crash on tables that already exist).
-    Stamping only records "this DB is already at revision X" in a new
-    alembic_version table -- it never touches existing data. A brand new
-    (empty) database, or one already tracked by Alembic, just runs `upgrade
-    head` normally."""
+    bookkeeping table, it is STAMPED at the BASELINE revision (audit
+    2026-07-11 -- a stamp at "head" used to skip here, silently marking a
+    pre-Alembic DB as fully up to date without ever running the ALTER TABLEs
+    of every migration after the baseline; the first read of a column added by
+    one of them then raised a raw OperationalError). Stamping only records
+    "this DB is at revision X" in a new alembic_version table -- it never
+    touches existing data. The `upgrade head` right after applies whatever
+    migrations the stamped revision is missing (a no-op if already there). A
+    brand new (empty) database just runs every migration from scratch."""
     from alembic import command
     from alembic.config import Config
+    from alembic.script import ScriptDirectory
     from sqlalchemy import inspect
 
     cfg = Config(str(_PROJECT_ROOT / "alembic.ini"))
@@ -50,9 +54,11 @@ def _ensure_schema(eng: Engine) -> None:
     has_app_tables = bool(existing_tables - {"alembic_version"})
 
     if has_app_tables and not has_alembic_history:
-        command.stamp(cfg, "head")
-    else:
-        command.upgrade(cfg, "head")
+        bases = ScriptDirectory.from_config(cfg).get_bases()
+        if len(bases) != 1:
+            raise RuntimeError(f"Expected exactly one migration baseline, got {bases!r}")
+        command.stamp(cfg, bases[0])
+    command.upgrade(cfg, "head")
 
 
 def init_db(engine: Engine | None = None) -> None:

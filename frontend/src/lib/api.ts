@@ -212,7 +212,16 @@ export async function getAppStatus(): Promise<AppStatus> {
 
 export async function requestVoiceSample(voiceId: string): Promise<VoiceSummary> {
   const res = await fetch(`${API_URL}/voices/${voiceId}/sample`, { method: "POST" });
-  if (!res.ok) throw new Error(`POST /voices/${voiceId}/sample failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(t().errors.voiceSample(detail));
+  }
   return res.json();
 }
 

@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import os
 import shutil
@@ -25,6 +26,8 @@ from app.schemas.book import (
 from app.services.voice_assignment import NARRATOR_VOICE_ID
 from app.workers.tasks import analyze_book, generate_book, generate_chapter
 
+logger = logging.getLogger(__name__)
+
 DATA_DIR = Path(get_settings().data_dir)
 
 _ALLOWED_COVER_TYPES: dict[str, str] = {
@@ -49,7 +52,7 @@ async def upload_book(
     if not file.filename or not file.filename.lower().endswith(".epub"):
         raise HTTPException(status_code=422, detail="Only .epub files are accepted.")
 
-    DATA_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     # The client-supplied filename is never used in the disk path (only as the book
     # title, below) -- it's untrusted input (audit 2026-07-07, P1).
     dest = DATA_DIR / f"{uuid.uuid4().hex}.epub"
@@ -163,6 +166,37 @@ def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> B
             detail=(
                 f"Book {book_id} cannot be generated (status={book.status.value}). "
                 "Expected ANALYZED, DONE or FAILED."
+            ),
+        )
+    # FAILED can mean the ANALYSIS itself never completed (0 chapters — e.g. a
+    # corrupt EPUB — or some chapters never reached by an interrupted LLM pass),
+    # not just an interrupted/failed GENERATION. Without this guard the book
+    # either ends up DONE with audio_path=None (0 chapters: _generate_book_async
+    # treats an empty chapter list as trivially "complete") or FAILED with a
+    # cryptic "Chapter N has no segments to synthesise" deep in synthesis
+    # (audit 2026-07-11).
+    chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+    if not chapters:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Book {book_id} has no chapters — analysis never completed. "
+                "Run POST /analyze first."
+            ),
+        )
+    chapter_ids = [c.id for c in chapters]
+    analyzed_chapter_ids = set(
+        session.exec(
+            select(Segment.chapter_id).where(Segment.chapter_id.in_(chapter_ids)).distinct()
+        ).all()
+    )
+    missing_positions = sorted(c.position for c in chapters if c.id not in analyzed_chapter_ids)
+    if missing_positions:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Book {book_id} analysis is incomplete — chapter(s) {missing_positions} have "
+                "no segments. Resume analysis (POST /analyze) before generating."
             ),
         )
     generate_book(book.id)
@@ -375,6 +409,11 @@ def get_chapter_audio(
                 f"Use POST /books/{book_id}/chapters/{position}/generate first."
             ),
         )
+    if not chapter.audio_path:
+        # Défensif : incohérence DONE + audio_path=None (base ancienne, édition
+        # manuelle) -- Path(None) lève un TypeError brut -> 500 sinon. Même
+        # filtre que l'assembleur livre (tasks.py: `if c.audio_path`).
+        raise HTTPException(status_code=404, detail="Audio file not found on disk.")
     path = Path(chapter.audio_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk.")
@@ -480,6 +519,16 @@ def delete_book(book_id: int, session: Session = Depends(get_session)) -> None:
     session.delete(book)
     session.commit()
     for path in paths:
-        if path and os.path.exists(path):
+        if not path or not os.path.exists(path):
+            continue
+        try:
             os.remove(path)
+        except OSError:
+            # Best-effort (même logique que rmtree(ignore_errors=True)
+            # juste après) : un fichier verrouillé par le lecteur audio
+            # (Windows, plateforme cible) ne doit pas transformer une
+            # suppression déjà commitée en DB en 500 côté client (audit
+            # 2026-07-11) -- le fichier orphelin reste sur disque, pas pire
+            # que ce qui se passait déjà pour le dossier via rmtree.
+            logger.warning("delete_book: failed to remove %r", path, exc_info=True)
     shutil.rmtree(DATA_DIR / str(book_id), ignore_errors=True)

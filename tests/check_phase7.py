@@ -347,6 +347,50 @@ assert _analyze_calls == [_r8_book_id], (
 )
 ok(f"POST /books -> 202, analyze_book called with book_id={_r8_book_id}")
 
+# Section 8b: DATA_DIR.mkdir(parents=True) — fonctionne même si le PARENT
+# de DATA_DIR n'existe pas encore (audit 2026-07-11). Avant fix,
+# DATA_DIR.mkdir(exist_ok=True) seul levait FileNotFoundError -> 500 dès le
+# premier upload sur une config DATA_DIR="storage/data" avec "storage/" absent
+# (voices.py/le worker créent déjà leurs sous-dossiers avec parents=True).
+section("POST /books — DATA_DIR.mkdir(parents=True) même si son parent n'existe pas encore")
+books_module.analyze_book = lambda book_id: _analyze_calls.append(book_id)
+with tempfile.TemporaryDirectory() as _r8b_tmp:
+    _orig_data_dir = books_module.DATA_DIR
+    books_module.DATA_DIR = Path(_r8b_tmp) / "storage" / "data"  # "storage/" absent
+    try:
+        with TestClient(app, raise_server_exceptions=False) as _tc:
+            with open(str(FIXTURE_EPUB), "rb") as _fh:
+                _r8b = _tc.post("/books", files={"file": ("test.epub", _fh, "application/epub+zip")})
+        assert _r8b.status_code == 202, f"Expected 202, got {_r8b.status_code} ({_r8b.text})"
+    finally:
+        books_module.DATA_DIR = _orig_data_dir
+books_module.analyze_book = _analyze_book_task  # restore
+ok("upload réussit même si DATA_DIR a un parent inexistant (storage/ créé récursivement)")
+
+# Section 8c: DELETE /books/{id} — os.remove best-effort (audit 2026-07-11).
+# Un fichier verrouillé par le lecteur audio (Windows, plateforme cible) ne
+# doit pas faire échouer la suppression avec un 500 après que la ligne DB a
+# déjà été effacée -- même logique que rmtree(ignore_errors=True) juste après.
+section("DELETE /books/{id} — os.remove best-effort, pas de 500 si un fichier est verrouillé")
+with tempfile.TemporaryDirectory() as _rdel_tmp:
+    _del_epub = Path(_rdel_tmp) / "locked.epub"
+    _del_epub.write_bytes(b"fake epub content")
+    with Session(_rb_engine) as _s:
+        _del_book = Book(title="Locked", source_path=str(_del_epub), status=BookStatus.DONE)
+        _s.add(_del_book)
+        _s.commit()
+        _s.refresh(_del_book)
+        _del_book_id = _del_book.id
+
+    with patch("app.api.routes.books.os.remove", side_effect=PermissionError("simulated lock")):
+        with TestClient(app, raise_server_exceptions=False) as _tc:
+            _rdel = _tc.delete(f"/books/{_del_book_id}")
+    assert _rdel.status_code == 204, f"Expected 204, got {_rdel.status_code} ({_rdel.text})"
+
+    with Session(_rb_engine) as _s:
+        assert _s.get(Book, _del_book_id) is None, "Book row devrait être supprimée malgré l'échec du fichier"
+ok("204 malgré un fichier verrouillé (PermissionError avalée), ligne DB supprimée quand même")
+
 # Section 9: chapter audio -> 409 when chapter is PENDING (not yet generated)
 section("GET /books/{id}/chapters/1/audio — 409 when chapter is PENDING (not yet generated)")
 
@@ -404,6 +448,14 @@ with Session(_gen_engine) as _s:
     _s.commit()
     _s.refresh(_g11_book)
     _g11_book_id = _g11_book.id
+    # Analyse complète (audit 2026-07-11) : un chapitre avec segment, sinon la
+    # route rejette désormais en 409 ("analyse incomplète") avant dispatch.
+    _g11_ch = Chapter(book_id=_g11_book_id, position=1, title="Ch1", raw_text="x")
+    _s.add(_g11_ch)
+    _s.commit()
+    _s.refresh(_g11_ch)
+    _s.add(Segment(chapter_id=_g11_ch.id, position=1, text="x", segment_type=SegmentType.NARRATION))
+    _s.commit()
 
 _generate_calls: list = []
 books_module.generate_book = lambda book_id: _generate_calls.append(book_id)
@@ -729,6 +781,28 @@ with tempfile.TemporaryDirectory() as _c21_tmp:
     assert _r21.status_code == 200, f"Expected 200, got {_r21.status_code} ({_r21.text})"
     assert _r21.content[:4] == b"RIFF", f"Expected WAV body, got {_r21.content[:4]!r}"
     ok(f"200 with valid WAV ({len(_r21.content)} bytes) from persisted file")
+
+section("GET /books/{id}/chapters/{n}/audio — 404 (pas 500) si DONE avec audio_path=None (audit 2026-07-11)")
+# Incohérence défensive (base ancienne, édition manuelle) : un chapitre DONE
+# sans audio_path faisait planter Path(None) en TypeError -> 500, alors que
+# l'assembleur livre (tasks.py) filtre déjà ce cas avec `if c.audio_path`.
+with Session(_c3c_engine) as _s:
+    _c21b_book = Book(title="DoneNoPath", source_path="/tmp/y.epub", status=BookStatus.ANALYZED)
+    _s.add(_c21b_book)
+    _s.commit()
+    _s.refresh(_c21b_book)
+    _c21b_book_id = _c21b_book.id
+    _c21b_ch = Chapter(
+        book_id=_c21b_book_id, position=1, title="Ch1", raw_text="x",
+        status=ChapterStatus.DONE, audio_path=None,
+    )
+    _s.add(_c21b_ch)
+    _s.commit()
+
+with TestClient(app, raise_server_exceptions=False) as _tc:
+    _r21b = _tc.get(f"/books/{_c21b_book_id}/chapters/1/audio")
+assert _r21b.status_code == 404, f"Expected 404, got {_r21b.status_code} ({_r21b.text})"
+ok("404 propre (pas 500/TypeError) sur DONE + audio_path=None")
 
 # Section 22: GET /books/{id}/chapters — list[ChapterResponse]
 section("GET /books/{id}/chapters — list[ChapterResponse] ordered by position")

@@ -370,6 +370,16 @@ with Session(_e8) as _s:
     _s.commit()
     _s.refresh(_b8)
     _b8_id = _b8.id
+    # Analyse complète (audit 2026-07-11) : un chapitre avec segment, sinon la
+    # route rejette désormais en 409 ("analyse incomplète") avant même de
+    # regarder le statut FAILED -- ce que CETTE section ne teste pas, elle
+    # teste uniquement que FAILED est un statut accepté par la route.
+    _ch8 = Chapter(book_id=_b8_id, position=1, title="Ch1", raw_text="x")
+    _s.add(_ch8)
+    _s.commit()
+    _s.refresh(_ch8)
+    _s.add(Segment(chapter_id=_ch8.id, position=1, text="x", segment_type=SegmentType.NARRATION))
+    _s.commit()
 
 
 def _session8():
@@ -387,8 +397,15 @@ with patch("app.core.db.get_engine", return_value=_e8):
 app.dependency_overrides.clear()
 
 
-# ── 9. Livre sans chapitre -> toujours DONE, audio_path=None ─────────────────
-section("Régression : livre sans chapitre -> DONE, audio_path=None (comportement préexistant)")
+# ── 9. Livre sans chapitre -> FAILED, jamais DONE (audit 2026-07-11) ─────────
+# Corrige l'ancien comportement verrouillé ici ("DONE malgré l'absence de
+# chapitres") : un livre à 0 chapitre n'a jamais fini son analyse -- le
+# laisser finir DONE avec audio_path=None était un mensonge d'état (l'UI
+# affichait "terminé" sur un livre qui n'a jamais rien produit). Ce cas ne
+# peut plus être atteint via la route (409 avant dispatch, cf. section 8) --
+# ce test exerce directement _generate_book_impl (défense en profondeur,
+# _generate_book_async lève désormais au lieu de retourner True sur 0 chapitre).
+section("Régression : livre sans chapitre -> FAILED (jamais DONE, audit 2026-07-11)")
 _e9 = _make_test_engine()
 with Session(_e9) as _s:
     _b9 = Book(title="Empty", source_path="/tmp/empty.epub", status=BookStatus.ANALYZED)
@@ -402,8 +419,9 @@ with patch("app.core.db.get_engine", return_value=_e9):
 
 with Session(_e9) as _s:
     _b9_after = _s.get(Book, _b9_id)
-    check("livre DONE malgré l'absence de chapitres", _b9_after.status == BookStatus.DONE,
+    check("livre FAILED (jamais DONE avec 0 chapitre)", _b9_after.status == BookStatus.FAILED,
           f"got {_b9_after.status}")
+    check("error_message renseigné", bool(_b9_after.error_message))
     check("audio_path=None", _b9_after.audio_path is None)
     check("mp3_path=None", _b9_after.mp3_path is None)
 

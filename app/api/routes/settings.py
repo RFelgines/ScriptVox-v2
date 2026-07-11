@@ -50,26 +50,35 @@ def update_app_settings(
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> SettingsResponse:
+    # exclude_unset : un champ OMIS du body ne doit pas écraser l'autre
+    # préférence avec le défaut None du schéma (même pattern que
+    # patch_book/books.py) -- seul un champ explicitement envoyé (y compris
+    # `null` pour effacer une préférence) est appliqué.
+    fields = payload.model_dump(exclude_unset=True)
     if (
-        payload.preferred_tts_provider is not None
-        and payload.preferred_tts_provider not in VALID_TTS_PROVIDERS
+        "preferred_tts_provider" in fields
+        and fields["preferred_tts_provider"] is not None
+        and fields["preferred_tts_provider"] not in VALID_TTS_PROVIDERS
     ):
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid preferred_tts_provider={payload.preferred_tts_provider!r}",
+            detail=f"Invalid preferred_tts_provider={fields['preferred_tts_provider']!r}",
         )
     if (
-        payload.preferred_language is not None
-        and payload.preferred_language not in AVAILABLE_LANGUAGES
+        "preferred_language" in fields
+        and fields["preferred_language"] is not None
+        and fields["preferred_language"] not in AVAILABLE_LANGUAGES
     ):
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid preferred_language={payload.preferred_language!r}. "
+            detail=f"Invalid preferred_language={fields['preferred_language']!r}. "
             f"Accepted values: {sorted(AVAILABLE_LANGUAGES)}",
         )
     row = _get_or_create_app_setting(session)
-    row.preferred_tts_provider = payload.preferred_tts_provider
-    row.preferred_language = payload.preferred_language
+    if "preferred_tts_provider" in fields:
+        row.preferred_tts_provider = fields["preferred_tts_provider"]
+    if "preferred_language" in fields:
+        row.preferred_language = fields["preferred_language"]
     session.add(row)
     session.commit()
     session.refresh(row)

@@ -89,7 +89,7 @@ section("Tous les modules s'importent proprement")
 from sqlalchemy.pool import StaticPool  # noqa: E402
 from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 
-from app.core.enums import ChapterStatus, SegmentType  # noqa: E402
+from app.core.enums import BookStatus, ChapterStatus, SegmentType  # noqa: E402
 from app.models import Book, Chapter, Segment  # noqa: E402
 from app.workers.tasks import _generate_chapter_impl, _make_chapter_stop_checker  # noqa: E402
 ok("_generate_chapter_impl, _make_chapter_stop_checker, models, enums")
@@ -123,6 +123,31 @@ def _make_chapter(engine, texts: list[str]):
         s.commit()
         ch_id = ch.id
     return ch_id
+
+
+def _make_book_with_chapters(engine, chapters_segments: list[list[str]]):
+    """Crée un Book GENERATING avec N chapitres PENDING, chacun ayant les
+    segments (textes) donnés. Retourne (book_id, [chapter_id, ...])."""
+    with Session(engine) as s:
+        book = Book(title="P33BookTest", source_path="/tmp/y.epub", status=BookStatus.GENERATING)
+        s.add(book)
+        s.commit()
+        s.refresh(book)
+        chapter_ids = []
+        for i, texts in enumerate(chapters_segments, start=1):
+            ch = Chapter(book_id=book.id, position=i, title=f"Ch{i}", raw_text="x")
+            s.add(ch)
+            s.commit()
+            s.refresh(ch)
+            for pos, text in enumerate(texts, start=1):
+                s.add(Segment(
+                    chapter_id=ch.id, position=pos, text=text,
+                    segment_type=SegmentType.NARRATION, character_id=None,
+                ))
+            s.commit()
+            chapter_ids.append(ch.id)
+        book_id = book.id
+    return book_id, chapter_ids
 
 
 class _CountingTTS:
@@ -214,6 +239,92 @@ with Session(_e5) as _s:
     _ch5_after = _s.get(Chapter, _ch5)
     check("chapitre DONE", _ch5_after.status == ChapterStatus.DONE, f"got {_ch5_after.status}")
     check("audio_path renseigné", bool(_ch5_after.audio_path))
+
+
+# ── 6. Génération pilotée par le livre : stop d'UN chapitre en cours ─────────
+# (audit 2026-07-11) -- avant ce lot, _generate_book_async ne surveillait QUE
+# Book.status (should_abort du niveau livre) ; Chapter.cancel_requested posé
+# par POST /books/{id}/chapters/{n}/stop sur le chapitre EN COURS de synthèse
+# pendant une génération de livre entier n'avait aucun effet : le chapitre se
+# terminait normalement, et le flag résiduel avortait juste la PROCHAINE
+# tentative standalone de ce chapitre au lieu de rien faire.
+section("Génération livre : Chapter.cancel_requested du chapitre en cours interrompt le RUN entier")
+_e6 = _make_test_engine()
+_book6_id, _chs6 = _make_book_with_chapters(_e6, [["Segment1"], ["SegmentA", "SegmentB", "SegmentC"]])
+
+
+def _cancel_chapter2_after_first_call(n: int) -> None:
+    # Se déclenche pendant la synthèse du CHAPITRE 2 (son 1er segment,
+    # 2e appel global) -- le chapitre 1 (1 seul segment) est déjà DONE ici.
+    if n == 2:
+        with Session(_e6) as s:
+            c = s.get(Chapter, _chs6[1])
+            c.cancel_requested = True
+            s.add(c)
+            s.commit()
+
+
+_tts6 = _CountingTTS(on_call=_cancel_chapter2_after_first_call)
+
+with (
+    patch("app.core.db.get_engine", return_value=_e6),
+    patch("app.services.tts.factory.get_tts_provider", return_value=_tts6),
+):
+    import asyncio as _asyncio6
+    from app.workers.tasks import _generate_book_async
+    _completed6 = _asyncio6.run(_generate_book_async(_book6_id, _e6))
+
+check("_generate_book_async retourne False (abandon)", _completed6 is False, f"got {_completed6}")
+check("2 segments synthétisés (chapitre 1 entier + 1er segment du chapitre 2)",
+      _tts6.calls == 2, f"got {_tts6.calls}")
+with Session(_e6) as _s:
+    _ch6_1_after = _s.get(Chapter, _chs6[0])
+    check("chapitre 1 DONE (terminé avant l'interruption)",
+          _ch6_1_after.status == ChapterStatus.DONE, f"got {_ch6_1_after.status}")
+    _ch6_2_after = _s.get(Chapter, _chs6[1])
+    check("chapitre 2 revenu à PENDING (interrompu)",
+          _ch6_2_after.status == ChapterStatus.PENDING, f"got {_ch6_2_after.status}")
+    check("cancel_requested du chapitre 2 remis à False (pas de fuite d'état)",
+          _ch6_2_after.cancel_requested is False)
+    _book6_after = _s.get(Book, _book6_id)
+    check("Book.status = FAILED (pas resté bloqué GENERATING pour toujours)",
+          _book6_after.status == BookStatus.FAILED, f"got {_book6_after.status}")
+    check("Book.error_message renseigné", bool(_book6_after.error_message))
+
+
+# ── 7. cancel_requested résiduel nettoyé au DÉMARRAGE d'une génération ───────
+# (audit 2026-07-11) -- scénario : un /stop cliqué juste après la synthèse du
+# DERNIER segment d'un chapitre arrive trop tard pour interrompre quoi que ce
+# soit (should_abort() n'est plus revérifié après le dernier segment) -- le
+# chapitre finit DONE avec cancel_requested=True résiduel, puisque seul le
+# chemin d'ABANDON remet le flag à False (jamais le chemin de succès). À la
+# régénération standalone suivante de CE MÊME chapitre, le flag résiduel
+# avorte la synthèse dès le premier segment -- une tentative fantôme perdue
+# avant que la vraie génération ne puisse démarrer.
+section("cancel_requested résiduel (d'un cycle précédent) nettoyé avant de démarrer -- pas d'avortement fantôme")
+_e7 = _make_test_engine()
+_ch7 = _make_chapter(_e7, ["Segment1", "Segment2"])
+with Session(_e7) as _s:
+    _c7 = _s.get(Chapter, _ch7)
+    _c7.cancel_requested = True  # résidu d'un cycle précédent, jamais nettoyé
+    _s.add(_c7)
+    _s.commit()
+
+_tts7 = _CountingTTS()
+
+with (
+    patch("app.core.db.get_engine", return_value=_e7),
+    patch("app.services.tts.factory.get_tts_provider", return_value=_tts7),
+):
+    _generate_chapter_impl(_ch7)
+
+check("2 segments synthétisés (pas d'avortement fantôme dès le 1er)",
+      _tts7.calls == 2, f"got {_tts7.calls}")
+with Session(_e7) as _s:
+    _ch7_after = _s.get(Chapter, _ch7)
+    check("chapitre DONE (le résidu n'a pas fait avorter cette tentative)",
+          _ch7_after.status == ChapterStatus.DONE, f"got {_ch7_after.status}")
+    check("cancel_requested toujours False après succès", _ch7_after.cancel_requested is False)
 
 
 # ── Résumé ───────────────────────────────────────────────────────────────────

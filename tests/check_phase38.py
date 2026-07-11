@@ -147,6 +147,21 @@ _resp_bad = _client.patch("/settings", json={"preferred_language": "de"})
 check("PATCH /settings preferred_language='de' (non supporté) -> 422",
       _resp_bad.status_code == 422, _resp_bad.text)
 
+# Régression (audit 2026-07-11) : PATCH ne doit affecter QUE les champs
+# envoyés -- avant fix, tout champ omis du body était réécrit à None (défaut
+# du schéma SettingsUpdate), effaçant silencieusement l'AUTRE préférence.
+_resp_provider = _client.patch("/settings", json={"preferred_tts_provider": "qwen"})
+check("PATCH /settings preferred_tts_provider='qwen' -> 200",
+      _resp_provider.status_code == 200, _resp_provider.text)
+_resp_lang_only = _client.patch("/settings", json={"preferred_language": "fr"})
+check("PATCH /settings {preferred_language} seul -> 200",
+      _resp_lang_only.status_code == 200, _resp_lang_only.text)
+check("preferred_tts_provider PAS effacé par un PATCH qui ne le mentionne pas",
+      _resp_lang_only.json().get("preferred_tts_provider") == "qwen",
+      f"got {_resp_lang_only.json()}")
+check("preferred_language mis à jour par le même PATCH",
+      _resp_lang_only.json().get("preferred_language") == "fr", f"got {_resp_lang_only.json()}")
+
 app.dependency_overrides.pop(get_session, None)
 
 
