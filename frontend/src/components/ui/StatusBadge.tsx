@@ -5,9 +5,11 @@ import { useT } from "@/lib/i18n/LanguageContext";
 
 export default function StatusBadge({
   status,
+  tone = "default",
   className = "",
 }: {
   status: string;
+  tone?: "default" | "on-image";
   className?: string;
 }) {
   const t = useT();
@@ -18,7 +20,9 @@ export default function StatusBadge({
           isActiveStatus(status) ? "animate-pulse" : ""
         }`}
       />
-      <span className="font-medium text-muted">{statusLabel(status, t)}</span>
+      <span className={`font-medium ${tone === "on-image" ? "text-white/80" : "text-muted"}`}>
+        {statusLabel(status, t)}
+      </span>
     </p>
   );
 }

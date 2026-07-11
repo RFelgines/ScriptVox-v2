@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.update({
     "LLM_PROVIDER": "ollama",
-    "TTS_PROVIDER": "piper",
+    "TTS_PROVIDER": "edgetts",
     "OLLAMA_BASE_URL": "http://localhost:11434",
     "OLLAMA_MODEL": "llama3",
     "OLLAMA_CONTEXT_TOKENS": "8192",
