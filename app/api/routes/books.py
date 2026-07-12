@@ -3,6 +3,7 @@ import mimetypes
 import os
 import shutil
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -24,7 +25,7 @@ from app.schemas.book import (
     SegmentResponse,
 )
 from app.services.voice_assignment import NARRATOR_VOICE_ID
-from app.workers.tasks import analyze_book, generate_book, generate_chapter
+from app.workers.tasks import analyze_book, generate_book, generate_chapter_queue_pump
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +305,11 @@ def trigger_chapter_generate(
             status_code=409,
             detail=f"Chapter {position} is already being generated.",
         )
-    generate_chapter(chapter.id)
+    chapter.queued_at = datetime.now(timezone.utc)
+    session.add(chapter)
+    session.commit()
+    session.refresh(chapter)
+    generate_chapter_queue_pump()
     return ChapterResponse.model_validate(chapter)
 
 
@@ -373,9 +378,16 @@ def trigger_all_chapters_generate(
     chapters = session.exec(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
     ).all()
+    now = datetime.now(timezone.utc)
+    queued_any = False
     for chapter in chapters:
         if chapter.status not in (ChapterStatus.DONE, ChapterStatus.GENERATING):
-            generate_chapter(chapter.id)
+            chapter.queued_at = now
+            session.add(chapter)
+            queued_any = True
+    if queued_any:
+        session.commit()
+        generate_chapter_queue_pump()
     return [ChapterResponse.model_validate(c) for c in chapters]
 
 

@@ -379,6 +379,11 @@ async def _generate_chapter_async(
         # reset, la PROCHAINE tentative de ce chapitre avorterait à vide dès
         # son premier segment, avant même de vraiment démarrer.
         chapter.cancel_requested = False
+        # Sort de la file immédiatement -- la pompe (generate_chapter_queue_pump)
+        # ne doit plus jamais reconsidérer ce chapitre une fois pris en charge,
+        # que la synthèse aboutisse, échoue ou soit abandonnée (audit
+        # 2026-07-11, Lot 3).
+        chapter.queued_at = None
         session.add(chapter)
         session.commit()
 
@@ -821,6 +826,34 @@ def _generate_chapter_impl(chapter_id: int) -> None:
         pass  # already persisted to Chapter.FAILED inside _generate_chapter_async
 
 
+def _generate_chapter_queue_pump_impl() -> None:
+    """Pompe la file de génération de chapitres (audit 2026-07-11, Lot 3) : traite
+    un chapitre EN FILE (status=PENDING, queued_at renseigné) à la fois, en
+    relisant priority DESC puis position ASC à CHAQUE tour de boucle -- pas une
+    capture figée au moment de l'enfilage, pour qu'un PATCH .../priority pendant
+    l'exécution change réellement le prochain chapitre choisi. S'arrête dès que
+    la file est vide. Suppose un seul worker Huey (start.bat -k thread -w 1) --
+    aucun verrou inter-process n'est nécessaire."""
+    from app.core.db import get_engine
+    from app.core.enums import ChapterStatus
+    from app.models import Chapter
+
+    engine = get_engine()
+
+    while True:
+        with Session(engine) as session:
+            next_chapter = session.exec(
+                select(Chapter)
+                .where(Chapter.status == ChapterStatus.PENDING, Chapter.queued_at.is_not(None))
+                .order_by(Chapter.priority.desc(), Chapter.position.asc())
+            ).first()
+            if next_chapter is None:
+                return
+            chapter_id = next_chapter.id
+
+        _generate_chapter_impl(chapter_id)
+
+
 def _process_book_impl(book_id: int) -> None:
     """Chains analyze + generate — preserved for backward compatibility."""
     from app.core.db import get_engine
@@ -962,6 +995,11 @@ def generate_book(book_id: int, force: bool = False) -> None:
 @huey.task()
 def generate_chapter(chapter_id: int) -> None:
     _generate_chapter_impl(chapter_id)
+
+
+@huey.task()
+def generate_chapter_queue_pump() -> None:
+    _generate_chapter_queue_pump_impl()
 
 
 @huey.task()

@@ -617,7 +617,7 @@ with Session(_3a_engine) as _s:
 
 
 # ── 17-20. Étape 3b — _generate_chapter_impl + POST /chapters/{n}/generate ───
-from app.workers.tasks import _generate_chapter_impl, generate_chapter as _generate_chapter_task  # noqa: E402
+from app.workers.tasks import _generate_chapter_impl, generate_chapter_queue_pump as _generate_chapter_queue_pump_task  # noqa: E402
 
 
 def _get_chapter_id(engine, book_id: int) -> int:
@@ -688,7 +688,7 @@ with tempfile.TemporaryDirectory() as _c18_tmp:
 
 
 # Section 19: POST /books/{id}/chapters/{n}/generate -> 202 + dispatch
-section("POST /books/{id}/chapters/{n}/generate — 202, generate_chapter dispatched")
+section("POST /books/{id}/chapters/{n}/generate — 202, queued_at posé + pompe dispatchée")
 
 _c19_engine = _make_test_engine()
 
@@ -706,8 +706,8 @@ with tempfile.TemporaryDirectory() as _c19_tmp:
     _c19_book_id = _seed_analyzed_book(_c19_engine, str(_c19_epub))
     _c19_ch_id = _get_chapter_id(_c19_engine, _c19_book_id)
 
-    _chapter_gen_calls: list = []
-    books_module.generate_chapter = lambda chapter_id: _chapter_gen_calls.append(chapter_id)
+    _pump_calls19: list = []
+    books_module.generate_chapter_queue_pump = lambda: _pump_calls19.append(1)
 
     with TestClient(app) as _tc:
         _r19 = _tc.post(f"/books/{_c19_book_id}/chapters/1/generate")
@@ -716,12 +716,13 @@ with tempfile.TemporaryDirectory() as _c19_tmp:
         assert _r19_data["position"] == 1, f"Expected position=1, got {_r19_data['position']}"
         assert _r19_data["status"] == "PENDING", f"Expected PENDING, got {_r19_data['status']}"
 
-    books_module.generate_chapter = _generate_chapter_task  # restore
+    books_module.generate_chapter_queue_pump = _generate_chapter_queue_pump_task  # restore
 
-    assert _chapter_gen_calls == [_c19_ch_id], (
-        f"Expected generate_chapter([{_c19_ch_id}]), got {_chapter_gen_calls}"
-    )
-    ok(f"202, generate_chapter called with chapter_id={_c19_ch_id}")
+    assert len(_pump_calls19) == 1, f"Expected pump dispatched once, got {len(_pump_calls19)}"
+    with Session(_c19_engine) as _s:
+        _c19_ch_after = _s.get(Chapter, _c19_ch_id)
+        assert _c19_ch_after.queued_at is not None, "Expected queued_at to be set"
+    ok(f"202, queued_at posé + pompe dispatchée (chapter_id={_c19_ch_id})")
 
 # Section 20: route guards (404 book, 404 chapter, 409 non-ANALYZED)
 section("POST /books/{id}/chapters/{n}/generate — 404/409 guards")
@@ -735,7 +736,7 @@ with Session(_c19_engine) as _s:
     _s.refresh(_c20_done_book)
     _c20_done_id = _c20_done_book.id
 
-books_module.generate_chapter = lambda chapter_id: None
+books_module.generate_chapter_queue_pump = lambda: None
 
 with TestClient(app, raise_server_exceptions=False) as _tc:
     # 404 book not found
@@ -753,7 +754,7 @@ with TestClient(app, raise_server_exceptions=False) as _tc:
     assert _r20c.status_code == 404, f"Expected 404 for missing chapter, got {_r20c.status_code}"
     ok("404 for non-existent chapter position")
 
-books_module.generate_chapter = _generate_chapter_task  # restore
+books_module.generate_chapter_queue_pump = _generate_chapter_queue_pump_task  # restore
 app.dependency_overrides.clear()
 
 
@@ -870,17 +871,18 @@ with Session(_c3c_engine) as _s:
     _c23_ch_id = _c23_ch.id
 
 _c23_calls: list = []
-books_module.generate_chapter = lambda chapter_id: _c23_calls.append(chapter_id)
+books_module.generate_chapter_queue_pump = lambda: _c23_calls.append(1)
 
 with TestClient(app) as _tc:
     _r23 = _tc.post(f"/books/{_c23_book_id}/chapters/1/generate")
     assert _r23.status_code == 202, f"Expected 202, got {_r23.status_code} ({_r23.text})"
 
-books_module.generate_chapter = _generate_chapter_task  # restore
+books_module.generate_chapter_queue_pump = _generate_chapter_queue_pump_task  # restore
 
-assert _c23_calls == [_c23_ch_id], (
-    f"Expected generate_chapter([{_c23_ch_id}]), got {_c23_calls}"
-)
+assert _c23_calls == [1], f"Expected pump dispatched once, got {_c23_calls}"
+with Session(_c3c_engine) as _s:
+    _c23_ch_after = _s.get(Chapter, _c23_ch_id)
+    assert _c23_ch_after.queued_at is not None, "Expected queued_at to be set"
 ok(f"202, re-dispatch accepted for DONE chapter (chapter_id={_c23_ch_id})")
 
 # Section 23b (Phase 22) — 409 if chapter already GENERATING (no duplicate Huey dispatch)
@@ -901,16 +903,16 @@ with Session(_c3c_engine) as _s:
     _s.commit()
 
 _c23b_calls: list = []
-books_module.generate_chapter = lambda chapter_id: _c23b_calls.append(chapter_id)
+books_module.generate_chapter_queue_pump = lambda: _c23b_calls.append(1)
 
 with TestClient(app, raise_server_exceptions=False) as _tc:
     _r23b = _tc.post(f"/books/{_c23b_book_id}/chapters/1/generate")
     assert _r23b.status_code == 409, f"Expected 409, got {_r23b.status_code} ({_r23b.text})"
 
-books_module.generate_chapter = _generate_chapter_task  # restore
+books_module.generate_chapter_queue_pump = _generate_chapter_queue_pump_task  # restore
 
-assert _c23b_calls == [], f"generate_chapter must NOT be dispatched, got {_c23b_calls}"
-ok("409 si chapitre déjà GENERATING, generate_chapter non dispatché (pas de doublon Huey)")
+assert _c23b_calls == [], f"pump must NOT be dispatched, got {_c23b_calls}"
+ok("409 si chapitre déjà GENERATING, pompe non dispatchée (pas de doublon Huey)")
 
 app.dependency_overrides.clear()
 
@@ -1081,10 +1083,12 @@ with Session(_call_engine) as _s:
     _s.refresh(_r29_ch2)
     _s.refresh(_r29_ch3)
     _s.refresh(_r29_ch4)
+    _r29_ch1_id = _r29_ch1.id
     _r29_ch2_id, _r29_ch3_id = _r29_ch2.id, _r29_ch3.id
+    _r29_ch4_id = _r29_ch4.id
 
 _r29_calls: list = []
-books_module.generate_chapter = lambda chapter_id: _r29_calls.append(chapter_id)
+books_module.generate_chapter_queue_pump = lambda: _r29_calls.append(1)
 
 with TestClient(app) as _tc:
     _r29 = _tc.post(f"/books/{_r29_book_id}/chapters/generate")
@@ -1092,13 +1096,21 @@ with TestClient(app) as _tc:
     _r29_data = _r29.json()
     assert len(_r29_data) == 4, f"Expected 4 chapters in response, got {len(_r29_data)}"
 
-books_module.generate_chapter = _generate_chapter_task  # restore
+books_module.generate_chapter_queue_pump = _generate_chapter_queue_pump_task  # restore
 
-assert sorted(_r29_calls) == sorted([_r29_ch2_id, _r29_ch3_id]), (
-    f"Expected generate_chapter called for PENDING+FAILED chapters only "
-    f"(DONE and GENERATING skipped) {[_r29_ch2_id, _r29_ch3_id]}, got {_r29_calls}"
+assert _r29_calls == [1], (
+    f"Expected pump dispatched exactly once (not per-chapter), got {_r29_calls}"
 )
-ok(f"202, generate_chapter dispatched for 2 chapters, DONE+GENERATING skipped (got {_r29_calls})")
+with Session(_call_engine) as _s:
+    _r29_ch1_after = _s.get(Chapter, _r29_ch1_id)
+    _r29_ch2_after = _s.get(Chapter, _r29_ch2_id)
+    _r29_ch3_after = _s.get(Chapter, _r29_ch3_id)
+    _r29_ch4_after = _s.get(Chapter, _r29_ch4_id)
+    assert _r29_ch1_after.queued_at is None, "DONE chapter must not be queued"
+    assert _r29_ch2_after.queued_at is not None, "PENDING chapter must be queued"
+    assert _r29_ch3_after.queued_at is not None, "FAILED chapter must be queued"
+    assert _r29_ch4_after.queued_at is None, "GENERATING chapter must not be re-queued"
+ok(f"202, pompe dispatchée une fois, queued_at posé sur PENDING+FAILED uniquement (book_id={_r29_book_id})")
 
 # ── Phase 17 — PATCH /books/{id}: provider TTS par livre ──────────────────────
 
