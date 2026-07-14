@@ -14,11 +14,17 @@ class SettingsResponse(BaseModel):
     # langue a déjà été détectée ou définie manuellement.
     preferred_language: str | None
     available_languages: list[str]
+    # Préférence LLM éditable en Paramètres, résolue par _effective_llm_provider
+    # à chaque run d'analyse (AppSetting > .env). None = défaut usine.
+    default_llm_provider: str
+    preferred_llm_provider: str | None
+    available_llm_providers: list[str]
 
 
 class SettingsUpdate(BaseModel):
     preferred_tts_provider: str | None = None
     preferred_language: str | None = None
+    preferred_llm_provider: str | None = None
 
 
 class ProviderStatus(BaseModel):

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_VALID_LLM = frozenset({"gemini", "ollama"})
+VALID_LLM_PROVIDERS = frozenset({"gemini", "ollama"})
 # "elevenlabs" retiré (2026-07-02, audit finding M2) : le provider n'a jamais pu
 # fonctionner (voice_id logiques du catalogue injectés tels quels dans une API qui
 # attend un UUID ElevenLabs, modèle codé en dur anglais-only) et n'était couvert par
@@ -22,10 +22,10 @@ def _require(name: str) -> str:
 class Settings:
     def __init__(self) -> None:
         self.llm_provider: str = _require("LLM_PROVIDER")
-        if self.llm_provider not in _VALID_LLM:
+        if self.llm_provider not in VALID_LLM_PROVIDERS:
             raise ValueError(
                 f"Invalid LLM_PROVIDER={self.llm_provider!r}. "
-                f"Accepted values: {sorted(_VALID_LLM)}"
+                f"Accepted values: {sorted(VALID_LLM_PROVIDERS)}"
             )
 
         self.tts_provider: str = _require("TTS_PROVIDER")
@@ -35,29 +35,45 @@ class Settings:
                 f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
             )
 
+        # Gemini settings — always populated (best-effort, no _require), regardless
+        # of which LLM provider is the global default: AppSetting.preferred_llm_provider
+        # can switch to Gemini at runtime even when .env default is Ollama.
+        # Fail-fast (ValueError) only when Gemini IS the global default.
+        self.gemini_api_key: str | None = os.environ.get("GEMINI_API_KEY", "").strip() or None
+        self.gemini_model: str | None = os.environ.get("GEMINI_MODEL", "").strip() or None
         if self.llm_provider == "gemini":
-            self.gemini_api_key: str = _require("GEMINI_API_KEY")
-            self.gemini_model: str = _require("GEMINI_MODEL")
+            if not self.gemini_api_key:
+                raise ValueError("Missing required env var: GEMINI_API_KEY")
+            if not self.gemini_model:
+                raise ValueError("Missing required env var: GEMINI_MODEL")
 
+        # Ollama settings — always populated (best-effort), fail-fast only when
+        # Ollama is the global default. Budget de découpe en chunks, découplé de la
+        # fenêtre de contexte : des chunks plus petits gardent la SORTIE JSON loin
+        # de la troncature. Voir ARCHITECTURE.md §2.5.
+        self.ollama_base_url: str | None = os.environ.get("OLLAMA_BASE_URL", "").strip() or None
+        self.ollama_model: str | None = os.environ.get("OLLAMA_MODEL", "").strip() or None
+        _ctx_raw = os.environ.get("OLLAMA_CONTEXT_TOKENS", "").strip()
+        self.ollama_context_tokens: int | None = int(_ctx_raw) if _ctx_raw else None
+        self.ollama_chunk_tokens: int = int(
+            os.environ.get("OLLAMA_CHUNK_TOKENS", "4000") or "4000"
+        )
+        self.ollama_connect_timeout: float = float(
+            os.environ.get("OLLAMA_CONNECT_TIMEOUT", "60") or "60"
+        )
+        self.ollama_read_timeout: float = float(
+            os.environ.get("OLLAMA_READ_TIMEOUT", "600") or "600"
+        )
+        self.ollama_timeout_per_1k_tokens: float = float(
+            os.environ.get("OLLAMA_TIMEOUT_PER_1K_TOKENS", "200") or "200"
+        )
         if self.llm_provider == "ollama":
-            self.ollama_base_url: str = _require("OLLAMA_BASE_URL")
-            self.ollama_model: str = _require("OLLAMA_MODEL")
-            self.ollama_context_tokens: int = int(_require("OLLAMA_CONTEXT_TOKENS"))
-            # Budget de découpe en chunks, découplé de la fenêtre de contexte : des chunks
-            # plus petits gardent la SORTIE JSON (liste d'attributions) loin de la troncature
-            # et permettent un num_ctx réduit 100% GPU. Voir ARCHITECTURE.md §2.5.
-            self.ollama_chunk_tokens: int = int(
-                os.environ.get("OLLAMA_CHUNK_TOKENS", "4000")
-            )
-            self.ollama_connect_timeout: float = float(
-                os.environ.get("OLLAMA_CONNECT_TIMEOUT", "60")
-            )
-            self.ollama_read_timeout: float = float(
-                os.environ.get("OLLAMA_READ_TIMEOUT", "600")
-            )
-            self.ollama_timeout_per_1k_tokens: float = float(
-                os.environ.get("OLLAMA_TIMEOUT_PER_1K_TOKENS", "200")
-            )
+            if not self.ollama_base_url:
+                raise ValueError("Missing required env var: OLLAMA_BASE_URL")
+            if not self.ollama_model:
+                raise ValueError("Missing required env var: OLLAMA_MODEL")
+            if not self.ollama_context_tokens:
+                raise ValueError("Missing required env var: OLLAMA_CONTEXT_TOKENS")
 
         # Piper/EdgeTTS/Qwen settings are ALWAYS populated (best-effort, no _require),
         # regardless of which provider is the global default: a book can override its

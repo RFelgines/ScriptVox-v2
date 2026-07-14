@@ -159,3 +159,7 @@ class AppSetting(SQLModel, table=True):
     # d'ingestion EPUB. Valeurs attendues : codes reconnus par
     # language_profiles.resolve_profile ("fr", "en").
     preferred_language: Optional[str] = None
+    # Préférence globale éditable en Paramètres. Résolue par
+    # app.workers.tasks._effective_llm_provider à chaque run d'analyse LLM.
+    # Miroir exact de preferred_tts_provider pour le provider LLM.
+    preferred_llm_provider: Optional[str] = None
