@@ -315,7 +315,11 @@ export default function PlayerBar() {
 
             {bookId && track.chapterPosition !== undefined && (
               <div className="w-full">
-                <ChapterTranscript bookId={bookId} chapterPosition={track.chapterPosition} />
+                <ChapterTranscript
+                  bookId={bookId}
+                  chapterPosition={track.chapterPosition}
+                  chapterDone={currentChapter?.status === "DONE"}
+                />
               </div>
             )}
           </div>

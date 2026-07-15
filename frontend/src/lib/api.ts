@@ -501,3 +501,45 @@ export async function generateAllChapters(bookId: number): Promise<ChapterSummar
   }
   return res.json();
 }
+
+export interface SegmentTake {
+  id: number;
+  segment_id: number;
+  audio_path: string | null;
+  voice_id: string;
+  emotion: string | null;
+  is_selected: boolean;
+  created_at: string;
+}
+
+export async function regenerateSegment(
+  bookId: number,
+  chapterPosition: number,
+  segmentId: number,
+  opts: { voice_id: string; emotion?: string },
+): Promise<SegmentTake> {
+  const res = await fetch(
+    `${API_URL}/books/${bookId}/chapters/${chapterPosition}/segments/${segmentId}/regenerate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    },
+  );
+  if (!res.ok) throw new Error(`POST regenerate failed: ${res.status}`);
+  return res.json();
+}
+
+export async function selectTake(
+  bookId: number,
+  chapterPosition: number,
+  segmentId: number,
+  takeId: number,
+): Promise<SegmentTake> {
+  const res = await fetch(
+    `${API_URL}/books/${bookId}/chapters/${chapterPosition}/segments/${segmentId}/takes/${takeId}/select`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`POST select failed: ${res.status}`);
+  return res.json();
+}
