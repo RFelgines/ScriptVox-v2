@@ -98,8 +98,9 @@ def update_app_settings(
     )
 
 
-def _probe_llm(settings: Settings) -> ProviderStatus:
-    if settings.llm_provider == "gemini":
+def _probe_llm(settings: Settings, provider_override: str | None = None) -> ProviderStatus:
+    effective = provider_override or settings.llm_provider
+    if effective == "gemini":
         return ProviderStatus(
             name=f"Gemini ({settings.gemini_model})",
             status="ok",
@@ -171,8 +172,9 @@ def get_app_status(
     cloned_count = session.exec(
         select(func.count()).select_from(Voice).where(Voice.kind == VoiceKind.CLONED)
     ).one()
+    row = _get_or_create_app_setting(session)
     return StatusResponse(
-        llm=_probe_llm(settings),
+        llm=_probe_llm(settings, provider_override=row.preferred_llm_provider),
         tts=_probe_tts(settings),
         cloned_voices_count=cloned_count,
     )
