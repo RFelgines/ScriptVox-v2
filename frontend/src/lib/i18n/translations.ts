@@ -106,6 +106,7 @@ export interface Dictionary {
     rateSelectAriaLabel: string;
     readByLabel: string;
     closePlayerAriaLabel: string;
+    audioError: string;
   };
   generation: {
     title: string;
@@ -367,6 +368,7 @@ const fr: Dictionary = {
     rateSelectAriaLabel: "Vitesse de lecture",
     readByLabel: "Lu par",
     closePlayerAriaLabel: "Fermer le lecteur",
+    audioError: "Lecture impossible",
   },
   generation: {
     title: "Génération",
@@ -645,6 +647,7 @@ const en: Dictionary = {
     rateSelectAriaLabel: "Playback speed",
     readByLabel: "Read by",
     closePlayerAriaLabel: "Close player",
+    audioError: "Playback error",
   },
   generation: {
     title: "Generation",
