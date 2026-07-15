@@ -258,6 +258,22 @@ def _release_qwen_gpu(provider) -> None:
         pass
 
 
+def _extract_wav_slice(wav_bytes: bytes, offset_ms: int, dur_ms: int) -> bytes:
+    """Extract a time window from assembled WAV bytes and return it as a standalone WAV."""
+    import io as _io, wave as _wave
+    with _wave.open(_io.BytesIO(wav_bytes), "rb") as src:
+        ch, sw, fr = src.getnchannels(), src.getsampwidth(), src.getframerate()
+        src.setpos(int(offset_ms * fr / 1000))
+        pcm = src.readframes(int(dur_ms * fr / 1000))
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as dst:
+        dst.setnchannels(ch)
+        dst.setsampwidth(sw)
+        dst.setframerate(fr)
+        dst.writeframes(pcm)
+    return buf.getvalue()
+
+
 def _make_chapter_stop_checker(engine, chapter_id: int) -> Callable[[], bool]:
     """Mirrors _make_book_stop_checker but polls Chapter.cancel_requested — used by
     standalone (non book-driven) chapter generation, which has no Book.status to
@@ -348,17 +364,51 @@ async def _generate_chapter_async(
         _Path(audio_path).write_bytes(wav_bytes)
 
         with Session(engine) as session:
+            from sqlalchemy import delete as _sa_delete
+            from app.core.enums import SegmentType as _SegType
+            from app.models.entities import Character as _Char, SegmentTake as _STake
+            from app.services.voice_assignment import NARRATOR_VOICE_ID as _NARRATOR
+
+            seg_ids = [sid for sid, _, _ in timing]
+            if seg_ids:
+                session.execute(_sa_delete(_STake).where(_STake.segment_id.in_(seg_ids)))
+            session.flush()
+
+            seg_voice: list[tuple[int, int, int, str]] = []
             for seg_id, offset_ms, dur_ms in timing:
                 seg = session.get(Segment, seg_id)
                 if seg:
                     seg.audio_offset_ms = offset_ms
                     seg.duration_ms = dur_ms
                     session.add(seg)
+                    if seg.segment_type == _SegType.NARRATION or seg.character_id is None:
+                        vid = _NARRATOR
+                    else:
+                        char = session.get(_Char, seg.character_id)
+                        vid = char.voice_id if char and char.voice_id else _NARRATOR
+                    seg_voice.append((seg_id, offset_ms, dur_ms, vid))
 
             chapter = session.get(Chapter, chapter_id)
             chapter.audio_path = audio_path
             chapter.status = ChapterStatus.DONE
             session.add(chapter)
+
+            takes_dir = DATA_DIR / str(book_id) / "takes"
+            takes_dir.mkdir(parents=True, exist_ok=True)
+            take_info: list[tuple] = []
+            for seg_id, offset_ms, dur_ms, vid in seg_voice:
+                take = _STake(segment_id=seg_id, voice_id=vid, is_selected=True)
+                session.add(take)
+                take_info.append((take, offset_ms, dur_ms))
+            session.flush()
+
+            for take, offset_ms, dur_ms in take_info:
+                wav_slice = _extract_wav_slice(wav_bytes, offset_ms, dur_ms)
+                take_path = str(takes_dir / f"{take.id}.wav")
+                _Path(take_path).write_bytes(wav_slice)
+                take.audio_path = take_path
+                session.add(take)
+
             session.commit()
         return True
 
