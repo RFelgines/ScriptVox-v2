@@ -107,6 +107,24 @@ class Segment(SQLModel, table=True):
 
     chapter: Optional["Chapter"] = Relationship(back_populates="segments")
     character: Optional["Character"] = Relationship(back_populates="segments")
+    takes: list["SegmentTake"] = Relationship(
+        back_populates="segment",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class SegmentTake(SQLModel, table=True):
+    __tablename__ = "segment_take"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    segment_id: int = Field(foreign_key="segment.id", index=True)
+    audio_path: Optional[str] = None
+    voice_id: str
+    emotion: Optional[str] = None
+    is_selected: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    segment: Optional["Segment"] = Relationship(back_populates="takes")
 
 
 class CharacterMergeSuggestion(SQLModel, table=True):
