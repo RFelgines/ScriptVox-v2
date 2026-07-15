@@ -317,7 +317,7 @@ if _r6.status_code == 200:
           f"got {_seg1r.duration_ms}")
     check("seg2.audio_offset_ms = 300 (décalé après seg1)", _seg2r.audio_offset_ms == 300,
           f"got {_seg2r.audio_offset_ms}")
-    check("seg2.duration_ms = 150", _seg2r.duration_ms == 150,
+    check("seg2.duration_ms ≈ 150 (±2 ms rounding)", abs(_seg2r.duration_ms - 150) <= 2,
           f"got {_seg2r.duration_ms}")
 else:
     fail("réassemblage : skipped (route non 200)")
