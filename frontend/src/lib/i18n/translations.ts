@@ -142,6 +142,12 @@ export interface Dictionary {
     clonedVoicesNone: string;
     clonedVoicesHintAvailable: string;
     clonedVoicesHintNone: string;
+    preferredLlmLabel: string;
+    preferredLlmHint: string;
+    privacyBadgeLocal: string;
+    privacyBadgeCloud: string;
+    testConnection: string;
+    testConnectionTesting: string;
   };
   book: {
     backToLibrary: string;
@@ -411,6 +417,12 @@ const fr: Dictionary = {
     clonedVoicesNone: "Aucune voix clonée",
     clonedVoicesHintAvailable: "Utilisables avec Qwen3-TTS uniquement — assignées en priorité lors de l'analyse.",
     clonedVoicesHintNone: "Ajoutez des voix depuis l'onglet Voix pour activer le clonage.",
+    preferredLlmLabel: "Moteur LLM préféré",
+    preferredLlmHint: "Détermine quel modèle analyse vos textes à chaque run. Pris en compte au prochain lancement d'analyse.",
+    privacyBadgeLocal: "🔒 Local — aucune donnée envoyée",
+    privacyBadgeCloud: "☁️ Cloud — textes envoyés à Google",
+    testConnection: "Tester la connexion",
+    testConnectionTesting: "Test en cours…",
   },
   book: {
     backToLibrary: "← Bibliothèque",
@@ -688,6 +700,12 @@ const en: Dictionary = {
     clonedVoicesNone: "No cloned voice",
     clonedVoicesHintAvailable: "Usable with Qwen3-TTS only — assigned as priority during analysis.",
     clonedVoicesHintNone: "Add voices from the Voices tab to enable cloning.",
+    preferredLlmLabel: "Preferred LLM engine",
+    preferredLlmHint: "Determines which model analyses your texts each run. Applied at the next analysis launch.",
+    privacyBadgeLocal: "🔒 Local — no data sent",
+    privacyBadgeCloud: "☁️ Cloud — texts sent to Google",
+    testConnection: "Test connection",
+    testConnectionTesting: "Testing…",
   },
   book: {
     backToLibrary: "← Library",

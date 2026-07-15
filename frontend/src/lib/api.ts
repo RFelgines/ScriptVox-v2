@@ -35,6 +35,9 @@ export interface AppSettings {
   default_tts_provider: string;
   preferred_tts_provider: string | null;
   available_tts_providers: string[];
+  default_llm_provider: string;
+  preferred_llm_provider: string | null;
+  available_llm_providers: string[];
 }
 
 export type ProviderStatusLevel = "ok" | "warning" | "error";
@@ -193,7 +196,7 @@ export async function getAppSettings(): Promise<AppSettings> {
 }
 
 export async function updateAppSettings(
-  patch: Partial<Pick<AppSettings, "preferred_tts_provider">>
+  patch: Partial<Pick<AppSettings, "preferred_tts_provider" | "preferred_llm_provider">>
 ): Promise<AppSettings> {
   const res = await fetch(`${API_URL}/settings`, {
     method: "PATCH",
