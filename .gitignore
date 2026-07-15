@@ -30,6 +30,7 @@ data/*
 
 # Isolated DATA_DIR for tests/check_phaseN.py (never the real data/ above)
 data_test/
+data_test_*/
 
 # Local test ebooks — copyrighted, never commit
 Ebook/
