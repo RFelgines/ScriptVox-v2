@@ -315,7 +315,9 @@ export default function BookDetailPage({
           if (keep) timer = setTimeout(tick, POLL_MS);
         })
         .catch((e) => {
-          if (active) setError(String(e));
+          if (!active) return;
+          setError(String(e));
+          timer = setTimeout(tick, POLL_MS * 2);
         })
         .finally(() => {
           if (active) setLoading(false);
