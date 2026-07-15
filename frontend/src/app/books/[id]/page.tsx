@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AppSettings,
@@ -72,6 +72,7 @@ export default function BookDetailPage({
   // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
+  const prevBookStatusRef = useRef<string | null>(null);
 
   // ── Casting (fusionné dans la page livre — plus de page dédiée) ────────────
   const [castingExpanded, setCastingExpanded] = useState(false);
@@ -309,6 +310,11 @@ export default function BookDetailPage({
         .then(([b, ch]) => {
           if (!active) return;
           setBook(b);
+          if (prevBookStatusRef.current !== null && prevBookStatusRef.current !== "ANALYZED" && b.status === "ANALYZED") {
+            setMergeReloadNonce((n) => n + 1);
+            setPendingVoices(new Map());
+          }
+          prevBookStatusRef.current = b.status;
           setChapters(ch);
           setError(null);
           const keep = bookActive(b.status) || ch.some((c) => chapterActive(c.status));
