@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { SegmentSummary, getChapterSegments, regenerateSegment } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import VoiceOrb from "@/components/VoiceOrb";
@@ -124,7 +124,7 @@ export default function ChapterTranscript({ bookId, chapterPosition, chapterDone
             if (seg.audio_offset_ms !== null) seek(seg.audio_offset_ms / 1000);
           }
 
-          function handleRegenerate(e: MouseEvent) {
+          function handleRegenerate(e: ReactMouseEvent<HTMLButtonElement>) {
             e.stopPropagation();
             setRegeneratingId(seg.id);
             regenerateSegment(bookId, chapterPosition, seg.id, {
