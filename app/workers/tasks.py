@@ -14,6 +14,17 @@ huey = SqliteHuey(filename=get_settings().huey_db_path)
 DATA_DIR = Path(get_settings().data_dir)
 
 
+def _effective_llm_provider(session: Session) -> str | None:
+    """Résout le provider LLM effectif : préférence globale
+    (AppSetting.preferred_llm_provider) > défaut usine (Settings.llm_provider, .env).
+    Retourne None si aucune préférence n'est définie -- get_llm_provider()
+    retombe alors sur Settings.llm_provider."""
+    from app.models import AppSetting
+
+    row = session.get(AppSetting, 1)
+    return row.preferred_llm_provider if row else None
+
+
 def _effective_tts_provider(session: Session, book_tts_provider: str | None) -> str | None:
     """Résout le provider TTS effectif : override par livre > préférence globale
     (AppSetting.preferred_tts_provider) > défaut usine (Settings.tts_provider, .env).
@@ -59,7 +70,7 @@ async def _analyze_book(
     assignment / ANALYZED on a False return."""
     from sqlalchemy import delete as sa_delete
 
-    from app.core.enums import BookStatus
+    from app.core.enums import BookStatus, MergeSuggestionStatus
     from app.models import Book, Character, CharacterMergeSuggestion, Segment
     from app.services.llm.base import (
         GEMINI_MAX_TOKENS,
@@ -70,11 +81,13 @@ async def _analyze_book(
     from app.services.llm import factory as llm_factory
 
     settings = get_settings()
-    provider = llm_factory.get_llm_provider(settings)
-
+    with Session(engine) as _s:
+        llm_override = _effective_llm_provider(_s)
+    provider = llm_factory.get_llm_provider(settings, override=llm_override)
+    effective_llm = llm_override or settings.llm_provider
     budget = (
         settings.ollama_chunk_tokens
-        if settings.llm_provider == "ollama"
+        if effective_llm == "ollama"
         else GEMINI_MAX_TOKENS
     )
 
@@ -130,6 +143,21 @@ async def _analyze_book(
                         "analyze_book: book_id=%d chapter %d/%d succeeded on attempt %d",
                         book_id, already_done + i + 1, total, attempt + 1,
                     )
+                    # Nettoie le message de retry laissé par la tentative ratée
+                    # ("[ch X/Y essai Z/3] ... nouvel essai dans 30s") -- jamais
+                    # effacé jusqu'ici si la tentative suivante réussissait, le
+                    # livre finissait ANALYZED avec un message de progression
+                    # périmé exposé par l'API (audit 2026-07-11). Gardé derrière
+                    # `status != FAILED` : un /stop a pu survenir PENDANT le
+                    # sleep entre deux tentatives (la boucle ne le revérifie pas
+                    # avant de retenter) -- ne jamais écraser l'arrêt utilisateur
+                    # légitime qui a déjà positionné error_message avant nous.
+                    with Session(engine) as _s:
+                        _b = _s.get(Book, book_id)
+                        if _b and _b.status != BookStatus.FAILED:
+                            _b.error_message = None
+                            _s.add(_b)
+                            _s.commit()
                 last_exc = None
                 break
             except Exception as exc:
@@ -218,6 +246,23 @@ async def _analyze_book(
             logger.exception("suggest_merges failed for book_id=%s (non-blocking)", book_id)
             suggestions = []
 
+        # Purge les suggestions PENDING existantes avant d'insérer les
+        # nouvelles (audit 2026-07-11) : ce bloc tourne aussi lors d'une
+        # reprise d'analyse, sans jamais avoir purgé les suggestions d'un
+        # passage précédent (la purge de CharacterMergeSuggestion n'existe que
+        # dans la branche non-resume de _analyze_book_impl) -- doublons PENDING
+        # accumulés à chaque reprise. Purgée même si `suggestions` est vide :
+        # une reprise qui ne retrouve plus de doublon (casting changé entre
+        # temps) ne doit pas laisser une suggestion PENDING périmée.
+        with Session(engine) as session:
+            session.execute(
+                sa_delete(CharacterMergeSuggestion).where(
+                    CharacterMergeSuggestion.book_id == book_id,
+                    CharacterMergeSuggestion.status == MergeSuggestionStatus.PENDING,
+                )
+            )
+            session.commit()
+
         if suggestions:
             name_to_id = {c.name: c.id for c in characters}
             with Session(engine) as session:
@@ -258,6 +303,22 @@ def _release_qwen_gpu(provider) -> None:
         pass
 
 
+def _extract_wav_slice(wav_bytes: bytes, offset_ms: int, dur_ms: int) -> bytes:
+    """Extract a time window from assembled WAV bytes and return it as a standalone WAV."""
+    import io as _io, wave as _wave
+    with _wave.open(_io.BytesIO(wav_bytes), "rb") as src:
+        ch, sw, fr = src.getnchannels(), src.getsampwidth(), src.getframerate()
+        src.setpos(int(offset_ms * fr / 1000))
+        pcm = src.readframes(int(dur_ms * fr / 1000))
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as dst:
+        dst.setnchannels(ch)
+        dst.setsampwidth(sw)
+        dst.setframerate(fr)
+        dst.writeframes(pcm)
+    return buf.getvalue()
+
+
 def _make_chapter_stop_checker(engine, chapter_id: int) -> Callable[[], bool]:
     """Mirrors _make_book_stop_checker but polls Chapter.cancel_requested — used by
     standalone (non book-driven) chapter generation, which has no Book.status to
@@ -286,6 +347,25 @@ def _make_book_stop_checker(engine, book_id: int) -> Callable[[], bool]:
         with Session(engine) as s:
             b = s.get(Book, book_id)
             return b is None or b.status == BookStatus.FAILED
+
+    return _should_abort
+
+
+def _make_chapter_or_book_stop_checker(
+    engine, book_id: int, chapter_id: int,
+) -> Callable[[], bool]:
+    """OR of the book-level and chapter-level stop checkers — used by book-driven
+    generation (_generate_book_async) so that stopping the ONE chapter currently
+    being synthesised (POST /books/{id}/chapters/{n}/stop, Chapter.cancel_requested)
+    takes effect immediately, not just Book.status (audit 2026-07-11: before this,
+    a per-chapter stop clicked during a whole-book run had no effect at all — the
+    chapter just finished normally, and the residual flag silently aborted the
+    NEXT unrelated standalone dispatch of that same chapter instead)."""
+    book_check = _make_book_stop_checker(engine, book_id)
+    chapter_check = _make_chapter_stop_checker(engine, chapter_id)
+
+    def _should_abort() -> bool:
+        return book_check() or chapter_check()
 
     return _should_abort
 
@@ -321,6 +401,18 @@ async def _generate_chapter_async(
         position = chapter.position
         chapter.status = ChapterStatus.GENERATING
         chapter.error_message = None
+        # Nettoie un cancel_requested résiduel d'un cycle précédent (audit
+        # 2026-07-11) : un /stop cliqué juste après le DERNIER segment arrive
+        # trop tard pour être revérifié -- le chapitre finit DONE avec le flag
+        # toujours à True (seul le chemin d'abandon le remet à False). Sans ce
+        # reset, la PROCHAINE tentative de ce chapitre avorterait à vide dès
+        # son premier segment, avant même de vraiment démarrer.
+        chapter.cancel_requested = False
+        # Sort de la file immédiatement -- la pompe (generate_chapter_queue_pump)
+        # ne doit plus jamais reconsidérer ce chapitre une fois pris en charge,
+        # que la synthèse aboutisse, échoue ou soit abandonnée (audit
+        # 2026-07-11, Lot 3).
+        chapter.queued_at = None
         session.add(chapter)
         session.commit()
 
@@ -348,17 +440,51 @@ async def _generate_chapter_async(
         _Path(audio_path).write_bytes(wav_bytes)
 
         with Session(engine) as session:
+            from sqlalchemy import delete as _sa_delete
+            from app.core.enums import SegmentType as _SegType
+            from app.models.entities import Character as _Char, SegmentTake as _STake
+            from app.services.voice_assignment import NARRATOR_VOICE_ID as _NARRATOR
+
+            seg_ids = [sid for sid, _, _ in timing]
+            if seg_ids:
+                session.execute(_sa_delete(_STake).where(_STake.segment_id.in_(seg_ids)))
+            session.flush()
+
+            seg_voice: list[tuple[int, int, int, str]] = []
             for seg_id, offset_ms, dur_ms in timing:
                 seg = session.get(Segment, seg_id)
                 if seg:
                     seg.audio_offset_ms = offset_ms
                     seg.duration_ms = dur_ms
                     session.add(seg)
+                    if seg.segment_type == _SegType.NARRATION or seg.character_id is None:
+                        vid = _NARRATOR
+                    else:
+                        char = session.get(_Char, seg.character_id)
+                        vid = char.voice_id if char and char.voice_id else _NARRATOR
+                    seg_voice.append((seg_id, offset_ms, dur_ms, vid))
 
             chapter = session.get(Chapter, chapter_id)
             chapter.audio_path = audio_path
             chapter.status = ChapterStatus.DONE
             session.add(chapter)
+
+            takes_dir = DATA_DIR / str(book_id) / "takes"
+            takes_dir.mkdir(parents=True, exist_ok=True)
+            take_info: list[tuple] = []
+            for seg_id, offset_ms, dur_ms, vid in seg_voice:
+                take = _STake(segment_id=seg_id, voice_id=vid, is_selected=True)
+                session.add(take)
+                take_info.append((take, offset_ms, dur_ms))
+            session.flush()
+
+            for take, offset_ms, dur_ms in take_info:
+                wav_slice = _extract_wav_slice(wav_bytes, offset_ms, dur_ms)
+                take_path = str(takes_dir / f"{take.id}.wav")
+                _Path(take_path).write_bytes(wav_slice)
+                take.audio_path = take_path
+                session.add(take)
+
             session.commit()
         return True
 
@@ -389,7 +515,7 @@ async def _generate_book_async(book_id: int, engine) -> bool:
     reprise), False if aborted by /stop. Raises on a genuine chapter failure (a
     real TTSError, not an abort) -- the caller's except block fails the whole book,
     reusing the existing book-level error handling unchanged."""
-    from app.core.enums import ChapterStatus
+    from app.core.enums import BookStatus, ChapterStatus
     from app.models import Book, Chapter
 
     should_abort = _make_book_stop_checker(engine, book_id)
@@ -402,7 +528,14 @@ async def _generate_book_async(book_id: int, engine) -> bool:
 
     total = len(pending)
     if total == 0:
-        return True
+        # Defense in depth (audit 2026-07-11): the API route already rejects
+        # this with a 409 before ever dispatching generate_book, but treating
+        # an empty chapter list as trivially "complete" here let ANY caller
+        # (e.g. the legacy process_book chain, or a future one) mark a book
+        # DONE/progress=100 with audio_path=None — a book that lies about
+        # being finished. A book with zero chapters never finished analysis;
+        # that is a failure, not a no-op success.
+        raise ValueError(f"Book {book_id} has no chapters — analysis never completed")
 
     done_count = sum(1 for _, status in pending if status == ChapterStatus.DONE)
 
@@ -415,8 +548,28 @@ async def _generate_book_async(book_id: int, engine) -> bool:
         if status == ChapterStatus.DONE:
             continue  # reprise -- déjà généré (résume-après-échec uniquement)
 
-        completed = await _generate_chapter_async(chapter_id, engine, should_abort=should_abort)
+        # Combine le checker livre avec celui de CE chapitre : Chapter.cancel_requested
+        # posé par POST /books/{id}/chapters/{n}/stop sur le chapitre en cours de
+        # synthèse pendant une génération pilotée par le livre était jusqu'ici
+        # invisible ici (should_abort ne surveillait que Book.status) -- le flag
+        # ne prenait effet que lors d'une future tentative standalone de ce même
+        # chapitre (audit 2026-07-11).
+        chapter_abort = _make_chapter_or_book_stop_checker(engine, book_id, chapter_id)
+        completed = await _generate_chapter_async(chapter_id, engine, should_abort=chapter_abort)
         if not completed:
+            # L'abandon peut venir du flag de CE chapitre plutôt que de
+            # Book.status (déjà FAILED par la route /stop niveau livre) -- si
+            # c'est le cas, Book.status est encore GENERATING ici et doit être
+            # basculé nous-mêmes, sinon le livre reste bloqué GENERATING pour
+            # toujours (aucun code ne le fait jamais avancer autrement).
+            with Session(engine) as session:
+                book = session.get(Book, book_id)
+                if book is not None and book.status == BookStatus.GENERATING:
+                    book.status = BookStatus.FAILED
+                    book.error_message = "Arrêté par l'utilisateur."
+                    book.failed_stage = "generation"
+                    session.add(book)
+                    session.commit()
             return False
 
         done_count += 1
@@ -448,6 +601,7 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
         book.status = BookStatus.PROCESSING
         book.progress = 0.0
         book.error_message = None
+        book.failed_stage = None  # nettoie une valeur périmée d'une tentative précédente
         session.add(book)
         session.commit()
 
@@ -579,11 +733,12 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             if book:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
+                book.failed_stage = "analysis"
                 session.add(book)
                 session.commit()
 
 
-def _generate_book_impl(book_id: int) -> None:
+def _generate_book_impl(book_id: int, force: bool = False) -> None:
     from app.core.db import get_engine
     from app.core.enums import BookStatus, ChapterStatus
     from app.models import Book, Chapter
@@ -602,19 +757,24 @@ def _generate_book_impl(book_id: int) -> None:
             )
             return
         source_path = book.source_path
-        previous_status = book.status
         book.status = BookStatus.GENERATING
         book.progress = 0.0
         book.error_message = None
+        book.failed_stage = None  # nettoie une valeur périmée d'une tentative précédente
         session.add(book)
         session.commit()
 
-    # Reprise (skip chapters already DONE) only applies when resuming after a
-    # failure — a fresh "Générer"/"Regénérer" click on ANALYZED/DONE must redo
-    # everything, so every chapter is reset to PENDING first (mirrors
-    # _analyze_book_impl's resume_requested/force pattern; audit 2026-07-02 Lot C).
-    resume = previous_status == BookStatus.FAILED
-    if not resume:
+    # Chapters already DONE are reset (and fully resynthesised) ONLY on an
+    # explicit force=True — otherwise ALWAYS preserved, whatever the book's
+    # previous status, and only whatever is missing gets filled in (audit
+    # 2026-07-11: a book left ANALYZED after per-chapter generation — the
+    # normal state until "Générer l'audio" is clicked once at the book level
+    # — used to have EVERY already-DONE chapter unconditionally reset and
+    # resynthesised from scratch, discarding potentially hours of TTS work
+    # the moment that button was pressed. Only a resume-after-FAILED used to
+    # preserve DONE chapters; that is now the default in every case, and
+    # force=True is the explicit separate action for a real full regeneration).
+    if force:
         with Session(engine) as session:
             chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
             for c in chapters:
@@ -681,6 +841,7 @@ def _generate_book_impl(book_id: int) -> None:
             if book:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
+                book.failed_stage = "generation"
                 session.add(book)
                 session.commit()
 
@@ -728,6 +889,34 @@ def _generate_chapter_impl(chapter_id: int) -> None:
         pass  # already persisted to Chapter.FAILED inside _generate_chapter_async
 
 
+def _generate_chapter_queue_pump_impl() -> None:
+    """Pompe la file de génération de chapitres (audit 2026-07-11, Lot 3) : traite
+    un chapitre EN FILE (status=PENDING, queued_at renseigné) à la fois, en
+    relisant priority DESC puis position ASC à CHAQUE tour de boucle -- pas une
+    capture figée au moment de l'enfilage, pour qu'un PATCH .../priority pendant
+    l'exécution change réellement le prochain chapitre choisi. S'arrête dès que
+    la file est vide. Suppose un seul worker Huey (start.bat -k thread -w 1) --
+    aucun verrou inter-process n'est nécessaire."""
+    from app.core.db import get_engine
+    from app.core.enums import ChapterStatus
+    from app.models import Chapter
+
+    engine = get_engine()
+
+    while True:
+        with Session(engine) as session:
+            next_chapter = session.exec(
+                select(Chapter)
+                .where(Chapter.status == ChapterStatus.PENDING, Chapter.queued_at.is_not(None))
+                .order_by(Chapter.priority.desc(), Chapter.position.asc())
+            ).first()
+            if next_chapter is None:
+                return
+            chapter_id = next_chapter.id
+
+        _generate_chapter_impl(chapter_id)
+
+
 def _process_book_impl(book_id: int) -> None:
     """Chains analyze + generate — preserved for backward compatibility."""
     from app.core.db import get_engine
@@ -761,12 +950,20 @@ def _generate_voice_sample_impl(voice_id: str) -> None:
     from app.models.entities import Voice
 
     settings = get_settings()
-    if settings.tts_provider != "qwen":
-        logger.info("generate_voice_sample: skipped (TTS_PROVIDER=%s)", settings.tts_provider)
-        return
-
     engine = get_engine()
     with Session(engine) as session:
+        # Même résolution que la route (_effective_tts_provider) : regarder
+        # uniquement settings.tts_provider (.env brut) ignorait la préférence
+        # globale AppSetting.preferred_tts_provider, laissant ce no-op se
+        # déclencher en silence même quand la route avait accepté la requête
+        # sur la base du provider effectif (audit 2026-07-11).
+        effective_provider = _effective_tts_provider(session, None) or settings.tts_provider
+        if effective_provider != "qwen":
+            logger.info(
+                "generate_voice_sample: skipped (effective TTS provider=%s)", effective_provider,
+            )
+            return
+
         voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
         if voice is None or voice.kind != VoiceKind.CLONED or voice.reference_audio_path is None:
             logger.warning("generate_voice_sample: voice %r not found or no ref audio", voice_id)
@@ -794,6 +991,55 @@ def _generate_voice_sample_impl(voice_id: str) -> None:
         _release_qwen_gpu(provider)
 
 
+@huey.on_startup()
+def _reconcile_zombie_state() -> None:
+    """Runs once when the Huey consumer (re)starts. A Book left PROCESSING or
+    GENERATING, or a Chapter left GENERATING, can only mean the PREVIOUS
+    worker process died mid-task (SqliteHuey never replays a task it already
+    picked up, and this app runs exactly one worker) — nothing can
+    legitimately still be "in flight" the instant this process starts. Left
+    alone, a zombie Book is only reachable through an undocumented detour
+    (/stop happens to accept PROCESSING/GENERATING even with no worker alive
+    to see it), and a zombie standalone Chapter has NO way out at all:
+    regenerating it 409s ("already generating"), and its own /stop just sets
+    a flag nothing will ever poll again. Sweeping both here on startup turns
+    that dead end into the normal FAILED/PENDING state the existing
+    resume/retry UI already knows how to handle (audit 2026-07-11)."""
+    from app.core.db import get_engine
+    from app.core.enums import BookStatus, ChapterStatus
+    from app.models import Book, Chapter
+
+    engine = get_engine()
+    with Session(engine) as session:
+        zombie_books = session.exec(
+            select(Book).where(Book.status.in_((BookStatus.PROCESSING, BookStatus.GENERATING)))
+        ).all()
+        for book in zombie_books:
+            # Lire le statut D'ORIGINE avant de l'écraser -- c'est lui qui dit
+            # quelle étape était en cours (audit 2026-07-11, T2.3).
+            book.failed_stage = "analysis" if book.status == BookStatus.PROCESSING else "generation"
+            book.status = BookStatus.FAILED
+            book.error_message = "Worker interrompu (redémarrage) — reprendre l'analyse/génération."
+            session.add(book)
+
+        zombie_chapters = session.exec(
+            select(Chapter).where(Chapter.status == ChapterStatus.GENERATING)
+        ).all()
+        for chapter in zombie_chapters:
+            chapter.status = ChapterStatus.PENDING
+            chapter.cancel_requested = False
+            chapter.error_message = None
+            session.add(chapter)
+
+        session.commit()
+
+    if zombie_books or zombie_chapters:
+        logger.warning(
+            "worker startup: reconciled %d zombie book(s), %d zombie chapter(s)",
+            len(zombie_books), len(zombie_chapters),
+        )
+
+
 @huey.task()
 def generate_voice_sample(voice_id: str) -> None:
     _generate_voice_sample_impl(voice_id)
@@ -805,13 +1051,92 @@ def analyze_book(book_id: int, force: bool = False) -> None:
 
 
 @huey.task()
-def generate_book(book_id: int) -> None:
-    _generate_book_impl(book_id)
+def generate_book(book_id: int, force: bool = False) -> None:
+    _generate_book_impl(book_id, force)
 
 
 @huey.task()
 def generate_chapter(chapter_id: int) -> None:
     _generate_chapter_impl(chapter_id)
+
+
+async def _generate_segment_async(take_id: int, engine) -> None:
+    """Synthesise one SegmentTake: TTS → WAV on disk → take.audio_path updated."""
+    from pathlib import Path as _Path
+
+    from sqlmodel import select as _select
+
+    from app.models.entities import SegmentTake, Voice
+    from app.models import Book, Chapter, Segment
+    from app.services.audio.chapter import _synthesise_with_retry
+    from app.services.tts import factory as tts_factory
+
+    settings = get_settings()
+
+    with Session(engine) as session:
+        take = session.get(SegmentTake, take_id)
+        if take is None:
+            logger.error("generate_segment: unknown take_id=%d", take_id)
+            return
+        segment = session.get(Segment, take.segment_id)
+        if segment is None:
+            logger.error("generate_segment: segment missing for take_id=%d", take_id)
+            return
+        chapter = session.get(Chapter, segment.chapter_id)
+        if chapter is None:
+            logger.error("generate_segment: chapter missing for take_id=%d", take_id)
+            return
+        book = session.get(Book, chapter.book_id)
+
+        voice_id = take.voice_id
+        emotion = take.emotion
+        seg_text = segment.text
+        book_id = chapter.book_id
+
+        v = session.exec(_select(Voice).where(Voice.voice_id == voice_id)).first()
+        ref_path = v.reference_audio_path if v else None
+
+        provider = tts_factory.get_tts_provider(
+            settings,
+            override=_effective_tts_provider(session, book.tts_provider if book else None),
+            language=book.language if book else None,
+        )
+
+    try:
+        wav_bytes = await _synthesise_with_retry(
+            provider, seg_text, voice_id,
+            emotion=emotion, reference_audio_path=ref_path,
+        )
+    finally:
+        _release_qwen_gpu(provider)
+
+    takes_dir = DATA_DIR / str(book_id) / "takes"
+    takes_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = str(takes_dir / f"{take_id}.wav")
+    _Path(audio_path).write_bytes(wav_bytes)
+
+    with Session(engine) as session:
+        take = session.get(SegmentTake, take_id)
+        if take:
+            take.audio_path = audio_path
+            session.add(take)
+            session.commit()
+
+
+def _generate_segment_impl(take_id: int) -> None:
+    from app.core.db import get_engine
+    engine = get_engine()
+    asyncio.run(_generate_segment_async(take_id, engine))
+
+
+@huey.task()
+def generate_segment(take_id: int) -> None:
+    _generate_segment_impl(take_id)
+
+
+@huey.task()
+def generate_chapter_queue_pump() -> None:
+    _generate_chapter_queue_pump_impl()
 
 
 @huey.task()

@@ -1,7 +1,10 @@
+import logging
 import mimetypes
 import os
 import shutil
 import uuid
+from datetime import datetime, timezone
+import wave
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -12,7 +15,7 @@ from app.config import VALID_TTS_PROVIDERS, get_settings
 from app.core.db import get_session
 from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus, SegmentType
 from app.core.uploads import read_upload_capped
-from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment
+from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment, SegmentTake
 from app.schemas.book import (
     BookResponse,
     BookUpdate,
@@ -20,10 +23,21 @@ from app.schemas.book import (
     ChapterResponse,
     CharacterResponse,
     MergeSuggestionResponse,
+    RegenerateSegmentRequest,
     SegmentResponse,
+    SegmentTakeResponse,
 )
+from app.services.audio.assembler import assemble_wav_from_files
 from app.services.voice_assignment import NARRATOR_VOICE_ID
-from app.workers.tasks import analyze_book, generate_book, generate_chapter
+from app.workers.tasks import (
+    analyze_book,
+    generate_book,
+    generate_chapter,
+    generate_chapter_queue_pump,
+    generate_segment,
+)
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(get_settings().data_dir)
 
@@ -49,7 +63,7 @@ async def upload_book(
     if not file.filename or not file.filename.lower().endswith(".epub"):
         raise HTTPException(status_code=422, detail="Only .epub files are accepted.")
 
-    DATA_DIR.mkdir(exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     # The client-supplied filename is never used in the disk path (only as the book
     # title, below) -- it's untrusted input (audit 2026-07-07, P1).
     dest = DATA_DIR / f"{uuid.uuid4().hex}.epub"
@@ -141,6 +155,9 @@ def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookR
             status_code=409,
             detail=f"Book {book_id} is not in progress (status={book.status.value}).",
         )
+    # Lire le statut D'ORIGINE avant de l'écraser -- c'est lui qui dit quelle
+    # étape était en cours (audit 2026-07-11, T2.3).
+    book.failed_stage = "analysis" if book.status == BookStatus.PROCESSING else "generation"
     book.status = BookStatus.FAILED
     book.error_message = "Arrêté par l'utilisateur."
     session.add(book)
@@ -150,7 +167,9 @@ def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookR
 
 
 @router.post("/{book_id}/generate", response_model=BookResponse, status_code=202)
-def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> BookResponse:
+def trigger_generate(
+    book_id: int, force: bool = False, session: Session = Depends(get_session)
+) -> BookResponse:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
@@ -165,7 +184,38 @@ def trigger_generate(book_id: int, session: Session = Depends(get_session)) -> B
                 "Expected ANALYZED, DONE or FAILED."
             ),
         )
-    generate_book(book.id)
+    # FAILED can mean the ANALYSIS itself never completed (0 chapters — e.g. a
+    # corrupt EPUB — or some chapters never reached by an interrupted LLM pass),
+    # not just an interrupted/failed GENERATION. Without this guard the book
+    # either ends up DONE with audio_path=None (0 chapters: _generate_book_async
+    # treats an empty chapter list as trivially "complete") or FAILED with a
+    # cryptic "Chapter N has no segments to synthesise" deep in synthesis
+    # (audit 2026-07-11).
+    chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+    if not chapters:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Book {book_id} has no chapters — analysis never completed. "
+                "Run POST /analyze first."
+            ),
+        )
+    chapter_ids = [c.id for c in chapters]
+    analyzed_chapter_ids = set(
+        session.exec(
+            select(Segment.chapter_id).where(Segment.chapter_id.in_(chapter_ids)).distinct()
+        ).all()
+    )
+    missing_positions = sorted(c.position for c in chapters if c.id not in analyzed_chapter_ids)
+    if missing_positions:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Book {book_id} analysis is incomplete — chapter(s) {missing_positions} have "
+                "no segments. Resume analysis (POST /analyze) before generating."
+            ),
+        )
+    generate_book(book.id, force)
     return BookResponse.model_validate(book)
 
 
@@ -265,7 +315,11 @@ def trigger_chapter_generate(
             status_code=409,
             detail=f"Chapter {position} is already being generated.",
         )
-    generate_chapter(chapter.id)
+    chapter.queued_at = datetime.now(timezone.utc)
+    session.add(chapter)
+    session.commit()
+    session.refresh(chapter)
+    generate_chapter_queue_pump()
     return ChapterResponse.model_validate(chapter)
 
 
@@ -334,9 +388,16 @@ def trigger_all_chapters_generate(
     chapters = session.exec(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
     ).all()
+    now = datetime.now(timezone.utc)
+    queued_any = False
     for chapter in chapters:
         if chapter.status not in (ChapterStatus.DONE, ChapterStatus.GENERATING):
-            generate_chapter(chapter.id)
+            chapter.queued_at = now
+            session.add(chapter)
+            queued_any = True
+    if queued_any:
+        session.commit()
+        generate_chapter_queue_pump()
     return [ChapterResponse.model_validate(c) for c in chapters]
 
 
@@ -375,6 +436,11 @@ def get_chapter_audio(
                 f"Use POST /books/{book_id}/chapters/{position}/generate first."
             ),
         )
+    if not chapter.audio_path:
+        # Défensif : incohérence DONE + audio_path=None (base ancienne, édition
+        # manuelle) -- Path(None) lève un TypeError brut -> 500 sinon. Même
+        # filtre que l'assembleur livre (tasks.py: `if c.audio_path`).
+        raise HTTPException(status_code=404, detail="Audio file not found on disk.")
     path = Path(chapter.audio_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk.")
@@ -432,6 +498,166 @@ def get_chapter_segments(
     return results
 
 
+def _reassemble_chapter_if_possible(chapter: Chapter, session: Session) -> None:
+    """Reassemble chapter WAV from each segment's selected take (disk-to-disk).
+
+    Skips silently if any segment has no selected take with a valid audio_path on
+    disk — callers should not error in that case, the chapter WAV simply stays as-is.
+    When all takes are present: overwrites chapter.audio_path and updates every
+    Segment.audio_offset_ms / duration_ms.
+    """
+    segments = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id).order_by(Segment.position)
+    ).all()
+
+    take_paths: list[Path] = []
+    for seg in segments:
+        sel = session.exec(
+            select(SegmentTake).where(
+                SegmentTake.segment_id == seg.id,
+                SegmentTake.is_selected == True,  # noqa: E712
+            )
+        ).first()
+        if sel is None or not sel.audio_path:
+            return
+        p = Path(sel.audio_path)
+        if not p.exists():
+            return
+        take_paths.append(p)
+
+    if not take_paths:
+        return
+
+    out_path = (
+        Path(chapter.audio_path) if chapter.audio_path
+        else DATA_DIR / str(chapter.book_id) / f"ch{chapter.position}.wav"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    assemble_wav_from_files(take_paths, out_path)
+
+    if not chapter.audio_path:
+        chapter.audio_path = str(out_path)
+        session.add(chapter)
+
+    offset = 0
+    for seg, path in zip(segments, take_paths):
+        with wave.open(str(path), "rb") as w:
+            dur = int(w.getnframes() / w.getframerate() * 1000)
+        seg.audio_offset_ms = offset
+        seg.duration_ms = dur
+        session.add(seg)
+        offset += dur
+
+    session.commit()
+
+
+@router.post(
+    "/{book_id}/chapters/{position}/segments/{segment_id}/regenerate",
+    response_model=SegmentTakeResponse,
+    status_code=202,
+)
+def regenerate_segment(
+    book_id: int,
+    position: int,
+    segment_id: int,
+    body: RegenerateSegmentRequest,
+    session: Session = Depends(get_session),
+) -> SegmentTakeResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    segment = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id, Segment.id == segment_id)
+    ).first()
+    if segment is None:
+        raise HTTPException(
+            status_code=404, detail=f"Segment {segment_id} not found in chapter {position}."
+        )
+
+    voice_id = body.voice_id
+    if voice_id is None:
+        if segment.character_id:
+            char = session.get(Character, segment.character_id)
+            voice_id = char.voice_id if (char and char.voice_id) else NARRATOR_VOICE_ID
+        else:
+            voice_id = NARRATOR_VOICE_ID
+
+    take = SegmentTake(
+        segment_id=segment_id,
+        voice_id=voice_id,
+        emotion=body.emotion,
+        is_selected=False,
+    )
+    session.add(take)
+    session.commit()
+    session.refresh(take)
+
+    generate_segment(take.id)
+
+    return SegmentTakeResponse.model_validate(take)
+
+
+@router.post(
+    "/{book_id}/chapters/{position}/segments/{segment_id}/takes/{take_id}/select",
+    response_model=SegmentTakeResponse,
+)
+def select_segment_take(
+    book_id: int,
+    position: int,
+    segment_id: int,
+    take_id: int,
+    session: Session = Depends(get_session),
+) -> SegmentTakeResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    segment = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id, Segment.id == segment_id)
+    ).first()
+    if segment is None:
+        raise HTTPException(
+            status_code=404, detail=f"Segment {segment_id} not found in chapter {position}."
+        )
+    take = session.get(SegmentTake, take_id)
+    if take is None or take.segment_id != segment_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Take {take_id} does not belong to segment {segment_id}.",
+        )
+
+    other_takes = session.exec(
+        select(SegmentTake).where(
+            SegmentTake.segment_id == segment_id,
+            SegmentTake.id != take_id,
+        )
+    ).all()
+    for t in other_takes:
+        t.is_selected = False
+        session.add(t)
+    take.is_selected = True
+    session.add(take)
+    session.commit()
+
+    _reassemble_chapter_if_possible(chapter, session)
+
+    session.refresh(take)
+    return SegmentTakeResponse.model_validate(take)
+
+
 @router.get("/{book_id}/characters", response_model=list[CharacterResponse])
 def get_book_characters(book_id: int, session: Session = Depends(get_session)) -> list[CharacterResponse]:
     book = session.get(Book, book_id)
@@ -480,6 +706,16 @@ def delete_book(book_id: int, session: Session = Depends(get_session)) -> None:
     session.delete(book)
     session.commit()
     for path in paths:
-        if path and os.path.exists(path):
+        if not path or not os.path.exists(path):
+            continue
+        try:
             os.remove(path)
+        except OSError:
+            # Best-effort (même logique que rmtree(ignore_errors=True)
+            # juste après) : un fichier verrouillé par le lecteur audio
+            # (Windows, plateforme cible) ne doit pas transformer une
+            # suppression déjà commitée en DB en 500 côté client (audit
+            # 2026-07-11) -- le fichier orphelin reste sur disque, pas pire
+            # que ce qui se passait déjà pour le dossier via rmtree.
+            logger.warning("delete_book: failed to remove %r", path, exc_info=True)
     shutil.rmtree(DATA_DIR / str(book_id), ignore_errors=True)

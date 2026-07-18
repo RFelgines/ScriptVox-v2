@@ -51,6 +51,21 @@ function ProviderCard({
   );
 }
 
+function PrivacyBadge({ llmProvider, t }: { llmProvider: string; t: Dictionary }) {
+  const isCloud = llmProvider === "gemini";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+        isCloud
+          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+          : "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+      }`}
+    >
+      {isCloud ? t.settings.privacyBadgeCloud : t.settings.privacyBadgeLocal}
+    </span>
+  );
+}
+
 export default function ParametresPage() {
   const t = useT();
   const [status, setStatus] = useState<AppStatus | null>(null);
@@ -58,6 +73,7 @@ export default function ParametresPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
 
   useEffect(() => {
     Promise.all([getAppStatus(), getAppSettings()])
@@ -70,6 +86,17 @@ export default function ParametresPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  function handlePreferredLlmChange(value: string) {
+    if (!settings) return;
+    const preferred = value === "" ? null : value;
+    setSettings({ ...settings, preferred_llm_provider: preferred });
+    setSaving(true);
+    updateAppSettings({ preferred_llm_provider: preferred })
+      .then(setSettings)
+      .catch((e) => setError(String(e)))
+      .finally(() => setSaving(false));
+  }
+
   function handlePreferredProviderChange(value: string) {
     if (!settings) return;
     const preferred = value === "" ? null : value;
@@ -80,6 +107,18 @@ export default function ParametresPage() {
       .catch((e) => setError(String(e)))
       .finally(() => setSaving(false));
   }
+
+  function handleTestConnection() {
+    setTestingConnection(true);
+    getAppStatus()
+      .then(setStatus)
+      .catch((e) => setError(String(e)))
+      .finally(() => setTestingConnection(false));
+  }
+
+  const effectiveLlm = settings
+    ? (settings.preferred_llm_provider ?? settings.default_llm_provider)
+    : null;
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
@@ -102,8 +141,74 @@ export default function ParametresPage() {
         </Alert>
       )}
 
-      {status && (
+      {settings && (
         <div className="mt-6 space-y-3">
+          {/* Sélecteur LLM + badge confidentialité */}
+          <div className="rounded-card border border-border bg-surface p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">
+              {t.settings.preferredLlmLabel}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                value={settings.preferred_llm_provider ?? ""}
+                onChange={(e) => handlePreferredLlmChange(e.target.value)}
+                disabled={saving}
+                className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-50"
+                aria-label={t.settings.preferredLlmLabel}
+              >
+                <option value="">{t.settings.defaultOption(settings.default_llm_provider)}</option>
+                {settings.available_llm_providers.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              {effectiveLlm && <PrivacyBadge llmProvider={effectiveLlm} t={t} />}
+              {saving && <span className="text-xs text-muted">{t.settings.saving}</span>}
+            </div>
+            <p className="mt-2 text-xs text-muted">{t.settings.preferredLlmHint}</p>
+          </div>
+
+          {/* Sélecteur TTS */}
+          <div className="rounded-card border border-border bg-surface p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">
+              {t.settings.preferredProviderLabel}
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <select
+                value={settings.preferred_tts_provider ?? ""}
+                onChange={(e) => handlePreferredProviderChange(e.target.value)}
+                disabled={saving}
+                className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-50"
+                aria-label={t.settings.preferredProviderLabel}
+              >
+                <option value="">{t.settings.defaultOption(settings.default_tts_provider)}</option>
+                {settings.available_tts_providers.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              {saving && <span className="text-xs text-muted">{t.settings.saving}</span>}
+            </div>
+            <p className="mt-2 text-xs text-muted">
+              {t.settings.preferredHint}
+            </p>
+          </div>
+
+          {/* Bouton "Tester la connexion" */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleTestConnection}
+              disabled={testingConnection}
+              className="rounded-control border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-foreground hover:bg-surface transition-colors disabled:opacity-50"
+            >
+              {testingConnection ? t.settings.testConnectionTesting : t.settings.testConnection}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {status && (
+        <div className="mt-3 space-y-3">
           <ProviderCard
             label={t.settings.llmLabel}
             name={status.llm.name}
@@ -118,34 +223,6 @@ export default function ParametresPage() {
             detail={status.tts.detail}
             t={t}
           />
-
-          {settings && (
-            <div className="rounded-card border border-border bg-surface p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                {t.settings.preferredProviderLabel}
-              </p>
-              <div className="mt-2 flex items-center gap-2">
-                <select
-                  value={settings.preferred_tts_provider ?? ""}
-                  onChange={(e) => handlePreferredProviderChange(e.target.value)}
-                  disabled={saving}
-                  className="rounded-control border border-border bg-surface-2 px-2 py-1.5 text-sm text-foreground disabled:opacity-50"
-                  aria-label={t.settings.preferredProviderLabel}
-                >
-                  <option value="">{t.settings.defaultOption(settings.default_tts_provider)}</option>
-                  {settings.available_tts_providers.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                {saving && <span className="text-xs text-muted">{t.settings.saving}</span>}
-              </div>
-              <p className="mt-2 text-xs text-muted">
-                {t.settings.preferredHint}
-              </p>
-            </div>
-          )}
 
           <div className="rounded-card border border-border bg-surface p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">

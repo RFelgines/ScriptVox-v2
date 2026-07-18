@@ -405,7 +405,12 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
     les ``SegmentData`` depuis les spans pré-segmentés (cf. ARCHITECTURE.md §2.7)."""
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, TypeError) as exc:
+        # TypeError : raw=None (ex. GeminiProvider quand response.text est vide
+        # -- réponse bloquée par les filtres de sécurité, cf. ARCHITECTURE.md
+        # §2.5 "All JSON / Pydantic parsing lives inside try/except", audit
+        # 2026-07-11). json.loads(None) lève un TypeError, pas un
+        # JSONDecodeError -- sans ce cas, il remontait brut jusqu'au worker.
         raise LLMParsingError(raw, exc) from exc
 
     try:
@@ -561,7 +566,8 @@ def _parse_merge_json(raw: str, characters: list[CharacterData]) -> list[MergeSu
     jamais de crash (cf. philosophie de dégradation bornée du reste de ce fichier)."""
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, TypeError) as exc:
+        # Même correctif que _parse_llm_json ci-dessus (raw=None, audit 2026-07-11).
         raise LLMParsingError(raw, exc) from exc
 
     known_names = {c.name for c in characters}

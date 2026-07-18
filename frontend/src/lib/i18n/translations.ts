@@ -25,6 +25,7 @@ export interface Dictionary {
     voiceCreate: (detail: string) => string;
     voiceDelete: (detail: string) => string;
     voiceOverride: (detail: string) => string;
+    voiceSample: (detail: string) => string;
     bookAction: (action: string, detail: string) => string;
     actions: {
       analyze: string;
@@ -105,6 +106,7 @@ export interface Dictionary {
     rateSelectAriaLabel: string;
     readByLabel: string;
     closePlayerAriaLabel: string;
+    audioError: string;
   };
   generation: {
     title: string;
@@ -142,6 +144,12 @@ export interface Dictionary {
     clonedVoicesNone: string;
     clonedVoicesHintAvailable: string;
     clonedVoicesHintNone: string;
+    preferredLlmLabel: string;
+    preferredLlmHint: string;
+    privacyBadgeLocal: string;
+    privacyBadgeCloud: string;
+    testConnection: string;
+    testConnectionTesting: string;
   };
   book: {
     backToLibrary: string;
@@ -276,6 +284,7 @@ const fr: Dictionary = {
     voiceCreate: (detail) => `Création de voix échouée : ${detail}`,
     voiceDelete: (detail) => `Suppression de voix échouée : ${detail}`,
     voiceOverride: (detail) => `Override voix échoué : ${detail}`,
+    voiceSample: (detail) => `Aperçu de voix échoué : ${detail}`,
     bookAction: (action, detail) => `${action} : ${detail}`,
     actions: {
       analyze: "Analyse échouée",
@@ -365,6 +374,7 @@ const fr: Dictionary = {
     rateSelectAriaLabel: "Vitesse de lecture",
     readByLabel: "Lu par",
     closePlayerAriaLabel: "Fermer le lecteur",
+    audioError: "Lecture impossible",
   },
   generation: {
     title: "Génération",
@@ -411,6 +421,12 @@ const fr: Dictionary = {
     clonedVoicesNone: "Aucune voix clonée",
     clonedVoicesHintAvailable: "Utilisables avec Qwen3-TTS uniquement — assignées en priorité lors de l'analyse.",
     clonedVoicesHintNone: "Ajoutez des voix depuis l'onglet Voix pour activer le clonage.",
+    preferredLlmLabel: "Moteur LLM préféré",
+    preferredLlmHint: "Détermine quel modèle analyse vos textes à chaque run. Pris en compte au prochain lancement d'analyse.",
+    privacyBadgeLocal: "🔒 Local — aucune donnée envoyée",
+    privacyBadgeCloud: "☁️ Cloud — textes envoyés à Google",
+    testConnection: "Tester la connexion",
+    testConnectionTesting: "Test en cours…",
   },
   book: {
     backToLibrary: "← Bibliothèque",
@@ -553,6 +569,7 @@ const en: Dictionary = {
     voiceCreate: (detail) => `Voice creation failed: ${detail}`,
     voiceDelete: (detail) => `Voice deletion failed: ${detail}`,
     voiceOverride: (detail) => `Voice override failed: ${detail}`,
+    voiceSample: (detail) => `Voice preview failed: ${detail}`,
     bookAction: (action, detail) => `${action}: ${detail}`,
     actions: {
       analyze: "Analysis failed",
@@ -642,6 +659,7 @@ const en: Dictionary = {
     rateSelectAriaLabel: "Playback speed",
     readByLabel: "Read by",
     closePlayerAriaLabel: "Close player",
+    audioError: "Playback error",
   },
   generation: {
     title: "Generation",
@@ -688,6 +706,12 @@ const en: Dictionary = {
     clonedVoicesNone: "No cloned voice",
     clonedVoicesHintAvailable: "Usable with Qwen3-TTS only — assigned as priority during analysis.",
     clonedVoicesHintNone: "Add voices from the Voices tab to enable cloning.",
+    preferredLlmLabel: "Preferred LLM engine",
+    preferredLlmHint: "Determines which model analyses your texts each run. Applied at the next analysis launch.",
+    privacyBadgeLocal: "🔒 Local — no data sent",
+    privacyBadgeCloud: "☁️ Cloud — texts sent to Google",
+    testConnection: "Test connection",
+    testConnectionTesting: "Testing…",
   },
   book: {
     backToLibrary: "← Library",

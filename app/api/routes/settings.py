@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, func, select
 
-from app.config import VALID_TTS_PROVIDERS, Settings, get_settings
+from app.config import VALID_LLM_PROVIDERS, VALID_TTS_PROVIDERS, Settings, get_settings
 from app.core.db import get_session
 from app.core.enums import VoiceKind
 from app.models.entities import AppSetting, Voice
@@ -41,6 +41,9 @@ def get_app_settings(
         available_tts_providers=sorted(VALID_TTS_PROVIDERS),
         preferred_language=row.preferred_language,
         available_languages=sorted(AVAILABLE_LANGUAGES),
+        default_llm_provider=settings.llm_provider,
+        preferred_llm_provider=row.preferred_llm_provider,
+        available_llm_providers=sorted(VALID_LLM_PROVIDERS),
     )
 
 
@@ -50,26 +53,46 @@ def update_app_settings(
     settings: Settings = Depends(get_settings),
     session: Session = Depends(get_session),
 ) -> SettingsResponse:
+    # exclude_unset : un champ OMIS du body ne doit pas écraser l'autre
+    # préférence avec le défaut None du schéma (même pattern que
+    # patch_book/books.py) -- seul un champ explicitement envoyé (y compris
+    # `null` pour effacer une préférence) est appliqué.
+    fields = payload.model_dump(exclude_unset=True)
     if (
-        payload.preferred_tts_provider is not None
-        and payload.preferred_tts_provider not in VALID_TTS_PROVIDERS
+        "preferred_tts_provider" in fields
+        and fields["preferred_tts_provider"] is not None
+        and fields["preferred_tts_provider"] not in VALID_TTS_PROVIDERS
     ):
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid preferred_tts_provider={payload.preferred_tts_provider!r}",
+            detail=f"Invalid preferred_tts_provider={fields['preferred_tts_provider']!r}",
         )
     if (
-        payload.preferred_language is not None
-        and payload.preferred_language not in AVAILABLE_LANGUAGES
+        "preferred_language" in fields
+        and fields["preferred_language"] is not None
+        and fields["preferred_language"] not in AVAILABLE_LANGUAGES
     ):
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid preferred_language={payload.preferred_language!r}. "
+            detail=f"Invalid preferred_language={fields['preferred_language']!r}. "
             f"Accepted values: {sorted(AVAILABLE_LANGUAGES)}",
         )
+    if (
+        payload.preferred_llm_provider is not None
+        and payload.preferred_llm_provider not in VALID_LLM_PROVIDERS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid preferred_llm_provider={payload.preferred_llm_provider!r}. "
+            f"Accepted values: {sorted(VALID_LLM_PROVIDERS)}",
+        )
     row = _get_or_create_app_setting(session)
-    row.preferred_tts_provider = payload.preferred_tts_provider
-    row.preferred_language = payload.preferred_language
+    if "preferred_tts_provider" in fields:
+        row.preferred_tts_provider = fields["preferred_tts_provider"]
+    if "preferred_language" in fields:
+        row.preferred_language = fields["preferred_language"]
+    if "preferred_llm_provider" in fields:
+        row.preferred_llm_provider = fields["preferred_llm_provider"]
     session.add(row)
     session.commit()
     session.refresh(row)
@@ -79,11 +102,15 @@ def update_app_settings(
         available_tts_providers=sorted(VALID_TTS_PROVIDERS),
         preferred_language=row.preferred_language,
         available_languages=sorted(AVAILABLE_LANGUAGES),
+        default_llm_provider=settings.llm_provider,
+        preferred_llm_provider=row.preferred_llm_provider,
+        available_llm_providers=sorted(VALID_LLM_PROVIDERS),
     )
 
 
-def _probe_llm(settings: Settings) -> ProviderStatus:
-    if settings.llm_provider == "gemini":
+def _probe_llm(settings: Settings, provider_override: str | None = None) -> ProviderStatus:
+    effective = provider_override or settings.llm_provider
+    if effective == "gemini":
         return ProviderStatus(
             name=f"Gemini ({settings.gemini_model})",
             status="ok",
@@ -155,8 +182,9 @@ def get_app_status(
     cloned_count = session.exec(
         select(func.count()).select_from(Voice).where(Voice.kind == VoiceKind.CLONED)
     ).one()
+    row = _get_or_create_app_setting(session)
     return StatusResponse(
-        llm=_probe_llm(settings),
+        llm=_probe_llm(settings, provider_override=row.preferred_llm_provider),
         tts=_probe_tts(settings),
         cloned_voices_count=cloned_count,
     )

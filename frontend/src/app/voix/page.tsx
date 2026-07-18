@@ -12,7 +12,6 @@ import {
   requestVoiceSample,
   voiceSampleUrl,
 } from "@/lib/api";
-import { usePlayer } from "@/components/player/PlayerProvider";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
@@ -45,7 +44,9 @@ const SAMPLE_POLL_MAX_ATTEMPTS = 20; // ~1 min
 
 export default function VoixPage() {
   const t = useT();
-  const { play, track, isPlaying } = usePlayer();
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [voices, setVoices] = useState<VoiceSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,6 +79,33 @@ export default function VoixPage() {
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    return () => { audioRef.current?.pause(); };
+  }, []);
+
+  function handleOrbPreview(voiceId: string) {
+    if (previewId === voiceId) {
+      if (previewPlaying) {
+        audioRef.current?.pause();
+        setPreviewPlaying(false);
+      } else {
+        audioRef.current?.play().catch(() => {});
+        setPreviewPlaying(true);
+      }
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.onended = null;
+    }
+    const audio = new Audio(voiceSampleUrl(voiceId));
+    audio.onended = () => setPreviewPlaying(false);
+    audioRef.current = audio;
+    audio.play().catch(() => {});
+    setPreviewId(voiceId);
+    setPreviewPlaying(true);
+  }
 
   function toggleFavorite(voice: VoiceSummary) {
     setSavingId(voice.id);
@@ -395,17 +423,17 @@ export default function VoixPage() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => play({ title: t.book.previewTitle(v.name), src: voiceSampleUrl(v.id) })}
+                    onClick={() => handleOrbPreview(v.id)}
                     aria-label={t.voices.previewAriaLabel(v.name)}
                     className="group transition-transform hover:scale-105"
                   >
                     <VoiceOrb
                       hue={orbHues.get(v.id) ?? 0}
                       size={ORB_SIZE}
-                      active={isPlaying && track?.src === voiceSampleUrl(v.id)}
+                      active={previewId === v.id && previewPlaying}
                     >
-                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/30 text-white opacity-0 transition-opacity group-hover:opacity-100">
-                        ▶
+                      <span className={`flex h-12 w-12 items-center justify-center rounded-full bg-black/30 text-white transition-opacity ${previewId === v.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                        {previewId === v.id && previewPlaying ? "⏸" : "▶"}
                       </span>
                     </VoiceOrb>
                   </button>

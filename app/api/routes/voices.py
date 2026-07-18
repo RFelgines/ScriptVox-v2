@@ -215,7 +215,24 @@ def request_voice_sample(
         raise HTTPException(status_code=404, detail=f"Unknown voice_id: {voice_id!r}")
     if voice.kind != VoiceKind.CLONED:
         raise HTTPException(status_code=400, detail="Only cloned voices need sample generation.")
-    from app.workers.tasks import generate_voice_sample
+    from app.workers.tasks import _effective_tts_provider, generate_voice_sample
+    # Résout le MÊME provider effectif que le pipeline de génération (override
+    # livre n/a ici -- pas de livre -- puis préférence globale, puis défaut
+    # .env), pas seulement settings.tts_provider brut : sinon, avec .env=edgetts
+    # + préférence Paramètres=qwen (le setup type pour le clonage de voix), la
+    # génération de sample était acceptée (202) mais ne produisait jamais rien
+    # -- _generate_voice_sample_impl regardait, lui, un provider différent
+    # (audit 2026-07-11).
+    effective_provider = _effective_tts_provider(session, None) or settings.tts_provider
+    if effective_provider != "qwen":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Voice sample generation requires the 'qwen' TTS provider "
+                f"(effective provider is {effective_provider!r}). "
+                'Set it via PATCH /settings {"preferred_tts_provider": "qwen"}.'
+            ),
+        )
     generate_voice_sample(voice_id)
     locale = settings.edgetts_locale if settings.tts_provider == "edgetts" else None
     return _voice_to_response(voice, locale)

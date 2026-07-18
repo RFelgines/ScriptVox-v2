@@ -21,6 +21,7 @@ export interface BookSummary {
   status: BookStatus;
   progress: number;
   error_message: string | null;
+  failed_stage: "analysis" | "generation" | null;
   created_at: string;
   audio_path: string | null;
   mp3_path: string | null;
@@ -35,6 +36,9 @@ export interface AppSettings {
   default_tts_provider: string;
   preferred_tts_provider: string | null;
   available_tts_providers: string[];
+  default_llm_provider: string;
+  preferred_llm_provider: string | null;
+  available_llm_providers: string[];
 }
 
 export type ProviderStatusLevel = "ok" | "warning" | "error";
@@ -193,7 +197,7 @@ export async function getAppSettings(): Promise<AppSettings> {
 }
 
 export async function updateAppSettings(
-  patch: Partial<Pick<AppSettings, "preferred_tts_provider">>
+  patch: Partial<Pick<AppSettings, "preferred_tts_provider" | "preferred_llm_provider">>
 ): Promise<AppSettings> {
   const res = await fetch(`${API_URL}/settings`, {
     method: "PATCH",
@@ -212,7 +216,16 @@ export async function getAppStatus(): Promise<AppStatus> {
 
 export async function requestVoiceSample(voiceId: string): Promise<VoiceSummary> {
   const res = await fetch(`${API_URL}/voices/${voiceId}/sample`, { method: "POST" });
-  if (!res.ok) throw new Error(`POST /voices/${voiceId}/sample failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(t().errors.voiceSample(detail));
+  }
   return res.json();
 }
 
@@ -347,8 +360,8 @@ export function analyzeBook(bookId: number): Promise<BookSummary> {
   return _postBook(bookId, "analyze", "analyze");
 }
 
-export function generateBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "generate", "generate");
+export function generateBook(bookId: number, force = false): Promise<BookSummary> {
+  return _postBook(bookId, force ? "generate?force=true" : "generate", "generate");
 }
 
 export function stopBook(bookId: number): Promise<BookSummary> {
@@ -499,5 +512,47 @@ export async function generateAllChapters(bookId: number): Promise<ChapterSummar
     }
     throw new Error(t().errors.allChaptersGenerate(detail));
   }
+  return res.json();
+}
+
+export interface SegmentTake {
+  id: number;
+  segment_id: number;
+  audio_path: string | null;
+  voice_id: string;
+  emotion: string | null;
+  is_selected: boolean;
+  created_at: string;
+}
+
+export async function regenerateSegment(
+  bookId: number,
+  chapterPosition: number,
+  segmentId: number,
+  opts: { voice_id: string; emotion?: string },
+): Promise<SegmentTake> {
+  const res = await fetch(
+    `${API_URL}/books/${bookId}/chapters/${chapterPosition}/segments/${segmentId}/regenerate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    },
+  );
+  if (!res.ok) throw new Error(`POST regenerate failed: ${res.status}`);
+  return res.json();
+}
+
+export async function selectTake(
+  bookId: number,
+  chapterPosition: number,
+  segmentId: number,
+  takeId: number,
+): Promise<SegmentTake> {
+  const res = await fetch(
+    `${API_URL}/books/${bookId}/chapters/${chapterPosition}/segments/${segmentId}/takes/${takeId}/select`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`POST select failed: ${res.status}`);
   return res.json();
 }

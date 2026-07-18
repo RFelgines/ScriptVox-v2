@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { SegmentSummary, getChapterSegments } from "@/lib/api";
+import { MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import { SegmentSummary, getChapterSegments, regenerateSegment } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import VoiceOrb from "@/components/VoiceOrb";
 import { useT } from "@/lib/i18n/LanguageContext";
@@ -44,13 +44,15 @@ function LazySegmentOrb({ hue, active, root }: { hue: number; active: boolean; r
 interface Props {
   bookId: number;
   chapterPosition: number;
+  chapterDone?: boolean;
 }
 
-export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
+export default function ChapterTranscript({ bookId, chapterPosition, chapterDone }: Props) {
   const t = useT();
   const { currentSegment, voiceHues, seek, isPlaying } = usePlayer();
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [regeneratingId, setRegeneratingId] = useState<number | null>(null);
   const currentRef = useRef<HTMLDivElement | null>(null);
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
 
@@ -122,6 +124,14 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
             if (seg.audio_offset_ms !== null) seek(seg.audio_offset_ms / 1000);
           }
 
+          function handleRegenerate(e: ReactMouseEvent<HTMLButtonElement>) {
+            e.stopPropagation();
+            setRegeneratingId(seg.id);
+            regenerateSegment(bookId, chapterPosition, seg.id, {
+              voice_id: seg.voice_id ?? "narrator",
+            }).finally(() => setRegeneratingId(null));
+          }
+
           return (
             <div
               key={seg.id}
@@ -140,7 +150,7 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
                   : undefined
               }
               aria-label={canSeek ? t.player.transcript.seekAriaLabel(label) : undefined}
-              className={`flex gap-3 border-b border-border/50 px-4 py-2.5 transition-colors last:border-0 ${
+              className={`group flex gap-3 border-b border-border/50 px-4 py-2.5 transition-colors last:border-0 ${
                 canSeek ? "cursor-pointer" : ""
               } ${isCurrent ? "border-l-2" : "hover:bg-surface-2/40"}`}
               style={
@@ -179,6 +189,26 @@ export default function ChapterTranscript({ bookId, chapterPosition }: Props) {
                   <span className="italic">{seg.text}</span>
                 )}
               </p>
+
+              {/* Bouton régénérer (uniquement si chapitre DONE) */}
+              {chapterDone && (
+                <button
+                  onClick={handleRegenerate}
+                  disabled={regeneratingId === seg.id}
+                  aria-label="Regénérer ce segment"
+                  title="Regénérer ce segment"
+                  className="ml-1 shrink-0 self-center rounded-full p-1 text-muted opacity-0 transition-opacity hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 group-hover:opacity-100"
+                >
+                  {regeneratingId === seg.id ? (
+                    <span className="block h-3.5 w-3.5 text-[10px] leading-none">…</span>
+                  ) : (
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                      <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5" />
+                      <path d="M13.5 2.5v3.5h-3.5" />
+                    </svg>
+                  )}
+                </button>
+              )}
             </div>
           );
         })}
