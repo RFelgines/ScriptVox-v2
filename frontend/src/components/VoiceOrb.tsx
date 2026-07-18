@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 type VoiceOrbProps = {
   /** Teinte 0-360, calculée en amont par golden-angle (cohérence catalogue/player/transcription). */
@@ -8,44 +8,145 @@ type VoiceOrbProps = {
   className?: string;
   /** Contenu superposé au centre (icône play, spinner...). */
   children?: ReactNode;
-  /** Segment en cours de lecture / voix survolée : déclenche la rotation rapide
-   * + respiration. Statique sinon (défaut) -- nécessaire pour rester léger avec
-   * 50-200 orbes simultanées (transcription de chapitre). */
+  /** Voix en train de parler : nappes en dérive + cœur scintillant + halo.
+   * Figée sinon (défaut) : les animations restent posées mais en
+   * animation-play-state:paused (zéro coût, reprise sans saut) -- nécessaire
+   * pour rester léger avec 50-200 orbes simultanées (transcription). */
   active?: boolean;
 };
 
 export default function VoiceOrb({ hue, size, className, children, active = false }: VoiceOrbProps) {
+  const playState = active ? "running" : "paused";
+  // Phase déterministe par teinte : la pose figée diffère d'une voix à
+  // l'autre (mais reste stable pour une même voix), et deux orbes actives
+  // simultanément ne bougent pas en miroir.
+  const phase = -(((hue % 360) + 360) % 360) * 13;
+  // En dessous de ~28px (transcription, casting) le détail est invisible :
+  // une nappe de moins par instance.
+  const small = size < 28;
+
+  const anim = (name: string, durationS: number, phaseScale: number): CSSProperties => ({
+    animation: `${name} ${durationS}s ease-in-out infinite`,
+    animationDelay: `${Math.round(phase * phaseScale)}ms`,
+    animationPlayState: playState,
+    willChange: active ? "transform, opacity" : undefined,
+  });
+
   return (
     <span
       aria-hidden="true"
-      className={`relative block shrink-0 overflow-hidden rounded-full ${className ?? ""}`}
-      style={{
-        width: size,
-        height: size,
-        animation: active ? "orbGlassBreathe 1s ease-in-out infinite" : "none",
-      }}
+      className={`living-orb relative block shrink-0 ${className ?? ""}`}
+      style={{ width: size, height: size }}
     >
+      {/* Halo : lumière qui déborde de l'orbe, uniquement quand la voix parle. */}
       <span
-        className="absolute -inset-4 block"
-        style={{
-          background: `conic-gradient(from 120deg, hsl(${hue} 85% 62%), hsl(${(hue + 70) % 360} 80% 58%), hsl(${(hue + 200) % 360} 75% 50%), hsl(${hue} 85% 62%))`,
-          filter: "blur(14px)",
-          animation: active ? "orbSpinSlow 2.2s linear infinite" : "none",
-        }}
-      />
+        className="pointer-events-none absolute block rounded-full"
+        style={{ inset: "-38%", opacity: active ? 1 : 0, transition: "opacity 500ms ease" }}
+      >
+        <span
+          className="absolute inset-0 block rounded-full"
+          style={{
+            background: `radial-gradient(closest-side, hsl(${hue} 90% 62% / 0.5), hsl(${hue} 90% 62% / 0) 72%)`,
+            ...anim("orb-halo-pulse", 1.6, 0.4),
+          }}
+        />
+      </span>
+
+      {/* Sphère clippée : terne au repos, saturée + en respiration en lecture. */}
       <span
-        className="absolute inset-0 block rounded-full"
+        className="absolute inset-0 block overflow-hidden rounded-full"
         style={{
-          background:
-            "linear-gradient(150deg, rgba(255,255,255,0.5), rgba(255,255,255,0.04) 40%, rgba(255,255,255,0.2) 100%)",
-          backdropFilter: "blur(4px) saturate(1.3)",
-          border: "1px solid rgba(255,255,255,0.4)",
-          boxShadow:
-            "inset 0 10px 16px rgba(255,255,255,0.45), inset 0 -16px 22px rgba(0,0,0,0.2), inset 6px 0 10px rgba(255,255,255,0.08)",
+          background: `radial-gradient(circle at 32% 28%, hsl(${hue} 72% 58%), hsl(${hue} 78% 40%) 58%, hsl(${(hue + 18) % 360} 65% 24%) 100%)`,
+          filter: active ? "saturate(1.12) brightness(1.05)" : "saturate(0.8) brightness(0.92)",
+          transition: "filter 500ms ease",
+          ...anim("orb-breathe", 2.1, 0),
         }}
-      />
+      >
+        {/* Nappe large, teinte analogue +28° */}
+        <span
+          className="absolute block rounded-full"
+          style={{
+            inset: "-12%",
+            background: `radial-gradient(closest-side, hsl(${(hue + 28) % 360} 95% 66% / 0.9), hsl(${(hue + 28) % 360} 95% 66% / 0) 68%)`,
+            mixBlendMode: "screen",
+            ...anim("orb-drift-a", 5.9, 1),
+          }}
+        />
+        {/* Nappe elliptique claire, teinte analogue -26° (la rotation des
+            keyframes n'a d'effet visible que sur une forme non circulaire) */}
+        <span
+          className="absolute block"
+          style={{
+            width: "85%",
+            height: "64%",
+            left: "7.5%",
+            top: "18%",
+            borderRadius: "50%",
+            background: `radial-gradient(closest-side, hsl(${(hue + 334) % 360} 92% 74% / 0.7), hsl(${(hue + 334) % 360} 92% 74% / 0) 70%)`,
+            mixBlendMode: "screen",
+            ...anim("orb-drift-b", 7.3, 1.7),
+          }}
+        />
+        {/* Contre-couleur discrète : richesse du mélange sans casser
+            l'identité de teinte de la voix */}
+        {!small && (
+          <span
+            className="absolute block rounded-full"
+            style={{
+              width: "70%",
+              height: "70%",
+              left: "15%",
+              top: "15%",
+              background: `radial-gradient(closest-side, hsl(${(hue + 180) % 360} 85% 60% / 0.5), hsl(${(hue + 180) % 360} 85% 60% / 0) 70%)`,
+              mixBlendMode: "screen",
+              ...anim("orb-drift-c", 9.1, 2.3),
+            }}
+          />
+        )}
+        {/* Cœur lumineux : deux scintillements à périodes incommensurables ;
+            leur somme paraît aléatoire, comme modulée par la voix. Presque
+            éteint au repos. */}
+        <span
+          className="absolute inset-0 block"
+          style={{ opacity: active ? 1 : 0.25, transition: "opacity 500ms ease" }}
+        >
+          <span
+            className="absolute block rounded-full"
+            style={{
+              width: "68%",
+              height: "68%",
+              left: "16%",
+              top: "16%",
+              background: `radial-gradient(closest-side, hsl(${hue} 100% 96% / 0.85), hsl(${hue} 100% 96% / 0) 65%)`,
+              ...anim("orb-core-flicker", 1.13, 0.6),
+            }}
+          />
+          <span
+            className="absolute block rounded-full"
+            style={{
+              width: "46%",
+              height: "46%",
+              left: "27%",
+              top: "27%",
+              background: `radial-gradient(closest-side, hsl(${(hue + 40) % 360} 100% 92% / 0.9), hsl(${(hue + 40) % 360} 100% 92% / 0) 62%)`,
+              mixBlendMode: "screen",
+              ...anim("orb-core-flicker-2", 1.87, 1.1),
+            }}
+          />
+        </span>
+        {/* Finition sphérique : reflet zénithal + profondeur, proportionnels
+            à la taille (l'orbe va de 16 à 160px). */}
+        <span
+          className="absolute inset-0 block rounded-full"
+          style={{
+            background:
+              "linear-gradient(160deg, rgba(255,255,255,0.3), rgba(255,255,255,0.02) 42%, rgba(255,255,255,0.08) 100%)",
+            boxShadow: `inset 0 ${size * 0.06}px ${size * 0.09}px rgba(255,255,255,0.4), inset 0 -${size * 0.1}px ${size * 0.14}px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.16)`,
+          }}
+        />
+      </span>
       {children && (
-        <span className="absolute inset-0 flex items-center justify-center">{children}</span>
+        <span className="absolute inset-0 z-10 flex items-center justify-center">{children}</span>
       )}
     </span>
   );

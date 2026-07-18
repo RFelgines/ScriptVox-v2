@@ -12,6 +12,7 @@
 // direction choisie -- voir mémoire "voice-orb-redesign-elevenlabs".
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import VoiceOrb from "@/components/VoiceOrb";
 
 const SIZE = 160;
 
@@ -294,11 +295,21 @@ export default function OrbLabPage() {
   return (
     <div className="min-h-screen bg-background p-10 text-foreground">
       <style>{KEYFRAMES}</style>
-      <h1 className="mb-2 text-xl font-medium">Orb Lab — Glass Bubble original + nuages qui se dispersent + Aurora Ribbon</h1>
+      <h1 className="mb-2 text-xl font-medium">Orb Lab — Orbe vivante (prod) + Glass Bubble + nuages + Aurora Ribbon</h1>
       <p className="mb-8 text-sm text-muted">
-        Original recréé fidèlement (conic-gradient qui tourne). &quot;Dérive large&quot; remplacée par
-        4 variantes de nuages qui se cèdent la place -- transform + opacity uniquement, pas de flou.
+        La première carte est le composant de production actuel (VoiceOrb). Le reste du labo est
+        conservé pour comparaison et expérimentations futures.
       </p>
+
+      <h2 className="mb-4 text-lg font-medium">Orbe vivante — design en production (2026-07-18)</h2>
+      <div className="mb-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <DesignCard
+          title="Orbe vivante (prod)"
+          desc="Nappes en dérive organique + cœur scintillant bi-fréquence + halo. Play = état « parle » ; sinon figée, désaturée."
+          initialHue={HUE_PURPLE}
+          render={(h, p) => <VoiceOrb hue={h} size={SIZE} active={p} />}
+        />
+      </div>
 
       <h2 className="mb-4 text-lg font-medium">Glass Bubble — original</h2>
       <div className="mb-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
