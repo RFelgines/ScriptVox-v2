@@ -303,6 +303,22 @@ def _release_qwen_gpu(provider) -> None:
         pass
 
 
+def _extract_wav_slice(wav_bytes: bytes, offset_ms: int, dur_ms: int) -> bytes:
+    """Extract a time window from assembled WAV bytes and return it as a standalone WAV."""
+    import io as _io, wave as _wave
+    with _wave.open(_io.BytesIO(wav_bytes), "rb") as src:
+        ch, sw, fr = src.getnchannels(), src.getsampwidth(), src.getframerate()
+        src.setpos(int(offset_ms * fr / 1000))
+        pcm = src.readframes(int(dur_ms * fr / 1000))
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as dst:
+        dst.setnchannels(ch)
+        dst.setsampwidth(sw)
+        dst.setframerate(fr)
+        dst.writeframes(pcm)
+    return buf.getvalue()
+
+
 def _make_chapter_stop_checker(engine, chapter_id: int) -> Callable[[], bool]:
     """Mirrors _make_book_stop_checker but polls Chapter.cancel_requested — used by
     standalone (non book-driven) chapter generation, which has no Book.status to
@@ -424,17 +440,51 @@ async def _generate_chapter_async(
         _Path(audio_path).write_bytes(wav_bytes)
 
         with Session(engine) as session:
+            from sqlalchemy import delete as _sa_delete
+            from app.core.enums import SegmentType as _SegType
+            from app.models.entities import Character as _Char, SegmentTake as _STake
+            from app.services.voice_assignment import NARRATOR_VOICE_ID as _NARRATOR
+
+            seg_ids = [sid for sid, _, _ in timing]
+            if seg_ids:
+                session.execute(_sa_delete(_STake).where(_STake.segment_id.in_(seg_ids)))
+            session.flush()
+
+            seg_voice: list[tuple[int, int, int, str]] = []
             for seg_id, offset_ms, dur_ms in timing:
                 seg = session.get(Segment, seg_id)
                 if seg:
                     seg.audio_offset_ms = offset_ms
                     seg.duration_ms = dur_ms
                     session.add(seg)
+                    if seg.segment_type == _SegType.NARRATION or seg.character_id is None:
+                        vid = _NARRATOR
+                    else:
+                        char = session.get(_Char, seg.character_id)
+                        vid = char.voice_id if char and char.voice_id else _NARRATOR
+                    seg_voice.append((seg_id, offset_ms, dur_ms, vid))
 
             chapter = session.get(Chapter, chapter_id)
             chapter.audio_path = audio_path
             chapter.status = ChapterStatus.DONE
             session.add(chapter)
+
+            takes_dir = DATA_DIR / str(book_id) / "takes"
+            takes_dir.mkdir(parents=True, exist_ok=True)
+            take_info: list[tuple] = []
+            for seg_id, offset_ms, dur_ms, vid in seg_voice:
+                take = _STake(segment_id=seg_id, voice_id=vid, is_selected=True)
+                session.add(take)
+                take_info.append((take, offset_ms, dur_ms))
+            session.flush()
+
+            for take, offset_ms, dur_ms in take_info:
+                wav_slice = _extract_wav_slice(wav_bytes, offset_ms, dur_ms)
+                take_path = str(takes_dir / f"{take.id}.wav")
+                _Path(take_path).write_bytes(wav_slice)
+                take.audio_path = take_path
+                session.add(take)
+
             session.commit()
         return True
 
@@ -1008,6 +1058,80 @@ def generate_book(book_id: int, force: bool = False) -> None:
 @huey.task()
 def generate_chapter(chapter_id: int) -> None:
     _generate_chapter_impl(chapter_id)
+
+
+async def _generate_segment_async(take_id: int, engine) -> None:
+    """Synthesise one SegmentTake: TTS → WAV on disk → take.audio_path updated."""
+    from pathlib import Path as _Path
+
+    from sqlmodel import select as _select
+
+    from app.models.entities import SegmentTake, Voice
+    from app.models import Book, Chapter, Segment
+    from app.services.audio.chapter import _synthesise_with_retry
+    from app.services.tts import factory as tts_factory
+
+    settings = get_settings()
+
+    with Session(engine) as session:
+        take = session.get(SegmentTake, take_id)
+        if take is None:
+            logger.error("generate_segment: unknown take_id=%d", take_id)
+            return
+        segment = session.get(Segment, take.segment_id)
+        if segment is None:
+            logger.error("generate_segment: segment missing for take_id=%d", take_id)
+            return
+        chapter = session.get(Chapter, segment.chapter_id)
+        if chapter is None:
+            logger.error("generate_segment: chapter missing for take_id=%d", take_id)
+            return
+        book = session.get(Book, chapter.book_id)
+
+        voice_id = take.voice_id
+        emotion = take.emotion
+        seg_text = segment.text
+        book_id = chapter.book_id
+
+        v = session.exec(_select(Voice).where(Voice.voice_id == voice_id)).first()
+        ref_path = v.reference_audio_path if v else None
+
+        provider = tts_factory.get_tts_provider(
+            settings,
+            override=_effective_tts_provider(session, book.tts_provider if book else None),
+            language=book.language if book else None,
+        )
+
+    try:
+        wav_bytes = await _synthesise_with_retry(
+            provider, seg_text, voice_id,
+            emotion=emotion, reference_audio_path=ref_path,
+        )
+    finally:
+        _release_qwen_gpu(provider)
+
+    takes_dir = DATA_DIR / str(book_id) / "takes"
+    takes_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = str(takes_dir / f"{take_id}.wav")
+    _Path(audio_path).write_bytes(wav_bytes)
+
+    with Session(engine) as session:
+        take = session.get(SegmentTake, take_id)
+        if take:
+            take.audio_path = audio_path
+            session.add(take)
+            session.commit()
+
+
+def _generate_segment_impl(take_id: int) -> None:
+    from app.core.db import get_engine
+    engine = get_engine()
+    asyncio.run(_generate_segment_async(take_id, engine))
+
+
+@huey.task()
+def generate_segment(take_id: int) -> None:
+    _generate_segment_impl(take_id)
 
 
 @huey.task()

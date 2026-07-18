@@ -4,6 +4,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime, timezone
+import wave
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -14,7 +15,7 @@ from app.config import VALID_TTS_PROVIDERS, get_settings
 from app.core.db import get_session
 from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus, SegmentType
 from app.core.uploads import read_upload_capped
-from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment
+from app.models import Book, Chapter, Character, CharacterMergeSuggestion, Segment, SegmentTake
 from app.schemas.book import (
     BookResponse,
     BookUpdate,
@@ -22,10 +23,19 @@ from app.schemas.book import (
     ChapterResponse,
     CharacterResponse,
     MergeSuggestionResponse,
+    RegenerateSegmentRequest,
     SegmentResponse,
+    SegmentTakeResponse,
 )
+from app.services.audio.assembler import assemble_wav_from_files
 from app.services.voice_assignment import NARRATOR_VOICE_ID
-from app.workers.tasks import analyze_book, generate_book, generate_chapter_queue_pump
+from app.workers.tasks import (
+    analyze_book,
+    generate_book,
+    generate_chapter,
+    generate_chapter_queue_pump,
+    generate_segment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -486,6 +496,166 @@ def get_chapter_segments(
             duration_ms=seg.duration_ms,
         ))
     return results
+
+
+def _reassemble_chapter_if_possible(chapter: Chapter, session: Session) -> None:
+    """Reassemble chapter WAV from each segment's selected take (disk-to-disk).
+
+    Skips silently if any segment has no selected take with a valid audio_path on
+    disk — callers should not error in that case, the chapter WAV simply stays as-is.
+    When all takes are present: overwrites chapter.audio_path and updates every
+    Segment.audio_offset_ms / duration_ms.
+    """
+    segments = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id).order_by(Segment.position)
+    ).all()
+
+    take_paths: list[Path] = []
+    for seg in segments:
+        sel = session.exec(
+            select(SegmentTake).where(
+                SegmentTake.segment_id == seg.id,
+                SegmentTake.is_selected == True,  # noqa: E712
+            )
+        ).first()
+        if sel is None or not sel.audio_path:
+            return
+        p = Path(sel.audio_path)
+        if not p.exists():
+            return
+        take_paths.append(p)
+
+    if not take_paths:
+        return
+
+    out_path = (
+        Path(chapter.audio_path) if chapter.audio_path
+        else DATA_DIR / str(chapter.book_id) / f"ch{chapter.position}.wav"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    assemble_wav_from_files(take_paths, out_path)
+
+    if not chapter.audio_path:
+        chapter.audio_path = str(out_path)
+        session.add(chapter)
+
+    offset = 0
+    for seg, path in zip(segments, take_paths):
+        with wave.open(str(path), "rb") as w:
+            dur = int(w.getnframes() / w.getframerate() * 1000)
+        seg.audio_offset_ms = offset
+        seg.duration_ms = dur
+        session.add(seg)
+        offset += dur
+
+    session.commit()
+
+
+@router.post(
+    "/{book_id}/chapters/{position}/segments/{segment_id}/regenerate",
+    response_model=SegmentTakeResponse,
+    status_code=202,
+)
+def regenerate_segment(
+    book_id: int,
+    position: int,
+    segment_id: int,
+    body: RegenerateSegmentRequest,
+    session: Session = Depends(get_session),
+) -> SegmentTakeResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    segment = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id, Segment.id == segment_id)
+    ).first()
+    if segment is None:
+        raise HTTPException(
+            status_code=404, detail=f"Segment {segment_id} not found in chapter {position}."
+        )
+
+    voice_id = body.voice_id
+    if voice_id is None:
+        if segment.character_id:
+            char = session.get(Character, segment.character_id)
+            voice_id = char.voice_id if (char and char.voice_id) else NARRATOR_VOICE_ID
+        else:
+            voice_id = NARRATOR_VOICE_ID
+
+    take = SegmentTake(
+        segment_id=segment_id,
+        voice_id=voice_id,
+        emotion=body.emotion,
+        is_selected=False,
+    )
+    session.add(take)
+    session.commit()
+    session.refresh(take)
+
+    generate_segment(take.id)
+
+    return SegmentTakeResponse.model_validate(take)
+
+
+@router.post(
+    "/{book_id}/chapters/{position}/segments/{segment_id}/takes/{take_id}/select",
+    response_model=SegmentTakeResponse,
+)
+def select_segment_take(
+    book_id: int,
+    position: int,
+    segment_id: int,
+    take_id: int,
+    session: Session = Depends(get_session),
+) -> SegmentTakeResponse:
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    segment = session.exec(
+        select(Segment).where(Segment.chapter_id == chapter.id, Segment.id == segment_id)
+    ).first()
+    if segment is None:
+        raise HTTPException(
+            status_code=404, detail=f"Segment {segment_id} not found in chapter {position}."
+        )
+    take = session.get(SegmentTake, take_id)
+    if take is None or take.segment_id != segment_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Take {take_id} does not belong to segment {segment_id}.",
+        )
+
+    other_takes = session.exec(
+        select(SegmentTake).where(
+            SegmentTake.segment_id == segment_id,
+            SegmentTake.id != take_id,
+        )
+    ).all()
+    for t in other_takes:
+        t.is_selected = False
+        session.add(t)
+    take.is_selected = True
+    session.add(take)
+    session.commit()
+
+    _reassemble_chapter_if_possible(chapter, session)
+
+    session.refresh(take)
+    return SegmentTakeResponse.model_validate(take)
 
 
 @router.get("/{book_id}/characters", response_model=list[CharacterResponse])

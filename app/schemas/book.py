@@ -100,3 +100,20 @@ class BookUpdate(BaseModel):
     genre: Optional[str] = None
     language: Optional[str] = None
     published_at: Optional[date] = None
+
+
+class RegenerateSegmentRequest(BaseModel):
+    voice_id: Optional[str] = None
+    emotion: Optional[str] = None
+
+
+class SegmentTakeResponse(BaseModel):
+    id: int
+    segment_id: int
+    audio_path: Optional[str] = None
+    voice_id: str
+    emotion: Optional[str] = None
+    is_selected: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

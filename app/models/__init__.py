@@ -5,6 +5,7 @@ from app.models.entities import (
     Character,
     CharacterMergeSuggestion,
     Segment,
+    SegmentTake,
     Voice,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "Character",
     "CharacterMergeSuggestion",
     "Segment",
+    "SegmentTake",
     "Voice",
 ]
