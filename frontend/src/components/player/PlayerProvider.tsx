@@ -25,6 +25,7 @@ export interface Track {
 interface PlayerState {
   track: Track | null;
   isPlaying: boolean;
+  audioError: boolean;
   currentTime: number;
   duration: number;
   rate: number;
@@ -53,6 +54,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [audioError, setAudioError] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRateState] = useState(1);
@@ -67,6 +69,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
     audio.addEventListener("timeupdate", () => setCurrentTime(audio.currentTime));
     audio.addEventListener("loadedmetadata", () => setDuration(audio.duration));
     audio.addEventListener("ended", () => setIsPlaying(false));
+    audio.addEventListener("error", () => { setIsPlaying(false); setAudioError(true); });
     audioRef.current = audio;
     return () => {
       audio.pause();
@@ -113,9 +116,10 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   const play = useCallback((newTrack: Track) => {
     const audio = audioRef.current;
     if (!audio) return;
+    setAudioError(false);
     audio.src = newTrack.src;
     audio.playbackRate = rateRef.current;
-    audio.play().catch(() => {});
+    audio.play().catch(() => { setIsPlaying(false); setAudioError(true); });
     setTrack(newTrack);
     setIsPlaying(true);
     setCurrentTime(0);
@@ -129,7 +133,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
       audio.pause();
       setIsPlaying(false);
     } else {
-      audio.play().catch(() => {});
+      audio.play().catch(() => { setIsPlaying(false); });
       setIsPlaying(true);
     }
   }, [isPlaying, track]);
@@ -163,7 +167,7 @@ export default function PlayerProvider({ children }: { children: ReactNode }) {
   return (
     <PlayerContext.Provider
       value={{
-        track, isPlaying, currentTime, duration, rate,
+        track, isPlaying, audioError, currentTime, duration, rate,
         currentSegment, voiceHues, voiceNames,
         play, toggle, seek, setRate, close,
       }}

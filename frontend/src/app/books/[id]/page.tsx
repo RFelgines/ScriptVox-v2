@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AppSettings,
@@ -72,6 +72,7 @@ export default function BookDetailPage({
   // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
   // ANALYZED, qui n'est pas un état « actif »).
   const [reloadNonce, setReloadNonce] = useState(0);
+  const prevBookStatusRef = useRef<string | null>(null);
 
   // ── Casting (fusionné dans la page livre — plus de page dédiée) ────────────
   const [castingExpanded, setCastingExpanded] = useState(false);
@@ -268,16 +269,18 @@ export default function BookDetailPage({
   }
 
   function handleGenerateBook() {
-    const destructive = book?.status === "DONE";
-    if (destructive && !window.confirm(t.book.regenerateAudioConfirm)) return;
+    // force=true uniquement pour la régénération complète explicite depuis un
+    // livre DONE (confirmation requise) -- sur ANALYZED, "Générer l'audio"
+    // préserve désormais les chapitres déjà générés individuellement au lieu
+    // de tout re-synthétiser (audit 2026-07-11, T2.1).
+    const force = book?.status === "DONE";
+    if (force && !window.confirm(t.book.regenerateAudioConfirm)) return;
     setGenerating(true);
     setError(null);
-    generateBook(bookId)
+    generateBook(bookId, force)
       .then(() => setReloadNonce((n) => n + 1))
-      .catch((e) => {
-        setError(e instanceof Error ? e.message : String(e));
-        setGenerating(false);
-      });
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setGenerating(false));
   }
 
   function handleGenerateChapter(position: number) {
@@ -307,13 +310,20 @@ export default function BookDetailPage({
         .then(([b, ch]) => {
           if (!active) return;
           setBook(b);
+          if (prevBookStatusRef.current !== null && prevBookStatusRef.current !== "ANALYZED" && b.status === "ANALYZED") {
+            setMergeReloadNonce((n) => n + 1);
+            setPendingVoices(new Map());
+          }
+          prevBookStatusRef.current = b.status;
           setChapters(ch);
           setError(null);
           const keep = bookActive(b.status) || ch.some((c) => chapterActive(c.status));
           if (keep) timer = setTimeout(tick, POLL_MS);
         })
         .catch((e) => {
-          if (active) setError(String(e));
+          if (!active) return;
+          setError(String(e));
+          timer = setTimeout(tick, POLL_MS * 2);
         })
         .finally(() => {
           if (active) setLoading(false);
@@ -557,20 +567,24 @@ export default function BookDetailPage({
                 )}
                 {book.status === "FAILED" && (
                   <div className="flex items-center gap-1.5">
+                    {/* Le bouton PRIMAIRE suit book.failed_stage (audit 2026-07-11,
+                        T2.3) : avant, "Reprendre l'analyse" était toujours mis en
+                        avant même quand seule la GÉNÉRATION avait échoué -- un clic
+                        dessus repassait le livre en ANALYZED, cassant la reprise de
+                        génération en cours. Les deux boutons restent visibles
+                        (chapters.length > 0 = les deux étapes sont possibles) --
+                        seul le style change, pas de comportement caché. */}
                     <Button
-                      variant="primary"
+                      variant={book.failed_stage === "generation" ? "secondary" : "primary"}
                       size="sm"
                       disabled={analyzingBook}
                       onClick={handleAnalyzeBook}
                     >
                       {analyzingBook ? t.book.launching : t.book.resumeAnalysis}
                     </Button>
-                    {/* N'apparaît que si des chapitres existent déjà (l'analyse a créé les
-                        chapitres/segments) -- sans quoi la génération n'a jamais pu commencer.
-                        Les deux boutons cohabitent plutôt qu'une heuristique fragile pour deviner
-                        laquelle des deux phases (analyse vs génération) a échoué. */}
                     {chapters.length > 0 && (
                       <Button
+                        variant={book.failed_stage === "generation" ? "primary" : "secondary"}
                         size="sm"
                         disabled={generating}
                         onClick={handleGenerateBook}

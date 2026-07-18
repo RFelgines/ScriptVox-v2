@@ -87,7 +87,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 from app.core.db import get_session  # noqa: E402
 from app.core.enums import VoiceKind, Gender  # noqa: E402
-from app.models.entities import Voice  # noqa: E402
+from app.models.entities import AppSetting, Voice  # noqa: E402
 
 _engine = create_engine(
     "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
@@ -111,18 +111,45 @@ with Session(_engine) as s:
     s.commit()
 
 
-# ── 4. POST /voices/{id}/sample sur une voix CLONED -> 202 + dispatch Huey ────
-section("POST /voices/{id}/sample -- voix CLONED -> 202, dispatch generate_voice_sample")
-with patch.object(tasks_mod, "generate_voice_sample") as _mock_task:
+# ── 4a. RÉGRESSION (audit 2026-07-11) : provider effectif non-qwen -> 409 ────
+# Avant fix, la route ne regardait QUE settings.tts_provider (.env brut),
+# jamais AppSetting.preferred_tts_provider (la préférence éditable en
+# Paramètres -- le mécanisme ajouté précisément pour le clonage de voix) :
+# incohérent avec _effective_tts_provider utilisé partout ailleurs dans le
+# pipeline. Dans l'état par défaut de ce test (TTS_PROVIDER=edgetts, aucune
+# ligne AppSetting), le provider effectif est edgetts -- générer un sample de
+# voix clonée n'a aucun sens (EdgeTTS n'a pas de clonage) et ne produisait
+# jusqu'ici qu'un 202 muet suivi d'un polling frontend qui n'aboutit jamais.
+section("POST /voices/{id}/sample -- provider effectif non-qwen (edgetts, aucune préférence) -> 409")
+with patch.object(tasks_mod, "generate_voice_sample") as _mock_task4a:
     with TestClient(app, raise_server_exceptions=False) as tc:
-        r = tc.post("/voices/patrick-baud/sample")
-if r.status_code != 202:
-    die(f"Expected 202, got {r.status_code}: {r.text}")
-if _mock_task.call_count != 1:
-    die(f"Expected generate_voice_sample called once, got {_mock_task.call_count}")
-if _mock_task.call_args.args != ("patrick-baud",):
-    die(f"Expected dispatched with ('patrick-baud',), got {_mock_task.call_args}")
-ok("202 + generate_voice_sample('patrick-baud') dispatché une fois")
+        r4a = tc.post("/voices/patrick-baud/sample")
+if r4a.status_code != 409:
+    die(f"Expected 409, got {r4a.status_code}: {r4a.text}")
+if _mock_task4a.called:
+    die("generate_voice_sample ne devrait pas être dispatché quand le provider effectif n'est pas qwen")
+ok("409 + aucun dispatch (évite un 202 qui n'aurait jamais rien produit)")
+
+
+# ── 4b. Préférence globale AppSetting.preferred_tts_provider='qwen' -> 202 ───
+# Reproduit exactement le scénario du bug (.env=edgetts + préférence Paramètres
+# =qwen, le setup type pour le clonage de voix) : la route doit résoudre le
+# MÊME provider effectif que le pipeline de génération (_effective_tts_provider).
+section("POST /voices/{id}/sample -- préférence globale AppSetting='qwen' -> 202 + dispatch")
+with Session(_engine) as _s:
+    _s.add(AppSetting(id=1, preferred_tts_provider="qwen"))
+    _s.commit()
+
+with patch.object(tasks_mod, "generate_voice_sample") as _mock_task4b:
+    with TestClient(app, raise_server_exceptions=False) as tc:
+        r4b = tc.post("/voices/patrick-baud/sample")
+if r4b.status_code != 202:
+    die(f"Expected 202, got {r4b.status_code}: {r4b.text}")
+if _mock_task4b.call_count != 1:
+    die(f"Expected generate_voice_sample called once, got {_mock_task4b.call_count}")
+if _mock_task4b.call_args.args != ("patrick-baud",):
+    die(f"Expected dispatched with ('patrick-baud',), got {_mock_task4b.call_args}")
+ok("202 + generate_voice_sample('patrick-baud') dispatché une fois (provider effectif résolu via AppSetting)")
 
 
 # ── 5. La réponse ne bloque pas sur la génération (pas de génération inline) ──

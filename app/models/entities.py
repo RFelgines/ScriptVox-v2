@@ -25,6 +25,10 @@ class Book(SQLModel, table=True):
     status: BookStatus = Field(default=BookStatus.PENDING, index=True)
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
     error_message: Optional[str] = None
+    # "analysis" | "generation" ; renseigné uniquement quand status=FAILED, sinon
+    # None. Distingue quelle étape a échoué (l'UI proposait parfois le mauvais
+    # bouton de reprise faute de cette info -- audit 2026-07-11, T2.3).
+    failed_stage: Optional[str] = None
     audio_path: Optional[str] = None
     mp3_path: Optional[str] = None
     cover_path: Optional[str] = None
@@ -63,6 +67,11 @@ class Chapter(SQLModel, table=True):
     error_message: Optional[str] = None
     priority: int = Field(default=0)  # 0 = normal priority; higher = more urgent
     cancel_requested: bool = Field(default=False)  # set by /stop, polled by should_abort
+    # Posé au dispatch réel (routes generate), effacé une fois GENERATING pris
+    # en charge ou retiré -- None = jamais demandé, distinct de status=PENDING
+    # seul. Lu par generate_chapter_queue_pump pour choisir le prochain
+    # chapitre par priority DESC (audit 2026-07-11, Lot 3).
+    queued_at: Optional[datetime] = None
 
     book: Optional["Book"] = Relationship(back_populates="chapters")
     segments: list["Segment"] = Relationship(

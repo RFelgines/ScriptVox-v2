@@ -2,15 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { BookSummary, coverUrl, deleteBook } from "@/lib/api";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { useT } from "@/lib/i18n/LanguageContext";
-
-const cardVariants = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const } },
-};
 
 export default function BookCard({
   book,
@@ -36,12 +30,7 @@ export default function BookCard({
   }
 
   return (
-    <motion.div
-      variants={cardVariants}
-      whileHover={{ y: -6, scale: 1.02 }}
-      transition={{ type: "spring", stiffness: 300, damping: 25 }}
-      className="group relative"
-    >
+    <div className="group relative transition-transform duration-200 ease-out hover:-translate-y-1.5 hover:scale-[1.02]">
       <Link
         href={`/books/${book.id}`}
         // Tuile pleine bordure/panneau supprimés : la couverture remplit toute
@@ -102,6 +91,6 @@ export default function BookCard({
       >
         {deleting ? "…" : "✕"}
       </button>
-    </motion.div>
+    </div>
   );
 }

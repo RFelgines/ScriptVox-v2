@@ -298,6 +298,20 @@ except LLMParsingError as exc:
     assert exc.raw_response == "not json at all {{{"
     ok(f"LLMParsingError sur JSON invalide : {exc}")
 
+# raw=None (audit 2026-07-11) : réponse Gemini bloquée par les filtres de
+# sécurité -> response.text vaut None -- json.loads(None) lève un TypeError
+# brut, jamais capturé par l'ancien `except json.JSONDecodeError` seul,
+# remontant tel quel jusqu'au worker au lieu du LLMParsingError attendu par
+# ARCHITECTURE.md §2.5 ("All JSON / Pydantic parsing lives inside try/except").
+try:
+    _parse_llm_json(None, [])
+    die("Expected LLMParsingError on raw=None")
+except LLMParsingError as exc:
+    assert exc.raw_response is None
+    ok(f"LLMParsingError sur raw=None (réponse LLM bloquée/vide) : {exc}")
+except TypeError as exc:
+    die(f"TypeError brut au lieu de LLMParsingError sur raw=None : {exc}")
+
 # Entrée d'attribution malformée (chaîne au lieu d'objet) -> ignorée, pas de crash
 # (trouvé sur un vrai run HP : un chapitre dense a perdu 26 min de calcul LLM sur ce cas)
 _malformed_attr_json = json.dumps({

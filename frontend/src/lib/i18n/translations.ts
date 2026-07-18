@@ -25,6 +25,7 @@ export interface Dictionary {
     voiceCreate: (detail: string) => string;
     voiceDelete: (detail: string) => string;
     voiceOverride: (detail: string) => string;
+    voiceSample: (detail: string) => string;
     bookAction: (action: string, detail: string) => string;
     actions: {
       analyze: string;
@@ -105,6 +106,7 @@ export interface Dictionary {
     rateSelectAriaLabel: string;
     readByLabel: string;
     closePlayerAriaLabel: string;
+    audioError: string;
   };
   generation: {
     title: string;
@@ -276,6 +278,7 @@ const fr: Dictionary = {
     voiceCreate: (detail) => `Création de voix échouée : ${detail}`,
     voiceDelete: (detail) => `Suppression de voix échouée : ${detail}`,
     voiceOverride: (detail) => `Override voix échoué : ${detail}`,
+    voiceSample: (detail) => `Aperçu de voix échoué : ${detail}`,
     bookAction: (action, detail) => `${action} : ${detail}`,
     actions: {
       analyze: "Analyse échouée",
@@ -365,6 +368,7 @@ const fr: Dictionary = {
     rateSelectAriaLabel: "Vitesse de lecture",
     readByLabel: "Lu par",
     closePlayerAriaLabel: "Fermer le lecteur",
+    audioError: "Lecture impossible",
   },
   generation: {
     title: "Génération",
@@ -553,6 +557,7 @@ const en: Dictionary = {
     voiceCreate: (detail) => `Voice creation failed: ${detail}`,
     voiceDelete: (detail) => `Voice deletion failed: ${detail}`,
     voiceOverride: (detail) => `Voice override failed: ${detail}`,
+    voiceSample: (detail) => `Voice preview failed: ${detail}`,
     bookAction: (action, detail) => `${action}: ${detail}`,
     actions: {
       analyze: "Analysis failed",
@@ -642,6 +647,7 @@ const en: Dictionary = {
     rateSelectAriaLabel: "Playback speed",
     readByLabel: "Read by",
     closePlayerAriaLabel: "Close player",
+    audioError: "Playback error",
   },
   generation: {
     title: "Generation",

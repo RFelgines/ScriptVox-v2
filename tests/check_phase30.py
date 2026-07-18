@@ -96,6 +96,30 @@ def _fresh_file_engine(tmpdir: Path, name: str = "test.db"):
     )
 
 
+def _pre_alembic_engine(tmpdir: Path, name: str = "test.db"):
+    """Un moteur dont le schéma est l'image EXACTE de la seule migration
+    baseline (0a0a59b228cc), sans table alembic_version -- la forme réelle de
+    tout scriptvox.db créé avant l'adoption d'Alembic (2026-07-02).
+
+    Volontairement PAS SQLModel.metadata.create_all() sur les modèles actuels :
+    ceux-ci contiennent déjà chapter.priority/cancel_requested et
+    app_setting.preferred_language (migrations 2 et 3), ce qu'aucune vraie
+    vieille base ne peut avoir -- un tel fixture ne peut pas détecter un stamp
+    erroné à head au lieu de la baseline (régression audit 2026-07-11, cf.
+    section 8)."""
+    from alembic import command
+    from alembic.config import Config
+
+    eng = _fresh_file_engine(tmpdir, name)
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", eng.url.render_as_string(hide_password=False))
+    command.upgrade(cfg, "0a0a59b228cc")
+    with eng.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE alembic_version")
+    return eng
+
+
 # ── 2. Base neuve -> _ensure_schema crée tout le schéma ──────────────────────
 section("Base neuve (fichier vide) : _ensure_schema crée toutes les tables")
 with tempfile.TemporaryDirectory() as _tmp2:
@@ -106,16 +130,17 @@ with tempfile.TemporaryDirectory() as _tmp2:
     check("table 'chapter' créée", "chapter" in _tables2)
     check("table 'segment' créée", "segment" in _tables2)
     check("table 'voice' créée", "voice" in _tables2)
+    _book_cols2 = {c["name"] for c in inspect(_eng2).get_columns("book")}
+    check("colonne 'book.failed_stage' créée (migration 4, audit 2026-07-11 T2.3)",
+          "failed_stage" in _book_cols2, f"got {_book_cols2}")
     check("historique alembic présent ('alembic_version')", "alembic_version" in _tables2)
     _eng2.dispose()
 
 
-# ── 3. Base "pré-Alembic" (create_all brut) -> auto-tamponnée, pas de crash ──
-section("Base pré-Alembic (create_all brut, sans historique) : auto-tamponnée sans crash")
+# ── 3. Base "pré-Alembic" (schéma baseline) -> auto-tamponnée, pas de crash ──
+section("Base pré-Alembic (schéma baseline, sans historique) : auto-tamponnée sans crash")
 with tempfile.TemporaryDirectory() as _tmp3:
-    _eng3 = _fresh_file_engine(Path(_tmp3))
-    import app.models  # noqa: F401 -- enregistre les tables sur SQLModel.metadata
-    SQLModel.metadata.create_all(_eng3)  # simule l'ancien comportement (avant ce lot)
+    _eng3 = _pre_alembic_engine(Path(_tmp3))
     _tables_before3 = set(inspect(_eng3).get_table_names())
     check("pas d'historique alembic avant (simule une vraie DB existante)",
           "alembic_version" not in _tables_before3, f"got {_tables_before3}")
@@ -138,19 +163,28 @@ with tempfile.TemporaryDirectory() as _tmp3:
 # ── 4. LE PLUS IMPORTANT : des données réelles survivent au tamponnage ───────
 section("Données réelles préexistantes survivent intactes à l'auto-tamponnage")
 with tempfile.TemporaryDirectory() as _tmp4:
-    _eng4 = _fresh_file_engine(Path(_tmp4))
-    SQLModel.metadata.create_all(_eng4)  # simule une vraie DB déjà en usage
+    _eng4 = _pre_alembic_engine(Path(_tmp4))
 
-    with Session(_eng4) as _s:
-        _book4 = Book(
-            title="Mon Vrai Livre", author="Un Vrai Auteur",
-            source_path="/data/1/original.epub", status=BookStatus.DONE,
-            progress=100.0, audio_path="/data/1/book.wav", mp3_path="/data/1/book.mp3",
+    # INSERT SQL brut limité aux colonnes baseline (PAS Session.add(Book(...)) :
+    # l'ORM construit l'INSERT depuis le modèle SQLModel ACTUEL, qui inclut
+    # désormais book.failed_stage -- ajouté par la migration 4, absente du
+    # schéma baseline de ce fixture -- ce qui échouerait sur une vraie vieille
+    # base. Even principe que _pre_alembic_engine : rester fidèle au schéma
+    # RÉEL d'une base pré-migration 4 (audit 2026-07-11, T2.3).
+    with _eng4.begin() as _conn4:
+        _conn4.exec_driver_sql(
+            "INSERT INTO book (title, author, source_path, status, progress, "
+            "audio_path, mp3_path, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "Mon Vrai Livre", "Un Vrai Auteur", "/data/1/original.epub", "DONE", 100.0,
+                "/data/1/book.wav", "/data/1/book.mp3",
+                "2026-07-02 00:00:00", "2026-07-02 00:00:00",
+            ),
         )
-        _s.add(_book4)
-        _s.commit()
-        _s.refresh(_book4)
-        _book4_id = _book4.id
+        _book4_id = _conn4.exec_driver_sql(
+            "SELECT id FROM book WHERE title = 'Mon Vrai Livre'"
+        ).scalar_one()
 
     _ensure_schema(_eng4)  # l'opération potentiellement dangereuse
 
@@ -196,8 +230,7 @@ with tempfile.TemporaryDirectory() as _tmp6:
 # ── 7. Intégration : init_db() sur base pré-Alembic avec données existantes ──
 section("Intégration : init_db() préserve les données d'une base pré-Alembic existante")
 with tempfile.TemporaryDirectory() as _tmp7:
-    _eng7 = _fresh_file_engine(Path(_tmp7))
-    SQLModel.metadata.create_all(_eng7)  # simule une vraie DB déjà en usage
+    _eng7 = _pre_alembic_engine(Path(_tmp7))
 
     with Session(_eng7) as _s:
         _voice7 = Voice(
@@ -227,6 +260,64 @@ with tempfile.TemporaryDirectory() as _tmp7:
         check("la voix clonée n'a pas été dupliquée",
               sum(1 for v in _all_voices7 if v.voice_id == "patrick-baud-clone") == 1)
     _eng7.dispose()
+
+
+# ── 8. RÉGRESSION (audit 2026-07-11) : le stamp doit cibler la BASELINE, ─────
+# pas "head" -- sans quoi les migrations 2 et 3 ne sont jamais appliquées à une
+# vraie vieille base (auto-tamponnée "à jour" alors que chapter.priority/
+# cancel_requested et app_setting.preferred_language lui manquent encore).
+# _pre_alembic_engine (contrairement à l'ancien fixture create_all() sur les
+# modèles actuels qu'utilisaient les sections 3/4/7 avant ce lot) reproduit
+# fidèlement ce cas : lui seul peut détecter un stamp erroné à head.
+section("RÉGRESSION : une base pré-Alembic au schéma RÉELLEMENT ancien reçoit les migrations manquantes")
+with tempfile.TemporaryDirectory() as _tmp8:
+    _eng8 = _pre_alembic_engine(Path(_tmp8))
+
+    # INSERT SQL brut, même raison qu'en section 4 : le modèle Book actuel
+    # inclut failed_stage (migration 4), absente du schéma baseline ici.
+    with _eng8.begin() as _conn8:
+        _conn8.exec_driver_sql(
+            "INSERT INTO book (title, source_path, status, progress, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "Vieux Livre Pré-Migration", "/data/2/x.epub", "DONE", 100.0,
+                "2026-07-02 00:00:00", "2026-07-02 00:00:00",
+            ),
+        )
+        _book8_id = _conn8.exec_driver_sql(
+            "SELECT id FROM book WHERE title = 'Vieux Livre Pré-Migration'"
+        ).scalar_one()
+
+    _cols_before8 = {c["name"] for c in inspect(_eng8).get_columns("chapter")}
+    check("schéma baseline confirmé : chapter.priority absente avant fix",
+          "priority" not in _cols_before8, f"got {_cols_before8}")
+
+    _ensure_schema(_eng8)  # doit stamper la BASELINE puis upgrade -- pas stamper head directement
+
+    _cols_chapter8 = {c["name"] for c in inspect(_eng8).get_columns("chapter")}
+    check("chapter.priority ajoutée après _ensure_schema (migration 9e2bc226e2fa appliquée)",
+          "priority" in _cols_chapter8, f"got {_cols_chapter8}")
+    check("chapter.cancel_requested ajoutée",
+          "cancel_requested" in _cols_chapter8, f"got {_cols_chapter8}")
+    _cols_setting8 = {c["name"] for c in inspect(_eng8).get_columns("app_setting")}
+    check("app_setting.preferred_language ajoutée (migration 29e226c24b2d appliquée)",
+          "preferred_language" in _cols_setting8, f"got {_cols_setting8}")
+    _cols_book8 = {c["name"] for c in inspect(_eng8).get_columns("book")}
+    check("book.failed_stage ajoutée (migration 67521bdee0e5 appliquée)",
+          "failed_stage" in _cols_book8, f"got {_cols_book8}")
+
+    with Session(_eng8) as _s:
+        _book8_after = _s.get(Book, _book8_id)
+        check("le livre pré-existant survit intact",
+              _book8_after is not None and _book8_after.title == "Vieux Livre Pré-Migration")
+
+    try:
+        _ensure_schema(_eng8)
+        ok("2e appel idempotent après le fix (déjà à head, upgrade no-op)")
+    except Exception as exc:
+        fail("2e appel a levé une exception", f"{type(exc).__name__}: {exc}")
+
+    _eng8.dispose()
 
 
 # ── Nettoyage fichiers de test résiduels ──────────────────────────────────────

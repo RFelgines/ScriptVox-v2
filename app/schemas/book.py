@@ -82,6 +82,7 @@ class BookResponse(BaseModel):
     status: BookStatus
     progress: float
     error_message: Optional[str] = None
+    failed_stage: Optional[str] = None  # "analysis" | "generation" ; renseigné uniquement si status=FAILED
     audio_path: Optional[str] = None
     mp3_path: Optional[str] = None
     cover_path: Optional[str] = None

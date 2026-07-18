@@ -219,6 +219,17 @@ try:
 except LLMParsingError:
     ok("malformed JSON -> LLMParsingError")
 
+# raw=None (audit 2026-07-11) : réponse Gemini bloquée par les filtres de
+# sécurité -> response.text vaut None -- json.loads(None) lève un TypeError
+# brut si non capturé, cf. le même correctif sur _parse_llm_json (check_phase3).
+try:
+    _parse_merge_json(None, _p8_chars)
+    die("Expected LLMParsingError on raw=None")
+except LLMParsingError:
+    ok("raw=None (réponse LLM bloquée/vide) -> LLMParsingError")
+except TypeError as exc:
+    die(f"TypeError brut au lieu de LLMParsingError sur raw=None : {exc}")
+
 
 # ── 9. OllamaProvider / GeminiProvider expose suggest_merges (fast path) ─────
 section("OllamaProvider/GeminiProvider.suggest_merges — fast path, <2 characters -> [] (no network)")

@@ -21,6 +21,7 @@ export interface BookSummary {
   status: BookStatus;
   progress: number;
   error_message: string | null;
+  failed_stage: "analysis" | "generation" | null;
   created_at: string;
   audio_path: string | null;
   mp3_path: string | null;
@@ -212,7 +213,16 @@ export async function getAppStatus(): Promise<AppStatus> {
 
 export async function requestVoiceSample(voiceId: string): Promise<VoiceSummary> {
   const res = await fetch(`${API_URL}/voices/${voiceId}/sample`, { method: "POST" });
-  if (!res.ok) throw new Error(`POST /voices/${voiceId}/sample failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = String(res.status);
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // réponse non-JSON : on garde le code HTTP
+    }
+    throw new Error(t().errors.voiceSample(detail));
+  }
   return res.json();
 }
 
@@ -347,8 +357,8 @@ export function analyzeBook(bookId: number): Promise<BookSummary> {
   return _postBook(bookId, "analyze", "analyze");
 }
 
-export function generateBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "generate", "generate");
+export function generateBook(bookId: number, force = false): Promise<BookSummary> {
+  return _postBook(bookId, force ? "generate?force=true" : "generate", "generate");
 }
 
 export function stopBook(bookId: number): Promise<BookSummary> {

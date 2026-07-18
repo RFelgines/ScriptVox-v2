@@ -48,7 +48,7 @@ function UtilBlock({
 
 export default function PlayerBar() {
   const t = useT();
-  const { track, isPlaying, currentTime, duration, rate, play, toggle, seek, setRate, close,
+  const { track, isPlaying, audioError, currentTime, duration, rate, play, toggle, seek, setRate, close,
           currentSegment, voiceHues, voiceNames } = usePlayer();
   const [expanded, setExpanded] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
@@ -340,6 +340,10 @@ export default function PlayerBar() {
             {duration ? `-${fmt(remaining)}` : fmt(duration)}
           </span>
         </div>
+      )}
+
+      {audioError && (
+        <p className="px-4 pb-0.5 text-center text-xs text-danger">{t.player.audioError}</p>
       )}
 
       {/* Grille à 3 colonnes (1fr/auto/1fr) : le cluster central reste centré sur
