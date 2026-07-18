@@ -2509,3 +2509,55 @@ d'appel (voix/page, PlayerBar, ChapterTranscript, books/[id]).
 `AnalyserNode` Web Audio sur l'`<audio>` du `PlayerProvider` et piloter une variable CSS
 (amplitude → scale/opacity du cœur). Écarté ici : traverse les frontières de composants + boucle
 rAF permanente, à ne faire que si le scintillement simulé ne suffit pas à l'oreille/à l'œil.
+→ **GO utilisateur le 2026-07-18 — livré en Étape 2 ci-dessous.**
+
+### Étape 2 ✅ (2026-07-18) — Amplitude audio réelle → intensité de l'orbe
+
+**Livré.** L'intensité du mouvement des orbes actives suit désormais la voix réellement entendue.
+
+- `PlayerProvider.tsx` — chaîne Web Audio paresseuse (création au 1er play, geste utilisateur
+  obligatoire pour l'AudioContext ; `createMediaElementSource` ne pouvant être appelé qu'une fois,
+  refs + resume() ensuite). Boucle rAF pendant la lecture : RMS du domaine temporel, remonté ×3.2,
+  lissage asymétrique façon vumètre (attaque 0.45, retombée 0.12), écrit dans la var CSS
+  **`--voice-amp`** (0..1) sur `<html>` — zéro re-render React à 60 fps, écriture seulement si
+  Δ > 0.01. À l'arrêt (pause/close/ended/démontage), la propriété est **retirée** → repli.
+  `audio.crossOrigin = "anonymous"` posé à la création (requis pour que l'analyseur reçoive du
+  signal depuis l'API, autre origine). Échec `AudioContext` → catch, lecture normale, orbes à
+  intensité par défaut.
+- `VoiceOrb.tsx` — quand `active` uniquement (une orbe inactive ne référence PAS la var, sinon
+  chaque écriture invaliderait le style des ~200 orbes de la transcription) : échelle de la sphère
+  `scale(0.97→1.06)`, opacité du halo `0.15→1`, luminosité du cœur `0.35→1`, toutes en
+  `var(--voice-amp, 0.55)` — repli mi-intensité quand rien n'est analysé (orb-lab, échec CORS…).
+  Couches de suivi dédiées (transitions 120-150 ms) pour ne pas entrer en conflit avec les
+  keyframes ni ralentir le suivi avec les fondus d'état 500 ms.
+
+**Validation.** Mécanisme complet testé dans le Chromium du conteneur : WAV cross-origin servi
+avec en-tête CORS + `crossOrigin="anonymous"` + `AnalyserNode` → RMS suit l'enveloppe du signal
+(0.02→1.00 mesuré sur un sinus modulé à 3 Hz), aucune erreur media. Build + lint verts.
+
+**⚠️ Risque assumé (documenté).** `crossOrigin="anonymous"` rend le chargement audio dépendant des
+en-têtes CORS du backend : si `FRONTEND_ORIGINS` ne couvre pas l'origine du front, la lecture audio
+échouera (avant, elle fonctionnait sans CORS). Config par défaut OK (localhost:3000, README).
+
+### Étape 3 ✅ (2026-07-18) — 5 candidats de variation dans orb-lab (revue utilisateur à faire)
+
+**Demande.** « D'autres variations d'orbes que je vérifierai ce soir. » 5 directions volontairement
+différentes ajoutées au labo (`/orb-lab`, section « Candidats — itération 2 »), même règle que la
+prod (figé au repos via `animation-play-state: paused` + désaturation, vivant en lecture,
+transform/opacity only) :
+
+1. **Comète** — arc de lumière orbital (conic masqué en anneau) + tête brillante + étincelle
+   contre-orbitale. Énergique, lisible en petit.
+2. **Nébuleuse bichrome** — deux nuages complémentaires (teinte + contre-couleur pleine) en
+   tourbillons opposés + étoiles. Plus contrasté que la palette analogue de la prod.
+3. **Sonar** — anneaux qui naissent au centre et s'évanouissent vers le bord + cœur pulsant.
+   Sémantique « émission de voix » forte.
+4. **Lave** — gouttes lumineuses qui montent du fond et se dissolvent. Lent, hypnotique.
+5. **Couronne** — éclipse inversée : centre sombre, lumière sur le bord qui flare + scintillement
+   conique en rotation lente. Dramatique, très distinctif.
+
+Le candidat retenu (s'il détrône la prod) recevra le même branchement `--voice-amp` et les mêmes
+optimisations (pose figée par teinte, couche en moins < 28 px) lors de la promotion en prod.
+
+**Fichiers Étapes 2+3 (4).** `frontend/src/components/player/PlayerProvider.tsx`,
+`frontend/src/components/VoiceOrb.tsx`, `frontend/src/app/orb-lab/page.tsx`, `TASKS.md`.

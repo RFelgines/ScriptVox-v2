@@ -8,12 +8,21 @@ type VoiceOrbProps = {
   className?: string;
   /** Contenu superposé au centre (icône play, spinner...). */
   children?: ReactNode;
-  /** Voix en train de parler : nappes en dérive + cœur scintillant + halo.
+  /** Voix en train de parler : nappes en dérive + cœur scintillant + halo,
+   * intensité pilotée par l'amplitude audio réelle via var(--voice-amp)
+   * (posée par PlayerProvider, repli 0.55 si aucune analyse ne tourne).
    * Figée sinon (défaut) : les animations restent posées mais en
-   * animation-play-state:paused (zéro coût, reprise sans saut) -- nécessaire
-   * pour rester léger avec 50-200 orbes simultanées (transcription). */
+   * animation-play-state:paused (zéro coût, reprise sans saut) et la var
+   * n'est PAS référencée -- nécessaire pour rester léger avec 50-200 orbes
+   * simultanées (transcription). */
   active?: boolean;
 };
+
+// Intensité liée à l'amplitude : `lo + amp * (hi - lo)`, uniquement quand
+// l'orbe est active (une orbe inactive ne doit pas dépendre de la var, sinon
+// chaque écriture 60fps invaliderait le style des ~200 orbes de la
+// transcription).
+const amp = (lo: number, hi: number) => `calc(${lo} + var(--voice-amp, 0.55) * ${hi - lo})`;
 
 export default function VoiceOrb({ hue, size, className, children, active = false }: VoiceOrbProps) {
   const playState = active ? "running" : "paused";
@@ -38,7 +47,18 @@ export default function VoiceOrb({ hue, size, className, children, active = fals
       className={`living-orb relative block shrink-0 ${className ?? ""}`}
       style={{ width: size, height: size }}
     >
-      {/* Halo : lumière qui déborde de l'orbe, uniquement quand la voix parle. */}
+      {/* Échelle liée à l'amplitude : englobe halo + sphère (le transform de la
+          sphère est déjà occupé par la respiration keyframe). */}
+      <span
+        className="absolute inset-0 block"
+        style={{
+          transform: active ? `scale(${amp(0.97, 1.06)})` : undefined,
+          transition: "transform 120ms ease-out",
+          willChange: active ? "transform" : undefined,
+        }}
+      >
+      {/* Halo : lumière qui déborde de l'orbe, uniquement quand la voix parle.
+          3 couches : fondu d'état (500ms) > suivi d'amplitude (120ms) > pulsation. */}
       <span
         className="pointer-events-none absolute block rounded-full"
         style={{ inset: "-38%", opacity: active ? 1 : 0, transition: "opacity 500ms ease" }}
@@ -46,10 +66,18 @@ export default function VoiceOrb({ hue, size, className, children, active = fals
         <span
           className="absolute inset-0 block rounded-full"
           style={{
-            background: `radial-gradient(closest-side, hsl(${hue} 90% 62% / 0.5), hsl(${hue} 90% 62% / 0) 72%)`,
-            ...anim("orb-halo-pulse", 1.6, 0.4),
+            opacity: active ? amp(0.15, 1) : undefined,
+            transition: "opacity 120ms linear",
           }}
-        />
+        >
+          <span
+            className="absolute inset-0 block rounded-full"
+            style={{
+              background: `radial-gradient(closest-side, hsl(${hue} 90% 62% / 0.5), hsl(${hue} 90% 62% / 0) 72%)`,
+              ...anim("orb-halo-pulse", 1.6, 0.4),
+            }}
+          />
+        </span>
       </span>
 
       {/* Sphère clippée : terne au repos, saturée + en respiration en lecture. */}
@@ -108,7 +136,10 @@ export default function VoiceOrb({ hue, size, className, children, active = fals
             éteint au repos. */}
         <span
           className="absolute inset-0 block"
-          style={{ opacity: active ? 1 : 0.25, transition: "opacity 500ms ease" }}
+          style={{
+            opacity: active ? amp(0.35, 1) : 0.25,
+            transition: `opacity ${active ? 150 : 500}ms ease`,
+          }}
         >
           <span
             className="absolute block rounded-full"
@@ -144,6 +175,7 @@ export default function VoiceOrb({ hue, size, className, children, active = fals
             boxShadow: `inset 0 ${size * 0.06}px ${size * 0.09}px rgba(255,255,255,0.4), inset 0 -${size * 0.1}px ${size * 0.14}px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.16)`,
           }}
         />
+      </span>
       </span>
       {children && (
         <span className="absolute inset-0 z-10 flex items-center justify-center">{children}</span>
