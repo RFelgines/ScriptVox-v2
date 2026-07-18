@@ -2561,3 +2561,43 @@ optimisations (pose figée par teinte, couche en moins < 28 px) lors de la promo
 
 **Fichiers Étapes 2+3 (4).** `frontend/src/components/player/PlayerProvider.tsx`,
 `frontend/src/components/VoiceOrb.tsx`, `frontend/src/app/orb-lab/page.tsx`, `TASKS.md`.
+
+### Étape 4 ✅ (2026-07-18) — Seed par voix (toutes les propositions) + candidat shader « Plasma »
+
+**Demande.** (a) « Que le mouvement soit naturel et différent d'une voix à l'autre, déterminé par un
+seed associé à la voix » ; (b) avis critique sur l'écart de qualité avec ElevenLabs/ChatGPT.
+
+**(a) Seed livré partout.** PRNG déterministe (mulberry32) seedé par voix.
+- `VoiceOrb.tsx` (prod) — nouvelle prop `seed?: number` (défaut : dérivé de `hue`, donc déjà unique
+  par voix sans toucher aux sites d'appel). Tirés du seed : durées des 8 animations (bornes gardant
+  l'incommensurabilité), phases (delays négatifs → pose figée propre à la voix), sens de parcours
+  (`animation-direction: reverse` par couche), géométrie (inset nappe A, dimensions/position de
+  l'ellipse B, taille du cœur), décalages de teinte des nappes (+20..38° / −34..−18°). Bornes
+  calibrées pour qu'aucune combinaison ne soit déséquilibrée.
+- `orb-lab/page.tsx` — helper `seedRng(hue)` appliqué aux 5 candidats (durées, phases, directions,
+  géométrie). Dans le labo le seed = teinte ; en prod seed = voix.
+
+**(b) Avis critique rendu (résumé — détail dans la conversation).** L'écart avec ElevenLabs/ChatGPT
+n'est pas un problème de réglage mais de **technologie de rendu** : leurs orbes sont des fragment
+shaders (bruit simplex/fbm domain-warpé, évalué par pixel, temps continu jamais périodique, contour
+déformé, mapping audio multi-paramètres). Le CSS ne sait que translater/tourner/opacifier des
+calques figés : la matière ne se déforme pas, les keyframes sont périodiques, le cercle reste un
+cercle. L'abandon du WebGL en Phase 22 venait du plafond de contextes (~8-16) face aux 50-200 orbes
+de la transcription + d'un shader jugé décevant — mais la bonne architecture est **hybride** :
+shader pour les orbes « héros » (player, page Voix, segment actif = 1-3 instances), CSS pour la
+masse statique.
+
+**Démonstrateur livré : candidat « Plasma (shader) »** — `orb-lab/ShaderOrb.tsx` (nouveau, WebGL
+brut, zéro dépendance) : fbm 4 octaves domain-warpé par pixel, silhouette du disque déformée par le
+bruit (échantillonné sur le cercle, sans couture), palette ancrée sur la teinte de la voix + veines
+sombres, cœur lumineux modulé par le bruit, seed par voix (décale le domaine du bruit), énergie =
+`playing` + `var(--voice-amp)` (déjà branchée), repos = temps GELÉ + désaturation, rAF stoppé une
+fois la transition retombée (zéro coût au repos, même règle que la prod). Vérifié en navigateur
+réel : contour qui ondule, matière qui se déforme en continu, palettes violette/orange concluantes.
+
+**Fichiers (4).** `frontend/src/components/VoiceOrb.tsx`, `frontend/src/app/orb-lab/page.tsx`,
+`frontend/src/app/orb-lab/ShaderOrb.tsx` (nouveau), `TASKS.md`. Build + lint verts.
+
+**Décision en attente (revue du soir).** Si « Plasma » est retenu : promotion en composant partagé
+avec bascule shader/CSS par taille+état (héros animé = shader, transcription/statique = CSS actuel),
+budget contextes WebGL borné (~3), fallback CSS si `getContext('webgl')` échoue.

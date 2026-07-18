@@ -16,6 +16,7 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import VoiceOrb from "@/components/VoiceOrb";
+import ShaderOrb from "./ShaderOrb";
 
 const SIZE = 160;
 
@@ -303,6 +304,20 @@ function AuroraRibbon({ hue, playing }: { hue: number; playing: boolean }) {
 // Candidats itération 2 (2026-07-18) : coquille commune (finition sphérique +
 // terne/figé au repos, comme la prod) ; chaque variante ne fournit que ses
 // couches internes.
+//
+// Seed par voix (2026-07-18) : comme en prod, chaque candidat tire durées,
+// phases et petites variations de géométrie d'un PRNG seedé -- ici le seed
+// est la teinte (dans l'app, teinte = voix). Deux voix n'ont jamais le même
+// mouvement.
+function seedRng(seed: number) {
+  let a = (Math.round(seed * 1021) + 1) | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 function CandidateShell({ playing, background, children }: { playing: boolean; background: string; children: ReactNode }) {
   return (
     <div
@@ -331,6 +346,8 @@ function CandidateShell({ playing, background, children }: { playing: boolean; b
 // anneau + tête brillante), une étincelle contre-orbite, cœur qui pulse.
 function CometOrb({ hue, playing }: { hue: number; playing: boolean }) {
   const ps = playing ? "running" : "paused";
+  const r = seedRng(hue);
+  const f = (lo: number, hi: number) => (lo + r() * (hi - lo)).toFixed(2);
   const ringMask = "radial-gradient(closest-side, transparent 58%, black 66%, black 90%, transparent 96%)";
   return (
     <CandidateShell playing={playing} background={`radial-gradient(circle at 40% 35%, hsl(${hue} 60% 26%), hsl(${hue} 65% 12%) 70%)`}>
@@ -339,11 +356,11 @@ function CometOrb({ hue, playing }: { hue: number; playing: boolean }) {
         style={{
           inset: "18%",
           background: `radial-gradient(closest-side, hsl(${hue} 90% 70% / 0.55), transparent 70%)`,
-          animation: "lorbCometHead 2.3s ease-in-out infinite",
+          animation: `lorbCometHead ${f(1.9, 2.9)}s ease-in-out ${-r() * 2}s infinite`,
           animationPlayState: ps,
         }}
       />
-      <div className="absolute" style={{ inset: "4%", animation: "lorbSpin 1.9s linear -0.4s infinite", animationPlayState: ps }}>
+      <div className="absolute" style={{ inset: "4%", animation: `lorbSpin ${f(1.5, 2.4)}s linear ${-r() * 2}s infinite`, animationPlayState: ps }}>
         <div
           className="absolute inset-0 rounded-full"
           style={{
@@ -360,14 +377,14 @@ function CometOrb({ hue, playing }: { hue: number; playing: boolean }) {
             left: "78%",
             top: "47%",
             background: `radial-gradient(closest-side, white, hsl(${hue} 100% 80%) 40%, transparent 70%)`,
-            animation: "lorbCometHead 0.9s ease-in-out infinite",
+            animation: `lorbCometHead ${f(0.7, 1.15)}s ease-in-out infinite`,
             animationPlayState: ps,
           }}
         />
       </div>
       <div
         className="absolute"
-        style={{ inset: "14%", animation: "lorbSpin 3.1s linear reverse infinite", animationPlayState: ps }}
+        style={{ inset: "14%", animation: `lorbSpin ${f(2.5, 3.9)}s linear ${-r() * 3}s infinite reverse`, animationPlayState: ps }}
       >
         <div
           className="absolute rounded-full"
@@ -389,7 +406,10 @@ function CometOrb({ hue, playing }: { hue: number; playing: boolean }) {
 // avec quelques étoiles. Plus contrasté que la prod (palette analogue).
 function NebulaOrb({ hue, playing }: { hue: number; playing: boolean }) {
   const ps = playing ? "running" : "paused";
+  const r = seedRng(hue);
+  const f = (lo: number, hi: number) => lo + r() * (hi - lo);
   const comp = (hue + 180) % 360;
+  const starK = f(0.8, 1.3);
   const stars = [
     { x: 24, y: 28, d: 0, dur: 1.7 },
     { x: 68, y: 22, d: 0.5, dur: 2.3 },
@@ -401,26 +421,27 @@ function NebulaOrb({ hue, playing }: { hue: number; playing: boolean }) {
       <div
         className="absolute rounded-full"
         style={{
-          width: "78%",
-          height: "70%",
-          left: "2%",
-          top: "10%",
+          width: `${f(70, 84).toFixed(1)}%`,
+          height: `${f(62, 76).toFixed(1)}%`,
+          left: `${f(0, 8).toFixed(1)}%`,
+          top: `${f(4, 16).toFixed(1)}%`,
           background: `radial-gradient(closest-side, hsl(${hue} 92% 62% / 0.85), transparent 70%)`,
           mixBlendMode: "screen",
-          animation: "lorbNebulaA 7.9s ease-in-out -2.2s infinite",
+          animation: `lorbNebulaA ${f(6.5, 9.5).toFixed(2)}s ease-in-out ${(-f(0, 8)).toFixed(2)}s infinite`,
+          animationDirection: r() < 0.5 ? "reverse" : undefined,
           animationPlayState: ps,
         }}
       />
       <div
         className="absolute rounded-full"
         style={{
-          width: "72%",
-          height: "66%",
-          left: "28%",
-          top: "28%",
+          width: `${f(64, 78).toFixed(1)}%`,
+          height: `${f(58, 72).toFixed(1)}%`,
+          left: `${f(22, 34).toFixed(1)}%`,
+          top: `${f(22, 34).toFixed(1)}%`,
           background: `radial-gradient(closest-side, hsl(${comp} 85% 60% / 0.7), transparent 70%)`,
           mixBlendMode: "screen",
-          animation: "lorbNebulaB 9.7s ease-in-out infinite",
+          animation: `lorbNebulaB ${f(8, 11.5).toFixed(2)}s ease-in-out ${(-f(0, 9)).toFixed(2)}s infinite`,
           animationPlayState: ps,
         }}
       />
@@ -433,7 +454,7 @@ function NebulaOrb({ hue, playing }: { hue: number; playing: boolean }) {
             height: 2,
             left: `${s.x}%`,
             top: `${s.y}%`,
-            animation: `orbTwinkle ${s.dur}s ease-in-out ${s.d}s infinite`,
+            animation: `orbTwinkle ${(s.dur * starK).toFixed(2)}s ease-in-out ${s.d}s infinite`,
             animationPlayState: ps,
           }}
         />
@@ -446,6 +467,11 @@ function NebulaOrb({ hue, playing }: { hue: number; playing: boolean }) {
 // pendant que le cœur pulse -- l'orbe "émet" littéralement la voix.
 function SonarOrb({ hue, playing }: { hue: number; playing: boolean }) {
   const ps = playing ? "running" : "paused";
+  const r = seedRng(hue);
+  const f = (lo: number, hi: number) => lo + r() * (hi - lo);
+  const ringDur = f(3.4, 5.2);
+  const ringPhase = f(0, 1);
+  const coreSize = f(30, 40);
   return (
     <CandidateShell playing={playing} background={`radial-gradient(circle at 35% 30%, hsl(${hue} 55% 38%), hsl(${hue} 60% 18%) 78%)`}>
       {[0, 1, 2].map((i) => (
@@ -455,7 +481,7 @@ function SonarOrb({ hue, playing }: { hue: number; playing: boolean }) {
           style={{
             inset: "6%",
             border: `2px solid hsl(${hue} 90% 72% / 0.8)`,
-            animation: `lorbSonarRing 4.2s ease-out ${-i * 1.4}s infinite`,
+            animation: `lorbSonarRing ${ringDur.toFixed(2)}s ease-out ${(-(i / 3 + ringPhase) * ringDur).toFixed(2)}s infinite`,
             animationPlayState: ps,
           }}
         />
@@ -463,12 +489,12 @@ function SonarOrb({ hue, playing }: { hue: number; playing: boolean }) {
       <div
         className="absolute rounded-full"
         style={{
-          width: "34%",
-          height: "34%",
-          left: "33%",
-          top: "33%",
+          width: `${coreSize.toFixed(1)}%`,
+          height: `${coreSize.toFixed(1)}%`,
+          left: `${((100 - coreSize) / 2).toFixed(1)}%`,
+          top: `${((100 - coreSize) / 2).toFixed(1)}%`,
           background: `radial-gradient(closest-side, white, hsl(${hue} 100% 82%) 45%, transparent 72%)`,
-          animation: "lorbSonarCore 1.7s ease-in-out infinite",
+          animation: `lorbSonarCore ${f(1.3, 2.1).toFixed(2)}s ease-in-out ${(-f(0, 2)).toFixed(2)}s infinite`,
           animationPlayState: ps,
         }}
       />
@@ -480,10 +506,14 @@ function SonarOrb({ hue, playing }: { hue: number; playing: boolean }) {
 // dissolvent en haut -- matière lente et hypnotique, moins "électrique".
 function LavaOrb({ hue, playing }: { hue: number; playing: boolean }) {
   const ps = playing ? "running" : "paused";
+  const r = seedRng(hue);
+  const f = (lo: number, hi: number) => lo + r() * (hi - lo);
+  const riseDur = f(6.4, 9.6);
+  const phase = f(0, 1);
   const blobs = [
-    { left: "-2%", w: 58, h: 50, d: 0 },
-    { left: "30%", w: 48, h: 44, d: -2.6 },
-    { left: "54%", w: 42, h: 40, d: -5.2 },
+    { left: `${f(-6, 2).toFixed(1)}%`, w: f(52, 62), h: f(46, 54), d: -phase * riseDur },
+    { left: `${f(24, 36).toFixed(1)}%`, w: f(42, 54), h: f(40, 48), d: -(phase + 1 / 3) * riseDur },
+    { left: `${f(48, 60).toFixed(1)}%`, w: f(36, 48), h: f(36, 44), d: -(phase + 2 / 3) * riseDur },
   ];
   return (
     <CandidateShell playing={playing} background={`linear-gradient(180deg, hsl(${hue} 70% 30%), hsl(${(hue + 20) % 360} 80% 13%))`}>
@@ -503,13 +533,13 @@ function LavaOrb({ hue, playing }: { hue: number; playing: boolean }) {
           key={i}
           className="absolute rounded-full"
           style={{
-            width: `${b.w}%`,
-            height: `${b.h}%`,
+            width: `${b.w.toFixed(1)}%`,
+            height: `${b.h.toFixed(1)}%`,
             left: b.left,
             top: "26%",
             background: `radial-gradient(closest-side, hsl(${(hue + 15) % 360} 95% 64% / 0.85), transparent 70%)`,
             mixBlendMode: "screen",
-            animation: `lorbLavaRise 7.8s ease-in-out ${b.d}s infinite`,
+            animation: `lorbLavaRise ${riseDur.toFixed(2)}s ease-in-out ${b.d.toFixed(2)}s infinite`,
             animationPlayState: ps,
           }}
         />
@@ -522,6 +552,8 @@ function LavaOrb({ hue, playing }: { hue: number; playing: boolean }) {
 // vivant sur le bord, qui flare et scintille en tournant lentement.
 function CoronaOrb({ hue, playing }: { hue: number; playing: boolean }) {
   const ps = playing ? "running" : "paused";
+  const r = seedRng(hue);
+  const f = (lo: number, hi: number) => lo + r() * (hi - lo);
   const ringMask = "radial-gradient(closest-side, transparent 55%, black 68%, black 88%, transparent 96%)";
   return (
     <CandidateShell playing={playing} background={`radial-gradient(circle, hsl(${hue} 40% 9%) 0 42%, hsl(${hue} 55% 16%) 72%, hsl(${hue} 65% 26%))`}>
@@ -529,11 +561,17 @@ function CoronaOrb({ hue, playing }: { hue: number; playing: boolean }) {
         className="absolute inset-0 rounded-full"
         style={{
           background: `radial-gradient(closest-side, transparent 52%, hsl(${hue} 95% 65% / 0.9) 72%, hsl(${(hue + 30) % 360} 95% 70% / 0.55) 80%, transparent 93%)`,
-          animation: "lorbCoronaFlare 2.1s ease-in-out infinite",
+          animation: `lorbCoronaFlare ${f(1.7, 2.6).toFixed(2)}s ease-in-out ${(-f(0, 2)).toFixed(2)}s infinite`,
           animationPlayState: ps,
         }}
       />
-      <div className="absolute inset-0" style={{ animation: "lorbSpin 6.5s linear infinite", animationPlayState: ps }}>
+      <div
+        className="absolute inset-0"
+        style={{
+          animation: `lorbSpin ${f(5, 8.5).toFixed(2)}s linear ${(-f(0, 6)).toFixed(2)}s infinite${r() < 0.5 ? " reverse" : ""}`,
+          animationPlayState: ps,
+        }}
+      >
         <div
           className="absolute inset-0 rounded-full"
           style={{
@@ -555,6 +593,7 @@ const CANDIDATE_VARIANTS: { title: string; desc: string; render: (h: number, p: 
   { title: "Sonar", desc: "Des anneaux naissent au centre et partent vers le bord : l'orbe « émet » la voix. Sémantique audio forte.", render: (h, p) => <SonarOrb hue={h} playing={p} /> },
   { title: "Lave", desc: "Gouttes lumineuses qui montent et se dissolvent. Lent, hypnotique, moins « électrique ».", render: (h, p) => <LavaOrb hue={h} playing={p} /> },
   { title: "Couronne", desc: "Éclipse inversée : centre sombre, la lumière vit sur le bord et flare. Dramatique, très distinctif.", render: (h, p) => <CoronaOrb hue={h} playing={p} /> },
+  { title: "Plasma (shader)", desc: "WebGL : fbm domain-warped par pixel, temps continu jamais périodique, silhouette qui se déforme. La qualité ElevenLabs/ChatGPT vient de là -- réservé aux orbes « héros » si retenu (1 contexte WebGL par instance).", render: (h, p) => <ShaderOrb hue={h} playing={p} size={SIZE} /> },
 ];
 
 const CLOUD_VARIANTS: { title: string; desc: string; config: CloudConfig }[] = [
