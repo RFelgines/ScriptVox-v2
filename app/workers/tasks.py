@@ -14,6 +14,17 @@ huey = SqliteHuey(filename=get_settings().huey_db_path)
 DATA_DIR = Path(get_settings().data_dir)
 
 
+def _effective_llm_provider(session: Session) -> str | None:
+    """Résout le provider LLM effectif : préférence globale
+    (AppSetting.preferred_llm_provider) > défaut usine (Settings.llm_provider, .env).
+    Retourne None si aucune préférence n'est définie -- get_llm_provider()
+    retombe alors sur Settings.llm_provider."""
+    from app.models import AppSetting
+
+    row = session.get(AppSetting, 1)
+    return row.preferred_llm_provider if row else None
+
+
 def _effective_tts_provider(session: Session, book_tts_provider: str | None) -> str | None:
     """Résout le provider TTS effectif : override par livre > préférence globale
     (AppSetting.preferred_tts_provider) > défaut usine (Settings.tts_provider, .env).
@@ -70,11 +81,13 @@ async def _analyze_book(
     from app.services.llm import factory as llm_factory
 
     settings = get_settings()
-    provider = llm_factory.get_llm_provider(settings)
-
+    with Session(engine) as _s:
+        llm_override = _effective_llm_provider(_s)
+    provider = llm_factory.get_llm_provider(settings, override=llm_override)
+    effective_llm = llm_override or settings.llm_provider
     budget = (
         settings.ollama_chunk_tokens
-        if settings.llm_provider == "ollama"
+        if effective_llm == "ollama"
         else GEMINI_MAX_TOKENS
     )
 
