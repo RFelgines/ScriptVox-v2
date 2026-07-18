@@ -1,41 +1,56 @@
-type SelectOption = { value: string; label: string };
-
-type SelectProps = {
+export type SelectOption = {
   value: string;
-  onChange: (value: string) => void;
-  options: SelectOption[];
-  placeholder?: string;
-  ariaLabel?: string;
-  disabled?: boolean;
-  className?: string;
+  label: string;
+  group?: string;
 };
 
 export default function Select({
   value,
   onChange,
   options,
-  placeholder,
   ariaLabel,
-  disabled = false,
   className = "",
-}: SelectProps) {
+  disabled = false,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectOption[];
+  ariaLabel?: string;
+  className?: string;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const ungrouped = options.filter((o) => !o.group);
+  const groups = new Map<string, SelectOption[]>();
+  for (const o of options) {
+    if (!o.group) continue;
+    if (!groups.has(o.group)) groups.set(o.group, []);
+    groups.get(o.group)!.push(o);
+  }
+
   return (
     <select
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={ariaLabel}
       disabled={disabled}
-      className={`rounded-control border border-border bg-surface-2 px-2 py-1 text-xs text-foreground transition-colors hover:bg-surface-2/70 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      aria-label={ariaLabel}
+      onChange={(e) => onChange(e.target.value)}
+      className={`rounded-control border border-border bg-surface-2 px-2 py-1 text-sm text-foreground transition-colors hover:bg-surface-2/70 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     >
-      {placeholder !== undefined && (
-        <option value="" disabled>
-          {placeholder}
-        </option>
-      )}
-      {options.map((o) => (
+      {placeholder && <option value="">{placeholder}</option>}
+      {ungrouped.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
         </option>
+      ))}
+      {[...groups.entries()].map(([group, opts]) => (
+        <optgroup key={group} label={group}>
+          {opts.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </optgroup>
       ))}
     </select>
   );
