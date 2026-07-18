@@ -1,0 +1,59 @@
+# CI « clone frais » — vérifie qu'un checkout vierge du dépôt build et démarre.
+# Née de l'incident des fichiers fantômes (2026-07-11) : framer-motion non déclaré,
+# ui/Select.tsx jamais commité, prop tone de StatusBadge jamais poussée — trois
+# casses invisibles depuis la machine de dev, détectées seulement sur clone frais.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # Le build de production résout tous les imports et types de toutes les
+      # routes — c'est lui qui attrape les fichiers oubliés en local.
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # Même setup que le README : la config de l'exemple doit suffire à charger l'app.
+      - run: cp .env.example .env
+      - run: python -m compileall -q app
+      # Importe chaque module de app/ — attrape les fichiers manquants et les
+      # imports cassés que compileall ne résout pas.
+      - name: Import de tous les modules
+        run: |
+          python - <<'EOF'
+          import importlib, pathlib
+          fails = []
+          for p in sorted(pathlib.Path("app").rglob("*.py")):
+              mod = str(p.with_suffix("")).replace("/", ".")
+              try:
+                  importlib.import_module(mod)
+              except Exception as e:
+                  fails.append((mod, repr(e)))
+          for m, e in fails:
+              print(f"{m} -> {e}")
+          raise SystemExit(1 if fails else 0)
+          EOF
