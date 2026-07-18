@@ -133,7 +133,7 @@ class _Recorder2:
 
 _orig_get_provider = llm_factory.get_llm_provider
 _rec2 = _Recorder2()
-llm_factory.get_llm_provider = lambda settings: _rec2
+llm_factory.get_llm_provider = lambda settings, override=None: _rec2
 try:
     asyncio.run(_analyze_book(_book2_id, [(999, "Chapitre restant.")], _engine2, resume=True))
 finally:
@@ -454,7 +454,7 @@ with Session(_engine6) as _s:
 
 _rec6 = _FlakyOnceProvider6()
 _orig_get_provider6 = llm_factory.get_llm_provider
-llm_factory.get_llm_provider = lambda settings: _rec6
+llm_factory.get_llm_provider = lambda settings, override=None: _rec6
 try:
     with patch.object(_tasks_mod.asyncio, "sleep", side_effect=_instant_sleep6):
         _completed6b = asyncio.run(_analyze_book(_book6_id, [(1, "Un chapitre.")], _engine6))
@@ -522,7 +522,7 @@ class _MergeRecorder7:
 
 _rec7 = _MergeRecorder7()
 _orig_get_provider7 = llm_factory.get_llm_provider
-llm_factory.get_llm_provider = lambda settings: _rec7
+llm_factory.get_llm_provider = lambda settings, override=None: _rec7
 try:
     # chapter_data=[] : tous les chapitres restants ont déjà des segments (cas
     # réel d'une reprise où seule la fusion de personnages n'avait pas eu lieu).
