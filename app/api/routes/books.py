@@ -289,6 +289,32 @@ async def upload_book_cover(
     return BookResponse.model_validate(book)
 
 
+def _require_chapter_generation_allowed(book: Book) -> None:
+    """Génération par chapitre autorisée sur un livre analysé, terminé ou en échec.
+
+    DONE / FAILED comptent : c'est ce qui permet de régénérer un chapitre ou de
+    reprendre après un échec (avant : 409 ou file jamais traitée, audit 2026-09-25).
+    """
+    if book.status not in (BookStatus.ANALYZED, BookStatus.DONE, BookStatus.FAILED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Book {book.id} is not ready for chapter generation "
+                f"(status={book.status.value}). Expected ANALYZED, DONE or FAILED."
+            ),
+        )
+
+
+def _reset_chapter_for_requeue(chapter: Chapter) -> None:
+    """La pompe (generate_chapter_queue_pump) ne sélectionne que les chapitres PENDING :
+    un chapitre DONE ou FAILED remis en file doit donc repasser PENDING, sinon il reste
+    en file indéfiniment sans jamais être traité (bug confirmé par reproduction).
+    audio_path est conservé : l'ancien fichier reste lisible jusqu'à son remplacement."""
+    if chapter.status in (ChapterStatus.DONE, ChapterStatus.FAILED):
+        chapter.status = ChapterStatus.PENDING
+        chapter.error_message = None
+
+
 @router.post("/{book_id}/chapters/{position}/generate", response_model=ChapterResponse, status_code=202)
 def trigger_chapter_generate(
     book_id: int,
@@ -298,11 +324,7 @@ def trigger_chapter_generate(
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status != BookStatus.ANALYZED:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Book {book_id} is not ready for chapter generation (status={book.status.value}). Expected ANALYZED.",
-        )
+    _require_chapter_generation_allowed(book)
     chapter = session.exec(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
     ).first()
@@ -315,6 +337,7 @@ def trigger_chapter_generate(
             status_code=409,
             detail=f"Chapter {position} is already being generated.",
         )
+    _reset_chapter_for_requeue(chapter)
     chapter.queued_at = datetime.now(timezone.utc)
     session.add(chapter)
     session.commit()
@@ -380,11 +403,7 @@ def trigger_all_chapters_generate(
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status != BookStatus.ANALYZED:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Book {book_id} is not ready for chapter generation (status={book.status.value}). Expected ANALYZED.",
-        )
+    _require_chapter_generation_allowed(book)
     chapters = session.exec(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
     ).all()
@@ -392,6 +411,7 @@ def trigger_all_chapters_generate(
     queued_any = False
     for chapter in chapters:
         if chapter.status not in (ChapterStatus.DONE, ChapterStatus.GENERATING):
+            _reset_chapter_for_requeue(chapter)
             chapter.queued_at = now
             session.add(chapter)
             queued_any = True

@@ -115,10 +115,17 @@ class Settings:
         # 2026-07-02 -- perte de couverture + audio TTS de plusieurs chapitres réels).
         self.data_dir: str = _require("DATA_DIR")
 
-        _origins_raw = os.environ.get("FRONTEND_ORIGINS", "http://localhost:3000")
+        _origins_raw = os.environ.get(
+            "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+        )
         self.frontend_origins: list[str] = [
             o.strip() for o in _origins_raw.split(",") if o.strip()
         ]
+        # Noms d'hôte acceptés dans l'en-tête Host (défense contre le DNS rebinding).
+        # "testserver" = hôte du TestClient Starlette (nom à un seul label, non résoluble
+        # par un attaquant vers 127.0.0.1).
+        _hosts_raw = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
+        self.allowed_hosts: list[str] = [h.strip() for h in _hosts_raw.split(",") if h.strip()]
 
 
 @lru_cache(maxsize=1)

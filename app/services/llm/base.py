@@ -382,6 +382,15 @@ def _looks_like_proper_noun(name: str) -> bool:
     return bool(_PROPER_NOUN_RE.match(name.strip()))
 
 
+# Mots-titres : seuls, ils ne désignent personne (« Professeur » ⊆ « Professeur Rogue »
+# ET ⊆ « Professeur McGonagall »).
+_TITLE_WORDS = frozenset({
+    "mr", "mrs", "ms", "miss", "m.", "mme", "mlle", "monsieur", "madame", "mademoiselle",
+    "professeur", "professor", "prof", "sir", "lady", "lord", "docteur", "dr", "dr.",
+    "maître", "capitaine", "commandant", "colonel", "général", "père", "mère", "oncle", "tante",
+})
+
+
 def _resolve_character_name(name: str, known_names: set[str]) -> str | None:
     """Résout un nom d'attribution vers un personnage déjà connu, au-delà de l'égalité stricte.
 
@@ -389,15 +398,24 @@ def _resolve_character_name(name: str, known_names: set[str]) -> str | None:
     Weasley », « Dumbledore » ⊆ « Albus Dumbledore ») — jamais une similarité générique.
     Retourne toujours le nom déjà présent dans ``known_names``, jamais la variante brute,
     pour ne jamais introduire de doublon de personnage.
+
+    Déterministe : si PLUSIEURS personnages connus satisfont l'inclusion (« Weasley » avec
+    Ron/Ginny/Molly Weasley), la résolution est ambiguë et on renvoie None plutôt que de
+    choisir au hasard (l'ordre d'itération d'un set de chaînes change à chaque lancement de
+    Python — bug confirmé, audit 2026-09-25). Un nom réduit à des mots-titres ne résout rien.
     """
     if name in known_names:
         return name
     name_tokens = set(name.lower().split())
-    for known in known_names:
+    significant = name_tokens - _TITLE_WORDS
+    if not significant:
+        return None
+    candidates: list[str] = []
+    for known in sorted(known_names):
         known_tokens = set(known.lower().split())
         if name_tokens <= known_tokens or known_tokens <= name_tokens:
-            return known
-    return None
+            candidates.append(known)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:

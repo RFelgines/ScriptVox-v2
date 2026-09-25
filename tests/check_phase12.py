@@ -56,15 +56,15 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 
 
 # ── 1. frontend_origins -- valeur par defaut (FRONTEND_ORIGINS absent) ────────
-section("Settings.frontend_origins -- defaut = ['http://localhost:3000']")
+section("Settings.frontend_origins -- defaut = localhost + 127.0.0.1 (port 3000)")
 from app.config import Settings  # noqa: E402
 
 _saved = os.environ.pop("FRONTEND_ORIGINS", None)
 try:
     s = Settings()
     check(
-        "frontend_origins == ['http://localhost:3000']",
-        s.frontend_origins == ["http://localhost:3000"],
+        "frontend_origins == défaut (localhost + 127.0.0.1)",
+        s.frontend_origins == ["http://localhost:3000", "http://127.0.0.1:3000"],
         str(s.frontend_origins),
     )
 finally:
