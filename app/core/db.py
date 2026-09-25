@@ -1,11 +1,29 @@
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import Engine
-from sqlmodel import Session, SQLModel, create_engine
+from sqlalchemy import Engine, event
+from sqlmodel import Session, create_engine
 
 _engine: Engine | None = None
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _enable_sqlite_pragmas(engine: Engine) -> None:
+    """L'API et le worker Huey (deux processus) écrivent dans la même base pendant les
+    longues générations. Le mode journal par défaut pose un verrou global d'écriture qui
+    bloque les lecteurs et provoque des « database is locked » : WAL laisse lire pendant une
+    écriture, busy_timeout attend au lieu d'échouer (audit 2026-09-25, BE-4)."""
+    if engine.url.get_backend_name() != "sqlite":
+        return
+
+    @event.listens_for(engine, "connect")
+    def _pragmas(dbapi_conn, _record):  # noqa: ANN001
+        cur = dbapi_conn.cursor()
+        try:
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=5000")
+        finally:
+            cur.close()
 
 
 def get_engine() -> Engine:
@@ -17,6 +35,7 @@ def get_engine() -> Engine:
             settings.database_url,
             connect_args={"check_same_thread": False},
         )
+        _enable_sqlite_pragmas(_engine)
     return _engine
 
 

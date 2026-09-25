@@ -232,14 +232,16 @@ section("Intégration : init_db() préserve les données d'une base pré-Alembic
 with tempfile.TemporaryDirectory() as _tmp7:
     _eng7 = _pre_alembic_engine(Path(_tmp7))
 
-    with Session(_eng7) as _s:
-        _voice7 = Voice(
-            voice_id="patrick-baud-clone", name="Patrick Baud",
-            kind=VoiceKind.CLONED, gender=Gender.MALE, is_favorite=True,
-            reference_audio_path="/data/voices/patrick-baud/ref.wav",
-        )
-        _s.add(_voice7)
-        _s.commit()
+    # SQL brut (colonnes du schéma HISTORIQUE uniquement) : le modèle ORM courant possède des
+    # colonnes que cette base pré-Alembic n'a volontairement pas encore (ajoutées par les
+    # migrations suivantes) — l'ORM ne peut donc pas servir à écrire dans cet ancien schéma.
+    from sqlalchemy import text as _sql_text
+    with _eng7.begin() as _conn:
+        _conn.execute(_sql_text(
+            "INSERT INTO voice (voice_id, name, kind, gender, is_favorite, reference_audio_path, created_at) "
+            "VALUES ('patrick-baud-clone', 'Patrick Baud', 'CLONED', 'MALE', 1, "
+            "'/data/voices/patrick-baud/ref.wav', '2026-06-27 00:00:00')"
+        ))
 
     init_db(_eng7)
 

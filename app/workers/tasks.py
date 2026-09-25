@@ -1,9 +1,12 @@
 import asyncio
+import json
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Callable
 
-from huey import SqliteHuey
+from huey import SqliteHuey, crontab
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -12,6 +15,111 @@ logger = logging.getLogger(__name__)
 
 huey = SqliteHuey(filename=get_settings().huey_db_path)
 DATA_DIR = Path(get_settings().data_dir)
+
+
+def _parse_options(raw: str | None) -> dict:
+    """AppSetting.llm_options / tts_options : JSON d'un dict de réglages à chaud (model,
+    base_url…). Toute valeur invalide donne {} (jamais d'exception dans le worker)."""
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _llm_options(session: Session) -> dict:
+    from app.models import AppSetting
+
+    row = session.get(AppSetting, 1)
+    return _parse_options(row.llm_options) if row else {}
+
+
+def _tts_options(session: Session) -> dict:
+    from app.models import AppSetting
+
+    row = session.get(AppSetting, 1)
+    return _parse_options(row.tts_options) if row else {}
+
+
+# ── Cache des providers TTS « à modèle lourd » (BE-1, audit 2026-09-25) ─────────
+# Un provider qui déclare keep_loaded=True (Qwen3-TTS…) reste instancié — donc son modèle
+# chargé en VRAM — d'un chapitre à l'autre et d'une régénération de réplique à l'autre.
+# Avant : rechargé (≈ 3-4 Go, dizaines de secondes) à CHAQUE chapitre. Déchargé sur demande
+# (release_qwen_vram), après TTS_IDLE_UNLOAD_SECONDS d'inactivité, ou avant une analyse LLM.
+# Process worker uniquement : l'API ne charge jamais de modèle (voir voices.py).
+_TTS_CACHE: dict[str, object] = {}
+_TTS_LAST_USED = 0.0
+_TTS_CACHE_LOCK = threading.Lock()
+
+
+def _get_tts_provider(settings, session: Session, book):
+    """Provider TTS effectif d'un livre (override livre > préférence Paramètres > .env),
+    avec les réglages à chaud de Paramètres ; réutilisé depuis le cache s'il garde son modèle
+    chargé."""
+    global _TTS_LAST_USED
+    from app.services.tts import factory as tts_factory
+
+    override = _effective_tts_provider(session, book.tts_provider if book else None)
+    language = book.language if book else None
+    options = _tts_options(session)
+    kwargs: dict = {"override": override, "language": language}
+    if options:
+        kwargs["options"] = options
+    key = json.dumps([override or settings.tts_provider, language, options], sort_keys=True)
+    with _TTS_CACHE_LOCK:
+        cached = _TTS_CACHE.get(key)
+        if cached is not None:
+            _TTS_LAST_USED = time.monotonic()
+            return cached
+    provider = tts_factory.get_tts_provider(settings, **kwargs)
+    if getattr(provider, "keep_loaded", False) is True:
+        with _TTS_CACHE_LOCK:
+            _TTS_CACHE[key] = provider
+            _TTS_LAST_USED = time.monotonic()
+    return provider
+
+
+def _release_all_tts() -> int:
+    """Décharge tous les modèles TTS gardés en mémoire. Retourne le nombre déchargé."""
+    with _TTS_CACHE_LOCK:
+        providers = list(_TTS_CACHE.values())
+        _TTS_CACHE.clear()
+    for provider in providers:
+        try:
+            provider.unload()
+        except Exception:  # noqa: BLE001
+            logger.warning("tts unload failed", exc_info=True)
+    return len(providers)
+
+
+def _touch_tts() -> None:
+    global _TTS_LAST_USED
+    _TTS_LAST_USED = time.monotonic()
+
+
+# ── Débit mesuré -> temps restant (BE-5) ────────────────────────────────────────
+# (caractères traités, secondes) des derniers éléments par livre et par étape ; moyenne
+# glissante sur 8 mesures. En mémoire : perdu au redémarrage du worker (ETA None le temps
+# de refaire 1-2 mesures), sans conséquence.
+_THROUGHPUT: dict[tuple[int, str], list[tuple[int, float]]] = {}
+
+
+def _record_throughput(book_id: int, stage: str, chars: int, seconds: float) -> None:
+    samples = _THROUGHPUT.setdefault((book_id, stage), [])
+    if chars > 0 and seconds > 0:
+        samples.append((chars, seconds))
+        del samples[:-8]
+
+
+def _eta_seconds(book_id: int, stage: str, remaining_chars: int) -> int | None:
+    samples = _THROUGHPUT.get((book_id, stage)) or []
+    total_chars = sum(c for c, _ in samples)
+    total_secs = sum(t for _, t in samples)
+    if not samples or total_chars <= 0 or total_secs <= 0 or remaining_chars <= 0:
+        return None
+    return int(remaining_chars / (total_chars / total_secs))
 
 
 def _effective_llm_provider(session: Session) -> str | None:
@@ -83,13 +191,23 @@ async def _analyze_book(
     settings = get_settings()
     with Session(engine) as _s:
         llm_override = _effective_llm_provider(_s)
-    provider = llm_factory.get_llm_provider(settings, override=llm_override)
+        llm_opts = _llm_options(_s)
+    # `options` (réglages à chaud de Paramètres) n'est passé que s'il y en a : les anciens
+    # points d'injection (tests, plugins sans options) restent appelables tels quels.
+    llm_kwargs: dict = {"override": llm_override}
+    if llm_opts:
+        llm_kwargs["options"] = llm_opts
+    provider = llm_factory.get_llm_provider(settings, **llm_kwargs)
     effective_llm = llm_override or settings.llm_provider
-    budget = (
-        settings.ollama_chunk_tokens
-        if effective_llm == "ollama"
-        else GEMINI_MAX_TOKENS
-    )
+    provider_budget = getattr(provider, "chunk_tokens", None)
+    if isinstance(provider_budget, int) and not isinstance(provider_budget, bool) and provider_budget > 0:
+        budget = provider_budget
+    else:
+        budget = (
+            settings.ollama_chunk_tokens
+            if effective_llm == "ollama"
+            else GEMINI_MAX_TOKENS
+        )
 
     chapter_ids = [cid for cid, _ in chapter_data]
 
@@ -116,7 +234,9 @@ async def _analyze_book(
 
     total = already_done + len(chapter_data)
 
+    remaining_chars = sum(len(t) for _, t in chapter_data)
     for i, (chapter_id, raw_text) in enumerate(chapter_data):
+        _chapter_started = time.monotonic()
         # Abort if the user triggered /stop while we were processing a previous chapter
         # (or, for i==0, raced in right after PROCESSING was set — checked defensively).
         with Session(engine) as _s:
@@ -208,8 +328,15 @@ async def _analyze_book(
                     emotion=sd.emotion,
                 ))
 
+            _record_throughput(
+                book_id, "analysis", len(raw_text), time.monotonic() - _chapter_started,
+            )
+            remaining_chars -= len(raw_text)
             book = session.get(Book, book_id)
             book.progress = 10.0 + (already_done + i + 1) / total * 50.0
+            book.stage = "analysis"
+            book.stage_progress = (already_done + i + 1) / total * 100.0
+            book.eta_seconds = _eta_seconds(book_id, "analysis", remaining_chars)
             session.add(book)
             session.commit()
 
@@ -274,6 +401,16 @@ async def _analyze_book(
                         reason=sug.reason,
                     ))
                 session.commit()
+
+    # Libère la VRAM du LLM local (LLM-4) : la synthèse vocale locale en a besoin, et sur une
+    # carte de 16 Go un LLM de 13-17 Go + Qwen3-TTS ne tiennent pas ensemble.
+    if settings.llm_unload_after_analysis is True:
+        try:
+            unload = getattr(provider, "unload", None)
+            if callable(unload):
+                unload()
+        except Exception:  # noqa: BLE001 — best-effort
+            logger.warning("llm unload failed", exc_info=True)
 
     return True
 
@@ -392,6 +529,7 @@ async def _generate_chapter_async(
     from app.core.enums import ChapterStatus
     from app.models import Chapter, Segment
 
+    _t_started = time.monotonic()
     with Session(engine) as session:
         chapter = session.get(Chapter, chapter_id)
         if chapter is None:
@@ -467,6 +605,10 @@ async def _generate_chapter_async(
             chapter = session.get(Chapter, chapter_id)
             chapter.audio_path = audio_path
             chapter.status = ChapterStatus.DONE
+            if timing:
+                _last = timing[-1]
+                chapter.duration_ms = _last[1] + _last[2]
+            _chars_done = len(chapter.raw_text or "")
             session.add(chapter)
 
             takes_dir = DATA_DIR / str(book_id) / "takes"
@@ -486,6 +628,7 @@ async def _generate_chapter_async(
                 session.add(take)
 
             session.commit()
+        _record_throughput(book_id, "generation", _chars_done, time.monotonic() - _t_started)
         return True
 
     except Exception as exc:
@@ -600,10 +743,16 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
         previous_status = book.status
         book.status = BookStatus.PROCESSING
         book.progress = 0.0
+        book.stage = "analysis"
+        book.stage_progress = 0.0
+        book.eta_seconds = None
         book.error_message = None
         book.failed_stage = None  # nettoie une valeur périmée d'une tentative précédente
         session.add(book)
         session.commit()
+
+    # Les modèles TTS gardés en mémoire (BE-1) n'ont rien à faire en VRAM pendant une analyse.
+    _release_all_tts()
 
     resume_requested = previous_status == BookStatus.FAILED and not force
 
@@ -623,12 +772,14 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             with Session(engine) as session:
                 chapter_data = []
                 for ch in existing_chapters:
+                    if not ch.included:
+                        continue
                     has_segment = session.exec(
                         select(Segment.id).where(Segment.chapter_id == ch.id).limit(1)
                     ).first()
                     if has_segment is None:
                         chapter_data.append((ch.id, ch.raw_text))
-            already_done = len(existing_chapters) - len(chapter_data)
+            already_done = sum(1 for c in existing_chapters if c.included) - len(chapter_data)
             logger.info(
                 "analyze_book: resuming book_id=%d — %d/%d chapters remaining",
                 book_id, len(chapter_data), len(existing_chapters),
@@ -653,7 +804,6 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             parsed = EpubParser().parse(source_path)
 
             with Session(engine) as session:
-                from pathlib import Path as _Path
                 book = session.get(Book, book_id)
                 book.title = parsed.title
                 if parsed.author:
@@ -665,6 +815,7 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                         position=pc.position,
                         title=pc.title,
                         raw_text=pc.raw_text,
+                        included=getattr(pc, "included", True),
                     ))
                 if parsed.cover_image:
                     _COVER_EXT = {
@@ -687,7 +838,7 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                     .where(Chapter.book_id == book_id)
                     .order_by(Chapter.position)
                 ).all()
-                chapter_data = [(ch.id, ch.raw_text) for ch in chapters]
+                chapter_data = [(ch.id, ch.raw_text) for ch in chapters if ch.included]
             already_done = 0
 
         # ── LLM analysis (progress 10% → 60%) ─────────────────────────────────
@@ -723,6 +874,9 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
             if book is not None and book.status != BookStatus.FAILED:
                 book.status = BookStatus.ANALYZED
                 book.progress = 100.0
+                book.stage = None
+                book.stage_progress = 0.0
+                book.eta_seconds = None
                 session.add(book)
                 session.commit()
 
@@ -734,15 +888,235 @@ def _analyze_book_impl(book_id: int, force: bool = False) -> None:
                 book.status = BookStatus.FAILED
                 book.error_message = str(exc)
                 book.failed_stage = "analysis"
+                book.stage = None
+                book.eta_seconds = None
                 session.add(book)
                 session.commit()
+
+
+def _assemble_book(engine, book_id: int, source_path: str) -> tuple[str | None, str | None, str | None]:
+    """Assemble le livre complet à partir des WAV de chapitres déjà sur disque : WAV, MP3 et
+    (si ffmpeg est disponible) M4B chapitré avec couverture. Tout se fait disque à disque, par
+    blocs bornés (mémoire constante, audit 2026-07-02 C1/C2). Retourne (wav, mp3, m4b) ;
+    (None, None, None) si aucun chapitre n'a d'audio.
+
+    Les chapitres sont séparés par un silence (AUDIO_PAUSE_CHAPTER_MS) ; un chapitre généré
+    à une autre fréquence (avant le passage à 24 kHz) est converti à la volée."""
+    from pathlib import Path as _Path
+
+    from app.core.enums import ChapterStatus
+    from app.models import Book, Chapter
+    from app.services.audio import m4b as m4b_mod
+    from app.services.audio.assembler import assemble_wav_from_files, wav_to_mp3_streaming
+    from app.services.audio.format import OUTPUT_SAMPLE_RATE
+
+    settings = get_settings()
+    with Session(engine) as session:
+        done_chapters = session.exec(
+            select(Chapter)
+            .where(Chapter.book_id == book_id, Chapter.status == ChapterStatus.DONE)
+            .order_by(Chapter.position)
+        ).all()
+        chapters = [(c.position, c.title, c.audio_path) for c in done_chapters
+                    if c.audio_path and c.included]
+        book = session.get(Book, book_id)
+        book_title = book.title if book else "Livre"
+        book_author = book.author if book else None
+        cover_path = book.cover_path if book else None
+    if not chapters:
+        return None, None, None
+
+    gap = settings.pause_chapter_ms if isinstance(settings.pause_chapter_ms, int) else 0
+    paths = [c[2] for c in chapters]
+    audio_path = str(_Path(source_path).with_suffix(".wav"))
+    assemble_wav_from_files(paths, audio_path, target_rate=OUTPUT_SAMPLE_RATE, gaps_ms=gap)
+    mp3_file = _Path(audio_path).with_suffix(".mp3")
+    wav_to_mp3_streaming(audio_path, mp3_file)
+
+    m4b_path: str | None = None
+    ffmpeg = m4b_mod.find_ffmpeg(getattr(settings, "ffmpeg_path", None)
+                                 if isinstance(getattr(settings, "ffmpeg_path", None), str) else None)
+    if ffmpeg:
+        durations = [m4b_mod.wav_file_duration_ms(p) for p in paths]
+        titles = [c[1] or f"Chapitre {c[0]}" for c in chapters]
+        marks = m4b_mod.chapter_marks(durations, titles, gap)
+        built = m4b_mod.build_m4b(
+            audio_path, _Path(audio_path).with_suffix(".m4b"), title=book_title,
+            author=book_author, chapters=marks, cover_path=cover_path, ffmpeg=ffmpeg,
+        )
+        m4b_path = str(built) if built else None
+    return audio_path, str(mp3_file), m4b_path
+
+
+def _update_generation_progress(session: Session, book, chapters) -> None:
+    """Progression de l'étape « génération » : pondérée par la taille du texte (un chapitre
+    de 30 pages pèse plus qu'un de 2), avec temps restant estimé (BE-5)."""
+    from app.core.enums import ChapterStatus
+
+    included = [c for c in chapters if c.included]
+    total_chars = sum(len(c.raw_text or "") for c in included) or 1
+    done_chars = sum(len(c.raw_text or "") for c in included if c.status == ChapterStatus.DONE)
+    remaining = total_chars - done_chars
+    book.stage = "generation"
+    book.stage_progress = min(100.0, done_chars / total_chars * 100.0)
+    book.progress = 60.0 + done_chars / total_chars * 30.0
+    book.eta_seconds = _eta_seconds(book.id, "generation", remaining)
+    session.add(book)
+
+
+def _advance_books(engine) -> None:
+    """Fait avancer les livres en cours de génération par la file de chapitres (BE-3).
+
+    Appelé après chaque chapitre traité par la pompe. Pour chaque livre GENERATING :
+      - des chapitres encore en file ou en cours -> met à jour progression et temps restant ;
+      - un chapitre FAILED -> le livre passe FAILED (reprise possible, chapitres DONE conservés) ;
+      - un chapitre ni fait ni en file (arrêté à la main) -> livre FAILED « Arrêté » ;
+      - tout est DONE -> assemble WAV/MP3/M4B puis livre DONE.
+    Un livre déjà FAILED (bouton Arrêter du livre) n'est jamais réécrit.
+    """
+    from app.core.enums import BookStatus, ChapterStatus
+    from app.models import Book, Chapter
+
+    with Session(engine) as session:
+        book_ids = [b.id for b in session.exec(
+            select(Book).where(Book.status == BookStatus.GENERATING)
+        ).all()]
+
+    for book_id in book_ids:
+        with Session(engine) as session:
+            book = session.get(Book, book_id)
+            if book is None or book.status != BookStatus.GENERATING:
+                continue
+            chapters = session.exec(
+                select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
+            ).all()
+            included = [c for c in chapters if c.included]
+            in_flight = [c for c in included if c.status == ChapterStatus.GENERATING
+                         or (c.status == ChapterStatus.PENDING and c.queued_at is not None)]
+            failed = [c for c in included if c.status == ChapterStatus.FAILED]
+            if in_flight:
+                _update_generation_progress(session, book, chapters)
+                session.commit()
+                continue
+            if failed:
+                book.status = BookStatus.FAILED
+                book.failed_stage = "generation"
+                book.error_message = failed[0].error_message or f"Chapitre {failed[0].position} en échec."
+                book.stage, book.eta_seconds = None, None
+                session.add(book)
+                session.commit()
+                continue
+            if any(c.status != ChapterStatus.DONE for c in included):
+                book.status = BookStatus.FAILED
+                book.failed_stage = "generation"
+                book.error_message = "Arrêté par l'utilisateur."
+                book.stage, book.eta_seconds = None, None
+                session.add(book)
+                session.commit()
+                continue
+            if not included:
+                book.status = BookStatus.FAILED
+                book.failed_stage = "generation"
+                book.error_message = f"Book {book_id} has no chapters — analysis never completed"
+                session.add(book)
+                session.commit()
+                continue
+            source_path = book.source_path
+            book.stage, book.stage_progress, book.progress = "assembly", 0.0, 90.0
+            book.eta_seconds = None
+            session.add(book)
+            session.commit()
+
+        try:
+            audio_path, mp3_path, m4b_path = _assemble_book(engine, book_id, source_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("assemble_book failed for book_id=%d", book_id)
+            with Session(engine) as session:
+                book = session.get(Book, book_id)
+                if book is not None and book.status == BookStatus.GENERATING:
+                    book.status = BookStatus.FAILED
+                    book.failed_stage = "generation"
+                    book.error_message = f"Assemblage : {exc}"
+                    book.stage = None
+                    session.add(book)
+                    session.commit()
+            continue
+        with Session(engine) as session:
+            book = session.get(Book, book_id)
+            if book is None or book.status != BookStatus.GENERATING:
+                continue  # /stop arrivé pendant l'assemblage : on ne l'écrase pas
+            book.audio_path, book.mp3_path, book.m4b_path = audio_path, mp3_path, m4b_path
+            book.status = BookStatus.DONE
+            book.progress, book.stage, book.stage_progress, book.eta_seconds = 100.0, None, 0.0, None
+            session.add(book)
+            session.commit()
+
+
+def _enqueue_book_generation(book_id: int, force: bool = False) -> None:
+    """Génération d'un livre par la file de chapitres (BE-3) : met en file tous les chapitres
+    inclus non terminés puis laisse la pompe les traiter UN PAR TÂCHE Huey — une tâche courte
+    (aperçu de voix, régénération d'une réplique) passe donc entre deux chapitres au lieu
+    d'attendre la fin du livre entier. Mêmes garde-fous et même reprise que _generate_book_impl.
+    """
+    from datetime import datetime, timezone
+
+    from app.core.db import get_engine
+    from app.core.enums import BookStatus, ChapterStatus
+    from app.models import Book, Chapter
+
+    engine = get_engine()
+    with Session(engine) as session:
+        book = session.get(Book, book_id)
+        if book is None:
+            logger.error("generate_book called with unknown book_id=%d", book_id)
+            return
+        if book.status not in (BookStatus.ANALYZED, BookStatus.DONE, BookStatus.FAILED):
+            logger.warning("generate_book skipped: book_id=%d has status=%s", book_id, book.status)
+            return
+        book.status = BookStatus.GENERATING
+        book.progress = 60.0
+        book.stage, book.stage_progress, book.eta_seconds = "generation", 0.0, None
+        book.error_message = None
+        book.failed_stage = None
+        session.add(book)
+        chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+        now = datetime.now(timezone.utc)
+        for c in chapters:
+            if not c.included or c.status == ChapterStatus.GENERATING:
+                continue
+            if c.status == ChapterStatus.DONE and not force:
+                continue
+            c.status = ChapterStatus.PENDING
+            c.error_message = None
+            c.cancel_requested = False
+            c.queued_at = now
+            session.add(c)
+        session.commit()
+    # Rien à générer (tout DONE) ou file à vider : _advance_books conclut, la pompe traite le reste.
+    _advance_books(engine)
+    _generate_chapter_queue_pump_impl(limit=1)
+    _schedule_pump_if_needed(engine)
+
+
+def _schedule_pump_if_needed(engine) -> None:
+    """Ré-enfile la pompe tant qu'il reste des chapitres en file (une tâche Huey par chapitre)."""
+    from app.core.enums import ChapterStatus
+    from app.models import Chapter
+
+    with Session(engine) as session:
+        remaining = session.exec(
+            select(Chapter.id).where(
+                Chapter.status == ChapterStatus.PENDING, Chapter.queued_at.is_not(None)
+            ).limit(1)
+        ).first()
+    if remaining is not None:
+        generate_chapter_queue_pump()
 
 
 def _generate_book_impl(book_id: int, force: bool = False) -> None:
     from app.core.db import get_engine
     from app.core.enums import BookStatus, ChapterStatus
     from app.models import Book, Chapter
-    from app.services.audio.assembler import assemble_wav_from_files, wav_to_mp3_streaming
 
     engine = get_engine()
 
@@ -794,31 +1168,8 @@ def _generate_book_impl(book_id: int, force: bool = False) -> None:
             logger.info("generate_book: aborted by stop for book_id=%d", book_id)
             return
 
-        # ── Assemble the book WAV from the per-chapter WAVs already on disk ────
-        # (streamed disk-to-disk, one chapter's frames in memory at a time — not
-        # the whole book, unlike the old flat-segment-loop design it replaces).
-        with Session(engine) as session:
-            done_chapters = session.exec(
-                select(Chapter)
-                .where(Chapter.book_id == book_id, Chapter.status == ChapterStatus.DONE)
-                .order_by(Chapter.position)
-            ).all()
-            chapter_wav_paths = [c.audio_path for c in done_chapters if c.audio_path]
-
-        audio_path: str | None = None
-        mp3_path: str | None = None
-        if chapter_wav_paths:
-            from pathlib import Path as _Path
-            audio_path = str(_Path(source_path).with_suffix(".wav"))
-            assemble_wav_from_files(chapter_wav_paths, audio_path)
-            # Both steps are now disk-to-disk, streamed in bounded chunks (Lot C2,
-            # audit 2026-07-02): assembling the book WAV from per-chapter WAVs
-            # above, and encoding it to MP3 here — neither holds more than one
-            # chapter's / one chunk's worth of PCM in memory at a time, instead of
-            # the whole book (~1.6 GB of PCM for a 10-hour novel).
-            mp3_file = _Path(audio_path).with_suffix(".mp3")
-            wav_to_mp3_streaming(audio_path, mp3_file)
-            mp3_path = str(mp3_file)
+        # ── Assemble WAV + MP3 + M4B from the per-chapter WAVs already on disk ─────────
+        audio_path, mp3_path, m4b_path = _assemble_book(engine, book_id, source_path)
 
         with Session(engine) as session:
             book = session.get(Book, book_id)
@@ -829,8 +1180,12 @@ def _generate_book_impl(book_id: int, force: bool = False) -> None:
                 return
             book.audio_path = audio_path
             book.mp3_path = mp3_path
+            book.m4b_path = m4b_path
             book.status = BookStatus.DONE
             book.progress = 100.0
+            book.stage = None
+            book.stage_progress = 0.0
+            book.eta_seconds = None
             session.add(book)
             session.commit()
 
@@ -846,6 +1201,15 @@ def _generate_book_impl(book_id: int, force: bool = False) -> None:
                 session.commit()
 
 
+def _after_tts_use(provider) -> None:
+    """Fin d'un usage TTS : un provider qui garde son modèle chargé (cache BE-1) reste en
+    mémoire (déchargé à l'inactivité ou sur demande) ; les autres libèrent la VRAM comme avant."""
+    if getattr(provider, "keep_loaded", False) is True:
+        _touch_tts()
+    else:
+        _release_qwen_gpu(provider)
+
+
 async def _synthesise_chapter_worker(
     chapter_id: int, engine, should_abort: Callable[[], bool] | None = None,
 ) -> tuple[bytes, list[tuple[int, int, int]]] | None:
@@ -853,23 +1217,18 @@ async def _synthesise_chapter_worker(
     should_abort() fired before the chapter finished synthesising."""
     from app.models import Book, Chapter
     from app.services.audio.chapter import _synthesise_segments
-    from app.services.tts import factory as tts_factory
 
     settings = get_settings()
     with Session(engine) as session:
         chapter = session.get(Chapter, chapter_id)
         book = session.get(Book, chapter.book_id) if chapter else None
-        provider = tts_factory.get_tts_provider(
-            settings,
-            override=_effective_tts_provider(session, book.tts_provider if book else None),
-            language=book.language if book else None,
-        )
+        provider = _get_tts_provider(settings, session, book)
         try:
             return await _synthesise_segments(
                 chapter_id, session, provider, should_abort=should_abort,
             )
         finally:
-            _release_qwen_gpu(provider)
+            _after_tts_use(provider)
 
 
 def _generate_chapter_impl(chapter_id: int) -> None:
@@ -889,21 +1248,24 @@ def _generate_chapter_impl(chapter_id: int) -> None:
         pass  # already persisted to Chapter.FAILED inside _generate_chapter_async
 
 
-def _generate_chapter_queue_pump_impl() -> None:
+def _generate_chapter_queue_pump_impl(limit: int | None = None) -> None:
     """Pompe la file de génération de chapitres (audit 2026-07-11, Lot 3) : traite
     un chapitre EN FILE (status=PENDING, queued_at renseigné) à la fois, en
     relisant priority DESC puis position ASC à CHAQUE tour de boucle -- pas une
     capture figée au moment de l'enfilage, pour qu'un PATCH .../priority pendant
     l'exécution change réellement le prochain chapitre choisi. S'arrête dès que
-    la file est vide. Suppose un seul worker Huey (start.bat -k thread -w 1) --
-    aucun verrou inter-process n'est nécessaire."""
+    la file est vide, ou après `limit` chapitres (la tâche Huey en traite un seul puis
+    se ré-enfile : les tâches courtes passent entre deux). Après chaque chapitre, les
+    livres en cours de génération avancent (_advance_books). Suppose un seul worker Huey
+    (start.bat -k thread -w 1) -- aucun verrou inter-process n'est nécessaire."""
     from app.core.db import get_engine
     from app.core.enums import ChapterStatus
     from app.models import Chapter
 
     engine = get_engine()
+    processed = 0
 
-    while True:
+    while limit is None or processed < limit:
         with Session(engine) as session:
             next_chapter = session.exec(
                 select(Chapter)
@@ -911,10 +1273,15 @@ def _generate_chapter_queue_pump_impl() -> None:
                 .order_by(Chapter.priority.desc(), Chapter.position.asc())
             ).first()
             if next_chapter is None:
-                return
+                break
             chapter_id = next_chapter.id
 
         _generate_chapter_impl(chapter_id)
+        processed += 1
+        _advance_books(engine)
+
+    if processed == 0:
+        _advance_books(engine)
 
 
 def _process_book_impl(book_id: int) -> None:
@@ -943,7 +1310,6 @@ def _generate_voice_sample_impl(voice_id: str) -> None:
     in the FastAPI process on every POST /voices/{id}/sample, risking VRAM
     contention with a book/chapter generation running in the worker at the same
     time — two separate processes touching the same GPU with no coordination."""
-    from pathlib import Path
 
     from app.core.db import get_engine
     from app.core.enums import VoiceKind
@@ -989,6 +1355,93 @@ def _generate_voice_sample_impl(voice_id: str) -> None:
         logger.exception("generate_voice_sample failed for voice_id=%r", voice_id)
     finally:
         _release_qwen_gpu(provider)
+
+
+# ── Aperçu d'une voix sur une réplique du personnage (UX-6) ───────────────────────
+
+_PREVIEW_MAX_CHARS = 220
+_PREVIEW_FALLBACK = "Bonjour, ceci est un aperçu de cette voix."
+
+
+def character_preview_path(session: Session, character, voice_id: str) -> Path:
+    """Fichier d'aperçu (personnage, voix). Le nom inclut une empreinte du moteur effectif
+    (provider + réglages à chaud + langue du livre) : changer de moteur invalide l'aperçu."""
+    import hashlib
+
+    from app.models import Book
+
+    book = session.get(Book, character.book_id)
+    provider = _effective_tts_provider(session, book.tts_provider if book else None) \
+        or get_settings().tts_provider
+    fingerprint = json.dumps([provider, _tts_options(session), book.language if book else None],
+                             sort_keys=True)
+    digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:8]
+    safe_voice = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in voice_id)
+    return DATA_DIR / str(character.book_id) / "previews" / f"{character.id}_{safe_voice}_{digest}.wav"
+
+
+def _preview_text(session: Session, character) -> str:
+    """La réplique (dialogue) la plus longue du personnage, tronquée à une fin de phrase :
+    c'est sur SON texte qu'on juge si la voix convient."""
+    from app.core.enums import SegmentType
+    from app.models import Chapter, Segment
+    from app.services.audio.format import split_sentences
+
+    chapter_ids = [c for c in session.exec(
+        select(Chapter.id).where(Chapter.book_id == character.book_id)
+    ).all()]
+    best = ""
+    if chapter_ids:
+        for text in session.exec(
+            select(Segment.text).where(
+                Segment.character_id == character.id,
+                Segment.segment_type == SegmentType.DIALOGUE,
+                Segment.chapter_id.in_(chapter_ids),
+            ).limit(300)
+        ).all():
+            if len(text) > len(best):
+                best = text
+    if not best:
+        return _PREVIEW_FALLBACK
+    pieces = split_sentences(best, _PREVIEW_MAX_CHARS)
+    return pieces[0] if pieces else _PREVIEW_FALLBACK
+
+
+def _generate_character_preview_impl(character_id: int, voice_id: str) -> None:
+    from app.core.db import get_engine
+    from app.models import Book, Character
+    from app.models.entities import Voice
+    from app.services.audio.chapter import _synthesise_with_retry
+
+    engine = get_engine()
+    settings = get_settings()
+    with Session(engine) as session:
+        character = session.get(Character, character_id)
+        if character is None:
+            logger.error("character preview: unknown character_id=%d", character_id)
+            return
+        book = session.get(Book, character.book_id)
+        text = _preview_text(session, character)
+        voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
+        ref_path = voice.reference_audio_path if voice else None
+        out_path = character_preview_path(session, character, voice_id)
+        provider = _get_tts_provider(settings, session, book)
+    try:
+        wav = asyncio.run(_synthesise_with_retry(
+            provider, text, voice_id, emotion=None, reference_audio_path=ref_path,
+        ))
+    except Exception:  # noqa: BLE001 — l'aperçu ne doit jamais casser le worker
+        logger.exception("character preview failed (character=%d voice=%s)", character_id, voice_id)
+        return
+    finally:
+        _after_tts_use(provider)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(wav)
+
+
+@huey.task(priority=10)
+def generate_character_preview(character_id: int, voice_id: str) -> None:
+    _generate_character_preview_impl(character_id, voice_id)
 
 
 @huey.on_startup()
@@ -1040,7 +1493,7 @@ def _reconcile_zombie_state() -> None:
         )
 
 
-@huey.task()
+@huey.task(priority=10)  # tâche courte : passe avant les chapitres en file
 def generate_voice_sample(voice_id: str) -> None:
     _generate_voice_sample_impl(voice_id)
 
@@ -1052,7 +1505,7 @@ def analyze_book(book_id: int, force: bool = False) -> None:
 
 @huey.task()
 def generate_book(book_id: int, force: bool = False) -> None:
-    _generate_book_impl(book_id, force)
+    _enqueue_book_generation(book_id, force)
 
 
 @huey.task()
@@ -1069,7 +1522,6 @@ async def _generate_segment_async(take_id: int, engine) -> None:
     from app.models.entities import SegmentTake, Voice
     from app.models import Book, Chapter, Segment
     from app.services.audio.chapter import _synthesise_with_retry
-    from app.services.tts import factory as tts_factory
 
     settings = get_settings()
 
@@ -1096,11 +1548,7 @@ async def _generate_segment_async(take_id: int, engine) -> None:
         v = session.exec(_select(Voice).where(Voice.voice_id == voice_id)).first()
         ref_path = v.reference_audio_path if v else None
 
-        provider = tts_factory.get_tts_provider(
-            settings,
-            override=_effective_tts_provider(session, book.tts_provider if book else None),
-            language=book.language if book else None,
-        )
+        provider = _get_tts_provider(settings, session, book)
 
     try:
         wav_bytes = await _synthesise_with_retry(
@@ -1108,7 +1556,7 @@ async def _generate_segment_async(take_id: int, engine) -> None:
             emotion=emotion, reference_audio_path=ref_path,
         )
     finally:
-        _release_qwen_gpu(provider)
+        _after_tts_use(provider)
 
     takes_dir = DATA_DIR / str(book_id) / "takes"
     takes_dir.mkdir(parents=True, exist_ok=True)
@@ -1129,14 +1577,34 @@ def _generate_segment_impl(take_id: int) -> None:
     asyncio.run(_generate_segment_async(take_id, engine))
 
 
-@huey.task()
+@huey.task(priority=10)
 def generate_segment(take_id: int) -> None:
     _generate_segment_impl(take_id)
 
 
 @huey.task()
 def generate_chapter_queue_pump() -> None:
-    _generate_chapter_queue_pump_impl()
+    """Un chapitre par tâche, puis ré-enfilage tant que la file n'est pas vide."""
+    from app.core.db import get_engine
+
+    _generate_chapter_queue_pump_impl(limit=1)
+    _schedule_pump_if_needed(get_engine())
+
+
+@huey.task(priority=10)
+def release_qwen_vram() -> None:
+    """Décharge les modèles TTS gardés en mémoire (POST /models/qwen/unload)."""
+    n = _release_all_tts()
+    logger.info("release_qwen_vram: %d provider(s) déchargé(s)", n)
+
+
+@huey.periodic_task(crontab(minute="*"))
+def _unload_idle_tts() -> None:
+    """Libère la VRAM d'un modèle TTS inutilisé depuis TTS_IDLE_UNLOAD_SECONDS (BE-1)."""
+    idle = get_settings().tts_idle_unload_seconds
+    if idle > 0 and _TTS_CACHE and time.monotonic() - _TTS_LAST_USED > idle:
+        n = _release_all_tts()
+        logger.info("modèle TTS inactif depuis > %ds : %d provider(s) déchargé(s)", idle, n)
 
 
 @huey.task()

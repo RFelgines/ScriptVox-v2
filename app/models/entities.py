@@ -31,13 +31,24 @@ class Book(SQLModel, table=True):
     failed_stage: Optional[str] = None
     audio_path: Optional[str] = None
     mp3_path: Optional[str] = None
+    m4b_path: Optional[str] = None  # livre audio chapitré + couverture (ffmpeg requis)
     cover_path: Optional[str] = None
     tts_provider: Optional[str] = None  # None = utilise le défaut global (Settings.tts_provider)
     genre: Optional[str] = None  # texte libre, tag manuel (pas d'extraction EPUB fiable)
     language: Optional[str] = None  # auto-extrait de dc:language à l'analyse, override manuel possible
     published_at: Optional[date] = None  # tag manuel (dc:date EPUB peu fiable/absent)
+    # Progression par étape (audit 2026-09-25, BE-5) : `progress` reste la valeur globale
+    # (compatibilité) ; l'UI affiche « étape · chapitre X/Y · temps restant ».
+    stage: Optional[str] = None  # "analysis" | "generation" | "assembly" ; None hors traitement
+    stage_progress: float = Field(default=0.0, ge=0.0, le=100.0)
+    eta_seconds: Optional[int] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # onupdate : mis à jour à chaque modification ORM (n'était jamais rafraîchi avant l'audit
+    # 2026-09-25).
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column_kwargs={"onupdate": lambda: datetime.now(timezone.utc)},
+    )
 
     chapters: list["Chapter"] = Relationship(
         back_populates="book",
@@ -72,6 +83,10 @@ class Chapter(SQLModel, table=True):
     # seul. Lu par generate_chapter_queue_pump pour choisir le prochain
     # chapitre par priority DESC (audit 2026-07-11, Lot 3).
     queued_at: Optional[datetime] = None
+    # False = page non narrative (couverture, copyright, table des matières…) : ignorée par
+    # l'analyse et la génération (BE-6). Décochable dans l'UI.
+    included: bool = Field(default=True)
+    duration_ms: Optional[int] = None  # durée du WAV généré
 
     book: Optional["Book"] = Relationship(back_populates="chapters")
     segments: list["Segment"] = Relationship(
@@ -165,6 +180,9 @@ class Voice(SQLModel, table=True):
     # Réservé au clonage (Phase 3b, non implémenté) -- chemin de l'échantillon
     # audio de référence pour une voix CLONED.
     reference_audio_path: Optional[str] = None
+    # Transcription de l'audio de référence : permet le clonage « complet » de Qwen3-TTS
+    # (timbre + prosodie) au lieu du mode x-vector seul.
+    reference_text: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -190,3 +208,7 @@ class AppSetting(SQLModel, table=True):
     # app.workers.tasks._effective_llm_provider à chaque run d'analyse LLM.
     # Miroir exact de preferred_tts_provider pour le provider LLM.
     preferred_llm_provider: Optional[str] = None
+    # Réglages à chaud du moteur (JSON : model, base_url…). Priment sur le .env — c'est ce
+    # qui permet de changer de modèle depuis Paramètres, y compris un modèle non listé.
+    llm_options: Optional[str] = None
+    tts_options: Optional[str] = None

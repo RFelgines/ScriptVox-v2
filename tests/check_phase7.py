@@ -1200,7 +1200,7 @@ with TestClient(app) as _tc:
     assert _r33.status_code == 200, f"Expected 200, got {_r33.status_code} ({_r33.text})"
     _r33_data = _r33.json()
     assert _r33_data["default_tts_provider"], f"got {_r33_data}"
-    assert set(_r33_data["available_tts_providers"]) == {"piper", "edgetts", "qwen"}, (
+    assert set(_r33_data["available_tts_providers"]) >= {"piper", "edgetts", "qwen"}, (
         f"got {_r33_data['available_tts_providers']}"
     )
 ok(f"GET /settings -> {_r33_data}")

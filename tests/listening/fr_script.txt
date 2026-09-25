@@ -1,0 +1,11 @@
+# Script d'écoute (≈ 1 min). Une ligne = un appel de synthèse ; format « voix | émotion | texte ».
+# Sert à comparer les moteurs TTS À L'OREILLE (scripts/bench_tts.py) : voix du narrateur, dialogues
+# calmes / en colère / murmurés, nombres, sigles, noms propres, phrase longue.
+narrator | neutral | Le soir tombait sur la petite ville, et les lampadaires s'allumaient un à un le long de la rue des Tanneurs.
+male_0 | calm | Je ne suis pas certain que ce soit une bonne idée, mais je te suivrai jusqu'au bout.
+female_0 | furious | Comment as-tu pu me mentir pendant trois ans ? Trois ans, Antoine !
+male_1 | whispering | Chut… Tu entends ? Quelqu'un marche dans le couloir.
+female_1 | joyful | Ça y est, on a gagné ! Mille huit cent quarante-deux voix d'avance, tu te rends compte ?
+narrator | neutral | En 1987, le professeur Delacroix quitta l'Université de Strasbourg pour rejoindre le CNRS, à Grenoble.
+male_2 | commanding | Rendez-vous au point de rassemblement avant l'aube, et que personne ne prononce un mot.
+narrator | neutral | Elle hésita longtemps devant la porte entrouverte, la main posée sur la poignée froide, écoutant le vent qui sifflait dans les branches nues du vieux tilleul, puis elle poussa doucement le battant et entra.

@@ -25,12 +25,19 @@ class ChapterResponse(BaseModel):
     status: ChapterStatus
     error_message: Optional[str] = None
     priority: int = 0
+    included: bool = True
+    duration_ms: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
 
 class ChapterPriorityUpdate(BaseModel):
     priority: int
+
+
+class ChapterUpdate(BaseModel):
+    """PATCH /books/{id}/chapters/{n} : inclure/exclure un chapitre (page non narrative)."""
+    included: Optional[bool] = None
 
 
 class QueueItemResponse(BaseModel):
@@ -85,12 +92,17 @@ class BookResponse(BaseModel):
     failed_stage: Optional[str] = None  # "analysis" | "generation" ; renseigné uniquement si status=FAILED
     audio_path: Optional[str] = None
     mp3_path: Optional[str] = None
+    m4b_path: Optional[str] = None
     cover_path: Optional[str] = None
     tts_provider: Optional[str] = None
     genre: Optional[str] = None
     language: Optional[str] = None
     published_at: Optional[date] = None
     created_at: datetime
+    # Étape en cours, avancement DANS l'étape et temps restant estimé (BE-5).
+    stage: Optional[str] = None
+    stage_progress: float = 0.0
+    eta_seconds: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -100,6 +112,10 @@ class BookUpdate(BaseModel):
     genre: Optional[str] = None
     language: Optional[str] = None
     published_at: Optional[date] = None
+
+
+class CharacterPreviewRequest(BaseModel):
+    voice_id: str
 
 
 class RegenerateSegmentRequest(BaseModel):

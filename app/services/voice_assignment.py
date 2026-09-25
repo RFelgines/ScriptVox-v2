@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.core.enums import AgeCategory, Gender, VoiceKind
-from app.models.entities import Character, Voice
+from app.models.entities import Character, Segment, Voice
 
 NARRATOR_VOICE_ID: str = "narrator"
 
@@ -108,13 +108,22 @@ def assign_voices(
 
     When tts_provider="qwen", cloned voices (kind=CLONED) are tried first for
     each character's gender pool before falling back to the catalogue.
-    Characters are processed alphabetically for determinism.
+    Characters are processed by decreasing number of lines (then alphabetically) for determinism.
     """
     characters = session.exec(
         select(Character)
         .where(Character.book_id == book_id)
         .order_by(Character.name)
     ).all()
+    # Les personnages les plus importants (le plus de répliques) choisissent EN PREMIER : avec
+    # 3 voix par genre, les mieux notées vont au héros plutôt qu'à « Argus » (ordre
+    # alphabétique avant l'audit 2026-09-25). Tri stable : à égalité, l'ordre alphabétique reste.
+    line_counts = dict(session.exec(
+        select(Segment.character_id, func.count(Segment.id))
+        .where(Segment.character_id.in_([c.id for c in characters]))
+        .group_by(Segment.character_id)
+    ).all()) if characters else {}
+    characters = sorted(characters, key=lambda c: -line_counts.get(c.id, 0))
 
     # Build cloned-voice pools per gender (qwen only).
     cloned_by_gender: dict[Gender, list[str]] = {}
