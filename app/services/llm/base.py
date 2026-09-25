@@ -152,6 +152,18 @@ class MergeSuggestion:
 
 
 class BaseLLMProvider(ABC):
+    """Contrat d'un moteur LLM. Seules `analyze` et `suggest_merges` sont obligatoires.
+
+    `chunk_tokens` : budget (tokens estimés) d'un appel ; le worker découpe les chapitres
+    plus longs (ARCHITECTURE.md §2.3). Un plugin peut le surcharger.
+    """
+
+    chunk_tokens: int = 12_000
+
+    def unload(self) -> None:
+        """Libère la mémoire côté serveur (VRAM) si le moteur le permet. No-op par défaut."""
+        return None
+
     @abstractmethod
     async def analyze(
         self, text: str, known_characters: list[str] | None = None,
@@ -538,6 +550,69 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
         raise LLMParsingError(raw, exc) from exc
 
     return LLMChapterResult(characters=characters, segments=segments)
+
+
+# ── Schémas JSON de sortie (LLM-2, audit 2026-09-25) ────────────────────────────
+# `format="json"` garantit un JSON valide mais pas sa forme ; passer le schéma au moteur
+# (Ollama `format=`, Gemini `response_json_schema`, OpenAI `response_format=json_schema`)
+# contraint la génération. _parse_llm_json reste le filet de sécurité (jamais retiré).
+
+_GENDER_VALUES = ["MALE", "FEMALE", "NEUTRAL", "UNKNOWN"]
+_AGE_VALUES = ["CHILD", "YOUNG_ADULT", "ADULT", "ELDER", "UNKNOWN"]
+
+ANALYSIS_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "characters": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "gender": {"type": "string", "enum": _GENDER_VALUES},
+                    "age_category": {"type": "string", "enum": _AGE_VALUES},
+                    "tone": {"type": "string"},
+                    "voice_quality": {"type": "string"},
+                    "voice_tone": {"type": "string"},
+                },
+                "required": ["name", "gender"],
+            },
+        },
+        "attributions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "character_name": {"type": "string"},
+                    "emotion": {"type": "string"},
+                },
+                "required": ["index", "character_name"],
+            },
+        },
+    },
+    "required": ["characters", "attributions"],
+}
+
+MERGE_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "merges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "survivor_name": {"type": "string"},
+                    "merged_name": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["survivor_name", "merged_name"],
+            },
+        },
+    },
+    "required": ["merges"],
+}
 
 
 # ── Fusion de personnages (suggest_merges) ──────────────────────────────────────

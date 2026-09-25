@@ -1,15 +1,40 @@
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-VALID_LLM_PROVIDERS = frozenset({"gemini", "ollama"})
+# Providers OFFICIELS (fournis avec l'application). Les plugins déposés dans plugins/ s'y
+# ajoutent dynamiquement : pour la liste complète, utiliser
+# app.services.registry.llm_provider_names() / tts_provider_names().
+VALID_LLM_PROVIDERS = frozenset({"gemini", "ollama", "openai_compatible"})
 # "elevenlabs" retiré (2026-07-02, audit finding M2) : le provider n'a jamais pu
 # fonctionner (voice_id logiques du catalogue injectés tels quels dans une API qui
 # attend un UUID ElevenLabs, modèle codé en dur anglais-only) et n'était couvert par
 # aucun test réel. Voir mémoire audit-2026-07-02-remediation-plan, Lot D.
-VALID_TTS_PROVIDERS = frozenset({"piper", "edgetts", "qwen"})
+VALID_TTS_PROVIDERS = frozenset({"piper", "edgetts", "qwen", "openai_tts", "command"})
+
+
+def _json_env(name: str) -> dict:
+    """Variable d'environnement contenant un objet JSON (ex. table de voix). {} si absente."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{name} n'est pas un JSON valide : {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} doit être un objet JSON (ex. {{\"narrator\": \"voix\"}})")
+    return value
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on", "oui")
 
 
 def _require(name: str) -> str:
@@ -21,18 +46,20 @@ def _require(name: str) -> str:
 
 class Settings:
     def __init__(self) -> None:
+        from app.services import registry  # import local : registry ne dépend pas de config
+
         self.llm_provider: str = _require("LLM_PROVIDER")
-        if self.llm_provider not in VALID_LLM_PROVIDERS:
+        if self.llm_provider not in registry.llm_provider_names():
             raise ValueError(
                 f"Invalid LLM_PROVIDER={self.llm_provider!r}. "
-                f"Accepted values: {sorted(VALID_LLM_PROVIDERS)}"
+                f"Accepted values: {registry.llm_provider_names()}"
             )
 
         self.tts_provider: str = _require("TTS_PROVIDER")
-        if self.tts_provider not in VALID_TTS_PROVIDERS:
+        if self.tts_provider not in registry.tts_provider_names():
             raise ValueError(
                 f"Invalid TTS_PROVIDER={self.tts_provider!r}. "
-                f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
+                f"Accepted values: {registry.tts_provider_names()}"
             )
 
         # Gemini settings — always populated (best-effort, no _require), regardless
@@ -107,6 +134,59 @@ class Settings:
                 raise ValueError(
                     f"PIPER_BINARY_PATH does not exist or is not a file: {self.piper_binary_path!r}"
                 )
+
+        # ── Réglages transverses LLM ─────────────────────────────────────────────
+        self.llm_temperature: float = float(os.environ.get("LLM_TEMPERATURE", "0.2") or "0.2")
+        # Libère la VRAM d'Ollama à la fin de l'analyse (le TTS local en a besoin).
+        self.llm_unload_after_analysis: bool = _bool_env("LLM_UNLOAD_AFTER_ANALYSIS", True)
+
+        # ── Serveur LLM compatible OpenAI (LM Studio, llama.cpp, vLLM, OpenRouter…) ─
+        self.openai_base_url: str = (
+            os.environ.get("OPENAI_BASE_URL", "").strip() or "http://localhost:1234/v1"
+        )
+        self.openai_api_key: str | None = os.environ.get("OPENAI_API_KEY", "").strip() or None
+        self.openai_model: str | None = os.environ.get("OPENAI_MODEL", "").strip() or None
+        self.openai_chunk_tokens: int = int(os.environ.get("OPENAI_CHUNK_TOKENS", "12000") or "12000")
+        self.openai_timeout: float = float(os.environ.get("OPENAI_TIMEOUT", "900") or "900")
+        if self.llm_provider == "openai_compatible" and not self.openai_model:
+            raise ValueError("Missing required env var: OPENAI_MODEL")
+
+        # ── TTS générique : serveur compatible OpenAI (/v1/audio/speech) ─────────
+        self.tts_http_base_url: str = (
+            os.environ.get("TTS_HTTP_BASE_URL", "").strip() or "http://localhost:8880/v1"
+        )
+        self.tts_http_api_key: str | None = os.environ.get("TTS_HTTP_API_KEY", "").strip() or None
+        self.tts_http_model: str = os.environ.get("TTS_HTTP_MODEL", "").strip() or "tts-1"
+        self.tts_http_voice_map: dict = _json_env("TTS_HTTP_VOICE_MAP")
+        self.tts_http_extra_body: dict = _json_env("TTS_HTTP_EXTRA_BODY")
+        self.tts_http_emotion_field: str | None = (
+            os.environ.get("TTS_HTTP_EMOTION_FIELD", "").strip() or None
+        )
+        self.tts_http_concurrency: int = int(os.environ.get("TTS_HTTP_CONCURRENCY", "1") or "1")
+        # ── TTS générique : programme externe. Défini UNIQUEMENT ici (jamais modifiable via
+        # l'API : exécuter une commande choisie par une requête HTTP serait une faille).
+        self.tts_command: str | None = os.environ.get("TTS_COMMAND", "").strip() or None
+        self.tts_command_timeout: float = float(os.environ.get("TTS_COMMAND_TIMEOUT", "300") or "300")
+        self.tts_command_voice_map: dict = _json_env("TTS_COMMAND_VOICE_MAP")
+        if self.tts_provider == "command" and not self.tts_command:
+            raise ValueError("Missing required env var: TTS_COMMAND")
+
+        # ── Surcharges de tables de voix / checkpoints (moteurs officiels) ────────
+        self.edgetts_voice_map: dict = _json_env("EDGETTS_VOICE_MAP")
+        self.qwen_voice_map: dict = _json_env("QWEN_VOICE_MAP")
+        self.qwen_base_model: str | None = os.environ.get("QWEN_BASE_MODEL", "").strip() or None
+
+        # ── Assemblage audio ─────────────────────────────────────────────────────
+        self.pause_same_voice_ms: int = int(os.environ.get("AUDIO_PAUSE_SAME_VOICE_MS", "250") or "250")
+        self.pause_voice_change_ms: int = int(os.environ.get("AUDIO_PAUSE_VOICE_CHANGE_MS", "450") or "450")
+        self.pause_chapter_ms: int = int(os.environ.get("AUDIO_PAUSE_CHAPTER_MS", "1500") or "1500")
+        self.audio_normalize: bool = _bool_env("AUDIO_NORMALIZE", True)
+        # 0 = valeur propre au provider ; sinon force max_chars / concurrence pour tous.
+        self.tts_max_chars: int = int(os.environ.get("TTS_MAX_CHARS", "0") or "0")
+        self.tts_concurrency: int = int(os.environ.get("TTS_CONCURRENCY", "0") or "0")
+        # Secondes d'inactivité avant déchargement d'un modèle TTS gardé en mémoire (0 = jamais).
+        self.tts_idle_unload_seconds: int = int(os.environ.get("TTS_IDLE_UNLOAD_SECONDS", "300") or "300")
+        self.ffmpeg_path: str | None = os.environ.get("FFMPEG_PATH", "").strip() or None
 
         self.database_url: str = _require("DATABASE_URL")
         self.huey_db_path: str = _require("HUEY_DB_PATH")

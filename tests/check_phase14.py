@@ -148,7 +148,7 @@ class _RecordingProvider:
 
 _recorder = _RecordingProvider()
 _original_get_provider = llm_factory.get_llm_provider
-llm_factory.get_llm_provider = lambda settings: _recorder
+llm_factory.get_llm_provider = lambda settings, **_kw: _recorder
 
 _chapter_data = [(1, "Chapitre un."), (2, "Chapitre deux.")]
 
@@ -210,7 +210,7 @@ class _EmotionProvider:
         )
 
 
-llm_factory.get_llm_provider = lambda settings: _EmotionProvider()
+llm_factory.get_llm_provider = lambda settings, **_kw: _EmotionProvider()
 try:
     asyncio.run(_analyze_book(_book_b1_id, [(1, "Chapitre.")], _engine_b1))
 finally:
