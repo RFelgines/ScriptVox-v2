@@ -5,10 +5,13 @@ from pathlib import Path
 
 from app.config import Settings
 from app.core.exceptions import TTSError
+from app.services.audio.format import normalize_audio
 from app.services.tts.base import BaseTTSProvider
 
 
 class PiperProvider(BaseTTSProvider):
+    max_chars = 1000
+
     def __init__(self, settings: Settings) -> None:
         # Settings always populates these two fields (possibly None) regardless of
         # whether piper is the global provider -- a per-book override can reach here
@@ -68,7 +71,7 @@ class PiperProvider(BaseTTSProvider):
                     raise RuntimeError(
                         f"piper exited with code {result.returncode}: {err or '<no stderr>'}"
                     )
-                return tmp_path.read_bytes()
+                return normalize_audio(tmp_path.read_bytes())
             finally:
                 tmp_path.unlink(missing_ok=True)
 

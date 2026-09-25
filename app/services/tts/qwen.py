@@ -1,26 +1,17 @@
-import array
 import asyncio
-import io
-import wave
 from pathlib import Path
-
-try:
-    import audioop  # Removed from the stdlib in Python 3.13+ (PEP 594).
-except ImportError:  # pragma: no cover — current venv pins Python 3.11
-    audioop = None  # type: ignore[assignment]
 
 from app.config import Settings
 from app.core.exceptions import TTSError
+from app.services.audio.format import OUTPUT_SAMPLE_RATE, float_to_pcm16, pcm16_to_wav, resample_pcm16
 from app.services.llm.language_profiles import resolve_profile
 from app.services.tts.base import BaseTTSProvider
 
 # Logical voice_id -> Qwen3-TTS speaker preset (CustomVoice variants).
 # IDs mirror VOICE_CATALOGUE (voice_assignment.py): narrator + male_N / female_N / neutral_N.
 # Qwen3-TTS ships exactly 9 presets (Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden,
-# Ono_Anna, Sohee) -- one per logical slot. The preset->gender mapping below is a BEST-EFFORT
-# GUESS from preset naming (Qwen's docs list the names with no gender/age metadata) -- to be
-# confirmed or corrected once the real-audio listening pass happens (B3 stays open until then,
-# see tts-emotion-qwen3-direction memory).
+# Ono_Anna, Sohee) -- one per logical slot. Mapping confirmed by ear (B3 listening pass,
+# 2026-06-27). Surchargeable via QWEN_VOICE_MAP (JSON) pour un checkpoint aux presets différents.
 _VOICE_MAP: dict[str, str] = {
     "narrator":  "Eric",
     "male_0":    "Dylan",
@@ -39,8 +30,8 @@ _MODEL_IDS: dict[str, str] = {
     "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
 }
 
-# Base checkpoint: voice cloning via generate_voice_clone + x_vector_only_mode.
-# Must NOT cohabitate with CustomVoice on a 10 Go GPU — sequential swap strategy.
+# Base checkpoint: voice cloning via generate_voice_clone.
+# Must NOT cohabitate with CustomVoice on a 10-16 Go GPU — sequential swap strategy.
 _MODEL_IDS_BASE: dict[str, str] = {
     "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
     "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
@@ -50,7 +41,7 @@ _MODEL_IDS_BASE: dict[str, str] = {
 _PROFILE_LANGUAGE: dict[str, str] = {"en": "English", "fr": "French"}
 
 _MODEL_SAMPLE_RATE = 24000   # what Qwen3-TTS always returns (verified by tests/spike_qwen_tts.py)
-_OUTPUT_SAMPLE_RATE = 22050  # ScriptVox's shared WAV format (assemble_wav's format guard)
+_OUTPUT_SAMPLE_RATE = OUTPUT_SAMPLE_RATE  # 24 kHz : plus aucun rééchantillonnage nécessaire
 
 
 def _import_qwen_deps():
@@ -62,35 +53,18 @@ def _import_qwen_deps():
 
 
 def _float_to_pcm16(samples) -> bytes:
-    """Float32 audio in [-1, 1] -> 16-bit signed PCM (stdlib only, no numpy dependency)."""
-    ints = [int(max(-1.0, min(1.0, float(s))) * 32767) for s in samples]
-    return array.array("h", ints).tobytes()
+    """Float32 audio in [-1, 1] -> 16-bit signed PCM (vectorisé numpy)."""
+    return float_to_pcm16(samples)
 
 
 def _resample_to_output(pcm16: bytes, source_rate: int) -> bytes:
     if source_rate == _OUTPUT_SAMPLE_RATE:
         return pcm16
-    if audioop is None:
-        raise TTSError(
-            "qwen:resample",
-            ImportError(
-                "audioop is unavailable (removed from the Python stdlib in 3.13+). "
-                "QwenTTSProvider needs it to resample audio to 22050 Hz — run on "
-                "Python <3.13, or install the 'audioop-lts' backport package."
-            ),
-        )
-    converted, _ = audioop.ratecv(pcm16, 2, 1, source_rate, _OUTPUT_SAMPLE_RATE, None)
-    return converted
+    return resample_pcm16(pcm16, source_rate, _OUTPUT_SAMPLE_RATE)
 
 
 def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)  # 16-bit signed PCM
-        w.setframerate(sample_rate)
-        w.writeframes(pcm)
-    return buf.getvalue()
+    return pcm16_to_wav(pcm, sample_rate)
 
 
 def _load_ref_audio(path: str):
@@ -122,11 +96,34 @@ def _load_ref_audio(path: str):
     return samples_f32, native_sr
 
 
+def _is_custom_model_id(value: str) -> bool:
+    """« 1.7b » / « 0.6b » = raccourcis ; tout autre texte est pris tel quel comme identifiant
+    Hugging Face (« org/nom ») ou chemin local d'un checkpoint compatible."""
+    return value.lower() not in _MODEL_IDS
+
+
 class QwenTTSProvider(BaseTTSProvider):
-    def __init__(self, settings: Settings, language: str | None = None) -> None:
-        size = getattr(settings, "qwen_model", "1.7b")
-        self._model_id = _MODEL_IDS.get(size, _MODEL_IDS["1.7b"])
-        self._base_model_id = _MODEL_IDS_BASE.get(size, _MODEL_IDS_BASE["1.7b"])
+    """Qwen3-TTS local (GPU). Modèle gardé chargé d'un chapitre à l'autre (BE-1).
+
+    `options` (réglages à chaud) : `model` = « 1.7b » | « 0.6b » | identifiant Hugging Face /
+    chemin local d'un checkpoint CustomVoice compatible ; `base_model` = idem pour le checkpoint
+    de clonage (sinon déduit : même taille si raccourci, sinon QWEN_BASE_MODEL).
+    """
+
+    keep_loaded = True
+    max_chars = 400  # au-delà, les TTS neuronaux dérivent ou tronquent (TTS-5)
+
+    def __init__(self, settings: Settings, language: str | None = None,
+                 options: dict | None = None) -> None:
+        options = options or {}
+        size = str(options.get("model") or getattr(settings, "qwen_model", "1.7b"))
+        if _is_custom_model_id(size):
+            self._model_id = size
+            base = options.get("base_model") or getattr(settings, "qwen_base_model", None)
+            self._base_model_id = base if isinstance(base, str) and base else _MODEL_IDS_BASE["1.7b"]
+        else:
+            self._model_id = _MODEL_IDS[size.lower()]
+            self._base_model_id = options.get("base_model") or _MODEL_IDS_BASE[size.lower()]
         # `language` is Book.language (raw EPUB metadata) -- resolved through the same
         # profile logic as LLM segmentation / EdgeTTS so a book's locale is consistent
         # across the whole pipeline. Falls back to the global QWEN_LANGUAGE when the
@@ -138,18 +135,37 @@ class QwenTTSProvider(BaseTTSProvider):
             self._language = getattr(settings, "qwen_language", "French")
         self._device = getattr(settings, "qwen_device", "cuda:0")
         self._attn = getattr(settings, "qwen_attn", "sdpa")
+        override = getattr(settings, "qwen_voice_map", None)
+        self._voice_map = {**_VOICE_MAP, **(override if isinstance(override, dict) else {})}
         self._model = None       # CustomVoice — lazy-loaded on first preset call
         self._base_model = None  # Base — lazy-loaded on first clone call
+        self._ref_cache: dict[str, tuple] = {}
+        self._prompt_cache: dict[str, object] = {}
 
     def resolve_voice(self, voice_id: str) -> str:
         """Return the Qwen3-TTS speaker preset for a logical voice_id."""
-        speaker = _VOICE_MAP.get(voice_id)
+        speaker = self._voice_map.get(voice_id)
         if speaker is None:
             raise TTSError(
                 f"qwen:{voice_id}",
                 ValueError(f"Unknown voice_id {voice_id!r} for Qwen3-TTS"),
             )
         return speaker
+
+    def unload(self) -> None:
+        """Libère la VRAM (modèles CustomVoice et Base)."""
+        if self._model is None and self._base_model is None:
+            return
+        import gc
+        self._model = None
+        self._base_model = None
+        self._prompt_cache.clear()  # les prompts de clonage vivent sur le GPU
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def _ensure_model(self):
         """Load the CustomVoice model, unloading the Base model first if needed."""
@@ -203,6 +219,45 @@ class QwenTTSProvider(BaseTTSProvider):
             )
         return self._base_model
 
+    def _reference(self, path: str):
+        """Audio de référence décodé UNE fois par voix (avant : relu à chaque réplique)."""
+        if path not in self._ref_cache:
+            self._ref_cache[path] = _load_ref_audio(path)
+        return self._ref_cache[path]
+
+    @staticmethod
+    def _reference_text(path: str) -> str | None:
+        """Transcription de l'audio de référence : fichier `ref.txt` posé à côté de `ref.<ext>`
+        à la création de la voix. Avec elle, le clonage est « complet » (timbre + prosodie) ;
+        sans, retour au mode x-vector seul (timbre uniquement)."""
+        sidecar = Path(path).with_suffix(".txt")
+        try:
+            text = sidecar.read_text(encoding="utf-8").strip() if sidecar.is_file() else ""
+        except OSError:
+            text = ""
+        return text or None
+
+    def _clone_kwargs(self, model, path: str) -> dict:
+        """Arguments de clonage. Le prompt de clonage (encodage de la référence) est calculé UNE
+        fois par voix puis réutilisé pour toutes ses répliques quand l'API du modèle le permet
+        (create_voice_clone_prompt) ; sinon la référence est passée telle quelle à chaque appel."""
+        samples_f32, ref_sr = self._reference(path)
+        ref_text = self._reference_text(path)
+        if not ref_text:
+            return {"ref_audio": (samples_f32, ref_sr), "x_vector_only_mode": True}
+        prompt = self._prompt_cache.get(path)
+        if prompt is None and hasattr(model, "create_voice_clone_prompt"):
+            try:
+                prompt = model.create_voice_clone_prompt(
+                    ref_audio=(samples_f32, ref_sr), ref_text=ref_text, x_vector_only_mode=False,
+                )
+                self._prompt_cache[path] = prompt
+            except Exception:  # noqa: BLE001 — API différente selon la version de qwen-tts
+                prompt = None
+        if prompt is not None:
+            return {"voice_clone_prompt": prompt}
+        return {"ref_audio": (samples_f32, ref_sr), "ref_text": ref_text, "x_vector_only_mode": False}
+
     async def synthesise(
         self, text: str, voice_id: str,
         emotion: str | None = None,
@@ -212,12 +267,10 @@ class QwenTTSProvider(BaseTTSProvider):
             # Clone mode — Base checkpoint + generate_voice_clone
             def _run_clone() -> bytes:
                 model = self._ensure_base_model()
-                samples_f32, ref_sr = _load_ref_audio(reference_audio_path)
                 wavs, sample_rate = model.generate_voice_clone(
                     text=text,
                     language=self._language,
-                    ref_audio=(samples_f32, ref_sr),
-                    x_vector_only_mode=True,
+                    **self._clone_kwargs(model, reference_audio_path),
                 )
                 pcm16 = _float_to_pcm16(wavs[0])
                 pcm16 = _resample_to_output(pcm16, sample_rate)

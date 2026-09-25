@@ -190,7 +190,7 @@ ok("EdgeTTS / Piper / Qwen -- reference_audio_path: str | None = None")
 
 
 # ── 11. QwenTTS chemin clone — generate_voice_clone appele ───────────────────
-section("QwenTTSProvider clone: generate_voice_clone appele, WAV 22050 Hz produit")
+section("QwenTTSProvider clone: generate_voice_clone appele, WAV 24000 Hz produit")
 
 import io as _io  # noqa: E402
 import wave as _wave  # noqa: E402
@@ -258,9 +258,9 @@ if len(_p11._base_model.calls) != 1:
 if "ref_audio" not in _p11._base_model.calls[0]:
     die(f"ref_audio absent des kwargs: {list(_p11._base_model.calls[0])}")
 with _wave.open(_io.BytesIO(_wav11), "rb") as _w11:
-    if _w11.getframerate() != 22050:
-        die(f"framerate attendu 22050, obtenu {_w11.getframerate()}")
-ok("generate_voice_clone appele avec ref_audio, WAV 22050 Hz produit")
+    if _w11.getframerate() != 24000:
+        die(f"framerate attendu 24000, obtenu {_w11.getframerate()}")
+ok("generate_voice_clone appele avec ref_audio, WAV 24000 Hz produit")
 
 
 # ── 12. QwenTTS swap — charger le modele Base decharge le CustomVoice ────────

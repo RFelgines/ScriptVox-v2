@@ -43,17 +43,40 @@ def assemble_wav_bytes(audio_segments: list[bytes]) -> bytes:
     return buf.getvalue()
 
 
-def _assemble_paths(paths: list[Path], dest) -> None:
+_READ_CHUNK_FRAMES = 1_000_000
+
+
+def _assemble_paths(
+    paths: list[Path], dest, target_rate: int | None = None,
+    gaps_ms: "int | list[int] | None" = None,
+) -> None:
     """Same contract as _assemble (format-mismatch guard included), but reads each
-    input from disk instead of from an in-memory bytes list — only one file's
-    frames are held in memory at a time, not all of them at once."""
+    input from disk instead of from an in-memory bytes list — only one chunk of one
+    file's frames is held in memory at a time, not all of them at once.
+
+    target_rate : si fourni, la sortie est mono 16 bits à cette fréquence et tout fichier
+    d'un autre format (ex. chapitres générés avant le passage à 24 kHz) est converti à la
+    volée au lieu de lever ValueError. Sans target_rate, le garde-fou strict s'applique.
+
+    gaps_ms : silence inséré ENTRE deux fichiers consécutifs (entier = même durée partout,
+    liste = un élément par jonction).
+    """
     if not paths:
         raise ValueError("paths must not be empty")
+
+    from app.services.audio.format import resample_pcm16
 
     with wave.open(str(paths[0]), "rb") as first:
         n_channels = first.getnchannels()
         sampwidth = first.getsampwidth()
         framerate = first.getframerate()
+    if target_rate is not None:
+        n_channels, sampwidth, framerate = 1, 2, target_rate
+
+    def _gap_after(i: int) -> int:
+        if i >= len(paths) - 1 or gaps_ms is None:
+            return 0
+        return gaps_ms if isinstance(gaps_ms, int) else int(gaps_ms[i])
 
     with wave.open(dest, "wb") as out:
         out.setnchannels(n_channels)
@@ -62,23 +85,44 @@ def _assemble_paths(paths: list[Path], dest) -> None:
         for i, path in enumerate(paths):
             with wave.open(str(path), "rb") as seg:
                 seg_ch, seg_sw, seg_fr = seg.getnchannels(), seg.getsampwidth(), seg.getframerate()
-                if (seg_ch, seg_sw, seg_fr) != (n_channels, sampwidth, framerate):
+                same = (seg_ch, seg_sw, seg_fr) == (n_channels, sampwidth, framerate)
+                if not same and (target_rate is None or seg_sw != 2):
                     raise ValueError(
                         f"WAV format mismatch at file {i} ({path}): "
                         f"expected ({n_channels}ch, {sampwidth}B, {framerate}Hz), "
                         f"got ({seg_ch}ch, {seg_sw}B, {seg_fr}Hz)"
                     )
-                out.writeframes(seg.readframes(seg.getnframes()))
+                remaining = seg.getnframes()
+                while remaining > 0:
+                    to_read = min(_READ_CHUNK_FRAMES, remaining)
+                    frames = seg.readframes(to_read)
+                    remaining -= to_read
+                    if not same:
+                        if seg_ch != 1:
+                            import miniaudio
+                            frames = bytes(miniaudio.convert_frames(
+                                miniaudio.SampleFormat.SIGNED16, seg_ch, seg_fr, frames,
+                                miniaudio.SampleFormat.SIGNED16, 1, seg_fr,
+                            ))
+                        frames = resample_pcm16(frames, seg_fr, framerate)
+                    out.writeframes(frames)
+            gap = _gap_after(i)
+            if gap > 0:
+                out.writeframes(b"\x00" * (sampwidth * n_channels * int(framerate * gap / 1000)))
 
 
-def assemble_wav_from_files(paths: list[str | Path], output_path: str | Path) -> Path:
+def assemble_wav_from_files(
+    paths: list[str | Path], output_path: str | Path,
+    target_rate: int | None = None, gaps_ms: "int | list[int] | None" = None,
+) -> Path:
     """Concatenate already-on-disk WAV files (one per chapter) into a single output
     WAV, streaming disk-to-disk. Companion to assemble_wav (which takes in-memory
     bytes, used for the per-chapter segment-synthesis path) — used by book-level
     generation to bound peak memory to one chapter's audio at a time instead of the
-    whole book (audit 2026-07-02, Lot C / finding M8)."""
+    whole book (audit 2026-07-02, Lot C / finding M8). `target_rate` / `gaps_ms` : voir
+    _assemble_paths."""
     output_path = Path(output_path)
-    _assemble_paths([Path(p) for p in paths], str(output_path))
+    _assemble_paths([Path(p) for p in paths], str(output_path), target_rate, gaps_ms)
     return output_path
 
 

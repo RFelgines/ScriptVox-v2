@@ -38,6 +38,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 os.environ.update({
+    # Assemblage brut : ni pauses ni normalisation de niveau (testés dans check_phase46).
+    "AUDIO_PAUSE_SAME_VOICE_MS": "0", "AUDIO_PAUSE_VOICE_CHANGE_MS": "0", "AUDIO_NORMALIZE": "false",
     "LLM_PROVIDER": "ollama",
     "TTS_PROVIDER": "edgetts",
     "OLLAMA_BASE_URL": "http://localhost:11434",
@@ -123,7 +125,7 @@ class _RecordingTTS:
     async def synthesise(self, text, voice_id, emotion=None, reference_audio_path=None) -> bytes:
         self.call_order.append(text)
         self.checkpoint_seq.append("base" if reference_audio_path else "custom")
-        return _make_wav_bytes(len(text) * 10)
+        return _make_wav_bytes(len(text) * 10, 24000)
 
 
 def _make_book_setup(engine, voices: list[tuple[str, str | None]]):
