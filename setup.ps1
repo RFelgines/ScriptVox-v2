@@ -36,6 +36,15 @@ try {
     Pop-Location
 }
 
+Write-Host "==> Frontend: production build (start.ps1 rebuilds it automatically when sources change)"
+Push-Location frontend
+try {
+    npm run build
+    if ($LASTEXITCODE -ne 0) { Write-Host "    build failed - .\start.ps1 -Dev still works" }
+} finally {
+    Pop-Location
+}
+
 Write-Host "==> Frontend: environment file"
 if (-not (Test-Path "frontend\.env.local")) {
     Copy-Item "frontend\.env.example" "frontend\.env.local"

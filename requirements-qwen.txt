@@ -1,13 +1,24 @@
 # ─── ScriptVox — optional Qwen3-TTS provider (TTS_PROVIDER=qwen) ─────────────
-# NOT installed by `pip install -r requirements.txt`. These are heavy, GPU/CUDA
-# specific dependencies (~2-3 GB) that the default EdgeTTS/Piper/ElevenLabs
-# providers never need. Install this file ONLY if you want emotion-per-line
-# synthesis via Qwen3-TTS. See README.md "Qwen3-TTS (optional, expressive TTS)".
+# NOT installed by `pip install -r requirements.txt`. These are heavy, GPU-specific
+# dependencies (~2-3 GB) that the default EdgeTTS/Piper providers never need. Install this
+# file ONLY if you want emotion-per-line synthesis / voice cloning via Qwen3-TTS.
+# See README.md "Qwen3-TTS" and "AMD GPUs".
 #
-# torch must be installed separately first, with the CUDA index URL matching
-# your GPU driver (cu128 below targets CUDA 12.8):
+# PyTorch must be installed FIRST, matching your GPU — pick ONE:
 #
-#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   NVIDIA (CUDA 12.8 shown; use the index URL matching your driver):
+#     pip install torch --index-url https://download.pytorch.org/whl/cu128
+#
+#   AMD Radeon (RX 7000 / RX 9000, e.g. RX 9070 XT) — PyTorch for ROCm, NOT the CUDA build
+#   above (a CUDA build cannot use an AMD card: it silently falls back to the CPU):
+#     Follow AMD's official "Install PyTorch" page for your OS in the ROCm documentation for
+#     Radeon (https://rocm.docs.amd.com/projects/radeon-ryzen/) and install the wheels it
+#     lists. The device string stays "cuda:0" (ROCm exposes the torch.cuda API), and
+#     QWEN_ATTN must be "sdpa". Verify with:
+#       python -c "import torch; print(torch.cuda.is_available(), torch.version.hip)"
+#     -> must print "True" and a HIP version. `python scripts/doctor.py` runs this check.
+#
+# Then:
 #   pip install -r requirements-qwen.txt
 #
 # qwen-tts ships open-weights models (Apache 2.0) downloaded from HuggingFace

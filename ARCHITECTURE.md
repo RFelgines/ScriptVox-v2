@@ -11,8 +11,9 @@ ScriptVox converts EPUB books into full multi-voice audiobooks:
 4. **Generation** — Synthesise every line with its assigned voice and assemble the
    final audio file.
 
-The application runs **entirely locally** (Ollama + Piper, or Ollama + Qwen3-TTS) or with a
-**cloud LLM** (Gemini) based on environment variables — no code change required.
+The application runs **entirely locally** (Ollama / any OpenAI-compatible server + Piper or Qwen3-TTS)
+or with cloud engines (Gemini, EdgeTTS) — chosen in *Settings* or by environment variables, no code
+change required. Engines the project does not know are added as **plugins** (§2.8).
 
 ---
 
@@ -30,6 +31,7 @@ The application runs **entirely locally** (Ollama + Piper, or Ollama + Qwen3-TTS
 | LLM cloud SDK   | google-genai ~2.8                             | New official SDK — replaces deprecated `google-generativeai` |
 | Config          | python-dotenv ~1.0                            | Loads `.env` at startup                           |
 | ASGI server     | uvicorn ~0.34                                 | Standard ASGI server for FastAPI                  |
+| Audio           | miniaudio, lameenc, numpy, ffmpeg (external)  | Decode/resample, MP3, vector ops; ffmpeg = chaptered M4B (optional) |
 
 > **Compatibility note:** SQLModel 0.0.14 introduced Pydantic V2 support. The pinned
 > version (0.0.38) is fully compatible with Pydantic V2 and SQLAlchemy 2.0.
@@ -50,7 +52,10 @@ app/services/llm/
 └── ollama.py      # OllamaProvider  — wraps ollama-python SDK
 ```
 
-Provider selected via env var: `LLM_PROVIDER=ollama | gemini`
+Providers: `ollama`, `gemini`, `openai_compatible` (any OpenAI-API server) or a plugin. Selected by
+`LLM_PROVIDER` (`.env`) or *Settings*; the **model** and server address are runtime settings
+(`AppSetting.llm_options`) that take priority over `.env`. All providers are resolved through the
+registry (§2.8): `llm/factory.py` no longer knows provider names.
 
 ### 2.2 Strategy Pattern — TTS (CRITICAL)
 
@@ -60,8 +65,10 @@ Same principle for speech synthesis.
 app/services/tts/
 ├── base.py           # BaseTTSProvider — abstract async synthesise(text, voice_id, emotion=None) -> bytes
 ├── piper.py          # PiperProvider    — local, offline; subprocess piper.exe; voice_id → PIPER_VOICES_DIR/<id>.onnx
-├── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 22050 Hz
-└── qwen.py           # QwenTTSProvider  — local GPU, expressive; emotion → `instruct` param; torch/qwen-tts lazy-imported
+├── edgetts.py        # EdgeTTSProvider  — cloud, free, no key; streams MP3 → miniaudio decode → WAV 24 kHz
+├── qwen.py           # QwenTTSProvider  — local GPU, expressive; emotion → `instruct`; any checkpoint id; torch lazy-imported
+├── http_tts.py       # OpenAICompatibleTTSProvider — POST {base}/audio/speech, voice table, extra body
+└── command.py        # CommandTTSProvider — external program, no shell, .env-only
 ```
 
 > **Licence Piper:** `piper-tts` est distribué sous **GPL-3.0** (`OHF-Voice/piper1-gpl`).
@@ -74,7 +81,15 @@ app/services/tts/
 > l'exerçait en conditions réelles. Supprimé plutôt que corrigé (KISS — pas de besoin identifié) ;
 > voir mémoire `audit-2026-07-02-remediation-plan`, Lot D, si un besoin réel émerge un jour.
 
-Provider selected via env var: `TTS_PROVIDER=piper | edgetts | qwen`
+Providers: `piper`, `edgetts`, `qwen`, `openai_tts` (any `/v1/audio/speech` server), `command`
+(external program) or a plugin. Selected by `TTS_PROVIDER` or *Settings* (global preference, per-book
+override); runtime settings in `AppSetting.tts_options`.
+
+`BaseTTSProvider` (`tts/base.py`) only requires `synthesise(text, voice_id, emotion, reference_audio_path)
+-> bytes`. Optional class attributes: `supports_concurrency` (parallel calls), `max_chars` (longer texts
+are split at sentence ends), `keep_loaded` (worker keeps the loaded model between chapters) and
+`unload()`. **Any decodable audio format is accepted** — `app/services/audio/format.normalize_audio`
+converts to the pipeline format (WAV mono 16-bit 24 kHz) in `_synthesise_with_retry`.
 
 > **`emotion` (Phase 14 §B2)** is forwarded from `Segment.emotion` to `synthesise()`. Piper
 > and EdgeTTS accept it but ignore it (no-op — neither has an emotion lever).
@@ -84,8 +99,8 @@ Provider selected via env var: `TTS_PROVIDER=piper | edgetts | qwen`
 > `app/services/tts/qwen.py` never binds them at module scope, so importing the module (or the
 > factory choosing a different provider) never requires them to be installed. Model loaded once
 > per provider instance (= once per Huey task), reused across `synthesise()` calls. Output is
-> always 24 000 Hz from the model, resampled to 22 050 Hz via stdlib `audioop.ratecv` to match
-> the other providers' WAV format. **B3 listening verdict (2026-06-27)**: speaker-preset→gender
+> always 24 000 Hz from the model, passed through unchanged (the pipeline format is 24 kHz; the previous 22 050 Hz resampling via the
+> removed `audioop` module is gone). **B3 listening verdict (2026-06-27)**: speaker-preset→gender
 > mapping in `_VOICE_MAP` confirmed correct (no remap needed); French quality is variable (some
 > presets carry a perceptible "British" accent — accepted as a Qwen preset limitation, not an
 > integration bug); the `instruct` emotion parameter is inconclusive (not consistently better than
@@ -140,6 +155,12 @@ does **not** fix CPU-fallback slowness itself (still governed by the `num_ctx` t
 §2.3) — it only ensures the timeout scales with the work requested instead of an arbitrary fixed
 ceiling. `GeminiProvider` is unaffected (cloud API, no local VRAM contention, no configurable
 timeout existed before this).
+
+**Constrained output (audit 2026-09-25).** The engines are given the JSON Schema of the expected answer
+(`ANALYSIS_JSON_SCHEMA` / `MERGE_JSON_SCHEMA` in `llm/base.py`): Ollama `format=`, Gemini
+`response_json_schema`, OpenAI `response_format=json_schema` (with automatic fallback to `json_object`
+then text). `_parse_llm_json` stays the safety net. Sampling temperature: `LLM_TEMPERATURE` (0.2).
+Gemini retries 429/503 with 5 s / 15 s / 45 s back-off.
 
 **Response robustness:**
 
@@ -227,8 +248,8 @@ inference fast (response size = O(dialogue spans), not O(input tokens)) and is w
    `[DIALOGUE]` span; `character_name` must match a listed character, otherwise the span
    falls back to the narrator. `emotion` (Phase 14 §B1) is free text describing how the line
    should be delivered (e.g. `"soft and hesitant"`, `"calm"`); optional, `null`/absent if
-   undeterminable. **Data layer only** — not yet consumed by any TTS provider (`synthesise()`
-   is unchanged); it exists to feed a future Qwen3-TTS `instruct` parameter.
+   undeterminable. Forwarded to `synthesise()` (§2.2): Qwen3-TTS uses it as `instruct`; other engines
+   ignore it or map it.
 
 3. **Reconstruction (Python).** Each span becomes a
    `SegmentData(position=index, text, segment_type=DIALOGUE|NARRATION, character_name, emotion)`.
@@ -237,6 +258,75 @@ inference fast (response size = O(dialogue spans), not O(input tokens)) and is w
    resulting `LLMChapterResult` is otherwise **identical in shape** to the previous protocol, so
    the worker, the DB and `_merge_chunk_results` are untouched beyond propagating this field. The
    public contract `analyze(text) -> LLMChapterResult` is preserved.
+
+### 2.6b Chapter states and generation through the queue (audit 2026-09-25)
+
+```
+Chapter:  PENDING ─(queued_at set)─▶ GENERATING ─▶ DONE
+              ▲                          │  └────▶ FAILED
+              └── abort / re-queue ◀─────┘        (re-queue: DONE/FAILED → PENDING)
+```
+
+`POST /books/{id}/generate` no longer runs one multi-hour task: it queues every included, unfinished
+chapter (`Chapter.queued_at`) and the **pump** (`generate_chapter_queue_pump`) processes **one chapter
+per Huey task**, re-enqueuing itself while the queue is not empty. Short tasks (`generate_segment`,
+`generate_voice_sample`, `generate_character_preview`, `release_qwen_vram`) have a higher Huey priority
+and run between two chapters. After every chapter `_advance_books` updates the progress and, when all
+included chapters are DONE, assembles WAV + MP3 + M4B and flips the book to DONE; a FAILED chapter fails
+the book (resume keeps the DONE chapters). `_generate_book_impl` (synchronous, whole book in one call)
+remains for `process_book` and tests. `Chapter.included=False` (cover, copyright, TOC — detected at
+import, editable in the UI) skips a chapter everywhere.
+
+Progress: `Book.progress` (legacy global 0-100) plus `stage` (`analysis|generation|assembly`),
+`stage_progress` and `eta_seconds` (moving average of the measured throughput).
+
+### 2.8 Engine registry and plugins
+
+`app/services/registry.py` maps provider names to factories `(settings, options[, language]) → provider`.
+Official engines are registered there (lazy imports); plugins are Python files in
+`plugins/llm/` and `plugins/tts/` (`PROVIDER_NAME`, `create(settings, options)`, optional `DESCRIPTION`
+and `list_models`), loaded once, **isolated** (a broken plugin is skipped and reported in Settings).
+`Settings` validates `LLM_PROVIDER` / `TTS_PROVIDER` against the registry. Runtime overrides live in
+`AppSetting.llm_options` / `tts_options` (whitelisted keys `model`, `base_url`, `base_model`, `locale`;
+secrets and `TTS_COMMAND` are `.env`-only). See `docs/PLUGINS.md`.
+
+The worker keeps providers that declare `keep_loaded=True` in a process-level cache (`_TTS_CACHE`):
+the Qwen model is loaded once per book, unloaded after `TTS_IDLE_UNLOAD_SECONDS`, on request, or before
+an analysis. The local LLM is unloaded at the end of an analysis (`LLM_UNLOAD_AFTER_ANALYSIS`).
+
+### 2.9 Audio pipeline
+
+`app/services/audio/`:
+
+- `format.py` — the single pipeline format (**WAV mono 16-bit 24 kHz**); `normalize_audio` converts any
+  provider output; helpers for silence, loudness (`adjust_level`, bounded ±6 dB) and sentence splitting.
+- `chapter.py` — synthesises a chapter: sentence splitting above the provider's `max_chars`, optional
+  concurrency (`supports_concurrency`), loudness normalisation, **pauses** (same voice / voice change),
+  `audio_offset_ms` including the pauses (the transcript highlighting depends on it).
+- `assembler.py` — streaming disk-to-disk assembly; `target_rate` converts chapters generated at another
+  rate on the fly; `gaps_ms` inserts silence between chapters.
+- `m4b.py` — chaptered M4B with cover through ffmpeg (optional).
+
+### 2.10 Security model
+
+Local single-user application, no authentication. The API refuses cross-site writes (`Origin` must be in
+`FRONTEND_ORIGINS`, or absent for non-browser clients) and unknown `Host` headers (`ALLOWED_HOSTS`);
+CORS is restricted to the frontend origins; EPUBs are checked against decompression bombs; SQLite runs in
+WAL mode with a busy timeout. See `SECURITY.md`.
+
+### 2.11 Storage layout (`DATA_DIR`)
+
+```
+DATA_DIR/
+├── <uuid>.epub|.wav|.mp3|.m4b     # source upload and the assembled book (next to each other)
+├── <book_id>/
+│   ├── cover.<ext>
+│   ├── ch<N>.wav                  # generated chapters (24 kHz)
+│   ├── takes/<take_id>.wav        # per-line takes (regeneration, take selection)
+│   └── previews/<char>_<voice>_<hash>.wav
+├── voices/<slug>/ref.<ext>|ref.txt   # cloned-voice reference audio and transcript
+└── voice_samples/                 # cached voice previews
+```
 
 ---
 
@@ -253,10 +343,8 @@ inference fast (response size = O(dialogue spans), not O(input tokens)) and is w
 
 ---
 
-## Phasing
+## Status
 
-| Phase       | Scope                                                                                        |
-|-------------|----------------------------------------------------------------------------------------------|
-| **Phase 1** | Foundations: FastAPI skeleton, fail-fast config, SQLModel models (`Book`, `Chapter`, `Job`), EPUB ingestion endpoint, Huey worker scaffold, job state machine |
-| **Phase 2** | LLM analysis: `BaseLLMProvider`, `GeminiProvider`, `OllamaProvider`, character extraction, dialogue segmentation, token-budget chunking |
-| **Phase 3** | TTS & audio: `BaseTTSProvider`, `PiperProvider`, `ElevenLabsProvider`, voice assignment, audio file assembly |
+The original three phases (Foundations, LLM analysis, TTS & audio) are complete; the roadmap since then
+(casting, cloning, generation queue, UI, engine registry, audit 2026-09-25) is tracked in `TASKS.md`
+and `CHANGELOG.md`, with the detailed journal in `docs/journal/`.

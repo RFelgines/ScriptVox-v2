@@ -66,3 +66,10 @@ frontend/.env.local
 # OS
 .DS_Store
 Thumbs.db
+
+# Plugins written by the user (own LLM / TTS engines) — keep the README and the _example_* templates
+plugins/llm/*
+plugins/tts/*
+!plugins/README.md
+!plugins/llm/_example_*.py
+!plugins/tts/_example_*.py

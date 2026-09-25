@@ -1,376 +1,268 @@
 # ScriptVox
 
-Convert an EPUB book into a full multi-voice audiobook.  
-Runs with **EdgeTTS** (free, no key, internet required — default), **locally** (Ollama + Piper), or with **Qwen3-TTS** (local GPU, emotion per line) — no code change required, only environment variables.
+Turn an EPUB into a **multi-voice audiobook**: a language model reads the book, finds the characters
+and who says each line, every character gets its own voice, and the result is exported as a
+**chaptered M4B** (plus MP3) with the cover.
 
-> ⚠️ **Local, single-user tool — no authentication.** Every route (upload, delete, generate) is open
-> to anyone who can reach the API. It's built to run on `localhost` for yourself; **do not expose it
-> to the internet** without adding your own auth layer in front of it (reverse proxy, VPN, etc.).
+- **Any model, any engine** — pick the model in *Settings* (a list of what is installed, but any name
+  is accepted), plug an OpenAI-compatible server, an external program, or drop a Python **plugin**
+  for an engine the project has never heard of. → [Changing models](#changing-models-and-engines)
+- **Runs locally or in the cloud** — Ollama / LM Studio / llama.cpp + Qwen3-TTS or Piper on your own
+  machine, or Gemini + EdgeTTS with zero setup. Nothing has to leave your computer if you don't want it to.
+- **Emotion per line**, **voice cloning**, casting screen with per-character voice preview, chapter
+  by chapter regeneration, resume after a crash.
+
+| Book page: progress with time left, casting | Finished book: player that resumes where you stopped |
+|---|---|
+| ![Generation in progress](docs/screenshots/book-generation.png) | ![Player](docs/screenshots/book-player.png) |
+
+| Settings: any engine, any model name | Library (light theme) |
+|---|---|
+| ![Models settings](docs/screenshots/settings-models.png) | ![Library](docs/screenshots/library-light.png) |
+
+> ⚠️ **Local, single-user tool — no authentication.** It is built to run on `localhost` for yourself.
+> **Do not expose it to the internet** (see [Security](#security)).
 >
-> **Privacy note.** With the default `TTS_PROVIDER=edgetts` and/or `LLM_PROVIDER=gemini`, your book's
-> text is sent to Microsoft's / Google's cloud APIs for synthesis/analysis. Use `LLM_PROVIDER=ollama`
-> with `TTS_PROVIDER=piper` or `qwen` if you need everything to stay fully local.
->
-> **Known limitations** (low impact for personal/local use, listed for transparency): no CSRF
-> protection, so a malicious page you visit could submit a form to your local API while it's running;
-> EPUB parsing has no upper bound on decompressed size (uploads are capped at 200 MB, but a crafted
-> zip within that limit could still decompress to several GB of text).
+> **Privacy.** With `LLM_PROVIDER=gemini` and/or `TTS_PROVIDER=edgetts` your book's text is sent to
+> Google / Microsoft (on Gemini's free tier, Google may use it to improve its products — check the
+> current terms). For a fully local run use Ollama (or any local server) + Qwen3-TTS / Piper.
 
 ---
 
 ## Quick start
 
 ```bash
-./setup.sh      # first time only: venv, backend + frontend deps, scaffolds .env files
-./start.sh      # launches API + worker + frontend together
+./setup.sh      # first time only: venv, backend + frontend deps, frontend build, .env files
+./start.sh      # API + worker + frontend (production build; ./start.sh --dev for hot reload)
 ```
 
-Windows: `setup.ps1` / `start.ps1` (PowerShell) do the same; `start.bat` also works once
-`setup.ps1` has been run at least once.
+Windows: `setup.ps1` / `start.ps1` (`-Dev` for hot reload); `start.bat` also works after `setup.ps1`.
 
-Before running `start`, pick **one** LLM path in `.env` (`setup.sh` creates it from
-`.env.example`, defaulted to Ollama):
+Then open <http://localhost:3000> (API docs: <http://localhost:8000/docs>).
 
-- **Fastest**: set `LLM_PROVIDER=gemini` and fill in `GEMINI_API_KEY` (get one at
-  https://aistudio.google.com/apikey) — no local install, just a key.
-- **Fully local**: keep `LLM_PROVIDER=ollama`, install [Ollama](https://ollama.com/download),
-  then pull the model set in `.env` (default: `ollama pull qwen3:1.7b`).
+Pick **one** LLM path in `.env` (created by `setup.sh`, default Ollama) — or later in *Settings*:
 
-Not sure what's missing? `python scripts/doctor.py` (also runs automatically at the end of
-`setup.sh`) checks Python/Node/deps/`.env` and tells you the exact command to fix whatever's
-outstanding — it never installs anything for you.
+| Path | How |
+|---|---|
+| **Fastest** | `LLM_PROVIDER=gemini` + `GEMINI_API_KEY` ([get one](https://aistudio.google.com/apikey)) |
+| **Fully local** | keep `LLM_PROVIDER=ollama`, install [Ollama](https://ollama.com/download), `ollama pull <model>` |
+| **Any local server** | `LLM_PROVIDER=openai_compatible` + `OPENAI_BASE_URL` / `OPENAI_MODEL` (LM Studio, llama.cpp `llama-server`, vLLM…) |
 
-Then open http://localhost:3000 (API at http://localhost:8000, docs at `/docs`). TTS is
-EdgeTTS by default — free, cloud, zero setup; see [Piper](#piper-binary-local-tts) or
-[Qwen3-TTS](#qwen3-tts-optional-expressive-tts--local-gpu) below for fully-local/GPU options.
+Not sure what's missing? `python scripts/doctor.py` checks Python, Node, ffmpeg, providers, and the
+GPU, and prints the exact command to fix each problem. It never installs anything.
 
-The sections below explain what these scripts do and how to run each step by hand.
+**Requirements:** Python **3.11 – 3.13** (3.12 recommended — 3.14 is not supported yet), Node 20+,
+and optionally [ffmpeg](https://ffmpeg.org/download.html) for the chaptered M4B export (without it you
+still get the MP3).
+
+### Which setup for which machine?
+
+| Machine | LLM | TTS |
+|---|---|---|
+| Any laptop, no GPU | `gemini` (cloud) | `edgetts` (cloud) — default |
+| Any laptop, offline | `ollama` small model (e.g. `qwen3:1.7b`) | `piper` |
+| GPU with 12–16 GB | `ollama` / `openai_compatible` with a 14–30 B model (quantised) | `qwen` (needs PyTorch for your GPU) |
+| AMD Radeon | as above — see [AMD GPUs](#amd-gpus-rocm) | `qwen` with PyTorch **ROCm** |
+
+A 16 GB card cannot hold a large LLM and a TTS model at the same time; ScriptVox unloads the LLM
+after the analysis (`LLM_UNLOAD_AFTER_ANALYSIS`) and keeps the TTS model loaded for the whole book.
 
 ---
 
-## Setup
+## Changing models and engines
 
-Requires **Python 3.11+** (developed and tested on 3.11.9). Note for Python 3.13+: the stdlib
-`audioop` module used by `QwenTTSProvider` was removed (PEP 594) — install the `audioop-lts` backport
-if you use `TTS_PROVIDER=qwen` there. The other three providers are unaffected.
+Everything below works **without touching the code**.
+
+1. **Settings page** — choose the engine and type/pick the model for both the *analysis LLM* and the
+   *voices*. The dropdown lists what the engine reports (installed Ollama models, models served by an
+   OpenAI-compatible server, Qwen presets…), but **any name is accepted**: a model that is not in
+   the list works if the engine serves it. Values saved here take priority over `.env`.
+   One-click profiles: *100 % local* / *Fast (cloud)*.
+2. **Official engines**
+
+   | Kind | Names |
+   |---|---|
+   | LLM | `ollama`, `gemini`, `openai_compatible` |
+   | TTS | `edgetts`, `piper`, `qwen`, `openai_tts`, `command` |
+
+3. **Generic engines** for models the project has no code for:
+   - `openai_compatible` (LLM) — any server speaking the OpenAI Chat API.
+   - `openai_tts` — any server exposing `POST /v1/audio/speech`, with a voice table, extra body fields
+     and an emotion field, all in `.env`.
+   - `command` — any external program (`TTS_COMMAND=python my_tts.py {text_file} {out} {voice}`);
+     no shell is used, so the book's text can never inject commands. Set in `.env` only.
+   - `qwen` accepts **any** Hugging Face id or local path of a compatible checkpoint as `QWEN_MODEL`.
+4. **Plugins** — drop `my_engine.py` in `plugins/tts/` or `plugins/llm/` (templates provided):
+   the engine appears in *Settings* on the next restart. → **[docs/PLUGINS.md](docs/PLUGINS.md)**
+
+Any audio format works: an engine may return WAV, MP3, FLAC or OGG at any sample rate — everything is
+converted to 24 kHz mono internally.
+
+### Which models are good? (as of September 2026 — measure, don't trust)
+
+- **LLM.** The task is French dialogue attribution, which public benchmarks don't measure. Use
+  `python scripts/bench_llm.py` on *your* books to compare models (attribution rate, time, VRAM).
+  Candidates: a Qwen 3.x dense/MoE model that fits your VRAM (quantised), or `gemini-3.1-flash-lite`
+  for the cloud path. `gemini-2.0-flash` is **retired** (June 2026); `gemini-2.5-flash` stops on
+  2026-10-16.
+- **TTS.** Judge by ear: `python scripts/bench_tts.py --provider <engine>` renders the same French
+  script with any engine so you can compare. Notes on the open models currently around: Qwen3-TTS
+  (Apache 2.0, cloning, weak emotion), Chatterbox Multilingual (MIT, emotion slider, cloning),
+  Fish Audio S2 Pro and Higgs Audio v3 (strong emotion tags, **non-commercial** licences),
+  Voxtral TTS (CC BY-NC, no cloning in the open weights). Add any of them as a plugin.
+
+---
+
+## Qwen3-TTS (local GPU)
+
+Emotion per line (`instruct`), voice cloning, 24 kHz output. The speaker → gender mapping and the
+French quality were checked by ear on 2026-06-27 (some presets carry a slight accent; the `instruct`
+emotion effect is subtle — cloning is often the better way to differentiate characters).
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # macOS / Linux
-
-pip install -r requirements.txt
-
-cp .env.example .env
-# Edit .env — see Configuration below
+# 1. PyTorch matching YOUR GPU (see requirements-qwen.txt for NVIDIA and AMD)
+# 2.
+pip install -r requirements-qwen.txt
+# 3. .env: TTS_PROVIDER=qwen   (or choose it in Settings)
 ```
+
+~4–6 GB VRAM, ~4.5 GB download on first use. The model stays loaded from one chapter to the next and
+is unloaded after `TTS_IDLE_UNLOAD_SECONDS` of inactivity (or from *Settings → Free GPU memory*).
+
+**Voice cloning:** *Voices → New cloned voice*, a 3–15 s clean sample. Also paste the **transcript** of
+the sample: with it, cloning reproduces the speaking style too, without it only the timbre.
+
+### AMD GPUs (ROCm)
+
+A **CUDA** build of PyTorch cannot use an AMD card (it falls back to the CPU, or fails). Install PyTorch
+for **ROCm** following AMD's official instructions for Radeon
+([rocm.docs.amd.com/projects/radeon-ryzen](https://rocm.docs.amd.com/projects/radeon-ryzen/)) — the RX 9000
+series (RDNA 4) is supported by ROCm 7.x. Keep `QWEN_DEVICE=cuda:0` (ROCm exposes the `torch.cuda` API)
+and `QWEN_ATTN=sdpa`. Check with `python scripts/doctor.py`. If the driver resets during generation
+on an RX 9000, set `TORCH_BLAS_PREFER_HIPBLASLT=0`.
+
+For **Ollama** on an RX 9000 on Windows, the stock installer may ship a ROCm build too old for RDNA 4:
+either use an Ollama build with ROCm 7 or its Vulkan backend, or serve the model with LM Studio /
+`llama-server` (Vulkan) and use `LLM_PROVIDER=openai_compatible`.
+
+---
+
+## Piper (local, CPU)
+
+Piper is invoked as a standalone executable (not the `piper-tts` pip package, which has no Windows wheel).
+
+1. Download the archive for your platform from [github.com/rhasspy/piper/releases](https://github.com/rhasspy/piper/releases)
+   and extract it (keep `espeak-ng-data/` and the `.dll` files next to the binary).
+2. Set `PIPER_BINARY_PATH` (e.g. `./piper/piper/piper.exe`) and `PIPER_VOICES_DIR` (default `./voices`).
+3. Put in `PIPER_VOICES_DIR` one `<voice_id>.onnx` **and** one `<voice_id>.onnx.json` per logical voice:
+   `narrator`, `male_0`–`male_2`, `female_0`–`female_2`, `neutral_0`–`neutral_1`
+   (voices: [huggingface.co/rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices); a missing or
+   misnamed `.onnx.json` makes Piper crash with an empty error).
+
+Piper is GPL-3.0: any distribution bundling the binary must comply with it.
+
+---
+
+## Output
+
+Each finished book gives:
+
+- **`.m4b`** — AAC audiobook with **chapter markers and cover** (needs ffmpeg). This is the format
+  audiobook apps expect (Apple Books, BookPlayer, VLC…). Download it from the book page.
+- **`.mp3`** and **`.wav`** — the same audio, plain.
+
+Audio details: 24 kHz mono; a short silence after each line (longer when the voice changes) and between
+chapters (`AUDIO_PAUSE_*`); loudness evened out across voices (`AUDIO_NORMALIZE`); long passages are
+split at sentence ends before synthesis.
+
+The in-app player resumes where you stopped, chains chapters, supports a sleep timer, media keys /
+lock-screen controls and keyboard shortcuts (`Space`, `←`/`→` = −15 s/+30 s, `[` `]` = speed).
 
 ---
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in the values for your chosen providers.
+Copy `.env.example` to `.env` (done by `setup.sh`). It is fully commented; the essentials:
 
-| Variable | Required when | Description |
-|---|---|---|
-| `LLM_PROVIDER` | always | `ollama` (local) or `gemini` (cloud) |
-| `OLLAMA_BASE_URL` | `LLM_PROVIDER=ollama` | Ollama server URL, e.g. `http://localhost:11434` |
-| `OLLAMA_MODEL` | `LLM_PROVIDER=ollama` | Model name, e.g. `llama3` |
-| `OLLAMA_CONTEXT_TOKENS` | `LLM_PROVIDER=ollama` | Context window size — **32768 recommended** (8192 truncates responses on real novel chapters) |
-| `OLLAMA_CHUNK_TOKENS` | `LLM_PROVIDER=ollama` | Per-request chunk budget (tokens), decoupled from context size above — see `.env.example` |
-| `OLLAMA_CONNECT_TIMEOUT` | `LLM_PROVIDER=ollama` | Connect timeout in seconds, default `60` |
-| `OLLAMA_READ_TIMEOUT` | `LLM_PROVIDER=ollama` | Read timeout floor in seconds, default `600` |
-| `OLLAMA_TIMEOUT_PER_1K_TOKENS` | `LLM_PROVIDER=ollama` | Extra read-timeout seconds per 1k prompt tokens, scales with chapter size |
-| `GEMINI_API_KEY` | `LLM_PROVIDER=gemini` | Gemini API key |
-| `GEMINI_MODEL` | `LLM_PROVIDER=gemini` | Model name, e.g. `gemini-2.0-flash` |
-| `TTS_PROVIDER` | always | `edgetts` (default, free) · `piper` (local) · `qwen` (local GPU, emotion) |
-| `EDGETTS_LOCALE` | `TTS_PROVIDER=edgetts` | BCP-47 locale for voice selection, e.g. `en-US` (default), `fr-FR` |
-| `PIPER_VOICES_DIR` | `TTS_PROVIDER=piper` | Path to the folder containing `.onnx` voice files |
-| `PIPER_BINARY_PATH` | `TTS_PROVIDER=piper` | Path to the `piper` executable (see Piper binary below) |
-| `QWEN_MODEL` | `TTS_PROVIDER=qwen` | `1.7b` (default) or `0.6b` — see Qwen3-TTS below |
-| `QWEN_LANGUAGE` | `TTS_PROVIDER=qwen` | Language passed to the model, e.g. `French` (default) |
-| `QWEN_DEVICE` | `TTS_PROVIDER=qwen` | torch device string, default `cuda:0` |
-| `QWEN_ATTN` | `TTS_PROVIDER=qwen` | `sdpa` (default, no FlashAttention 2) or `flash_attention_2` |
-| `DATABASE_URL` | always | SQLite path, e.g. `sqlite:///./scriptvox.db` |
-| `HUEY_DB_PATH` | always | Huey task queue DB path, e.g. `./huey.db` |
-| `DATA_DIR` | always | Storage folder for uploads, covers, generated audio and cloned-voice references, e.g. `data` |
-| `FRONTEND_ORIGINS` | always | Comma-separated browser origins allowed by CORS, default `http://localhost:3000` |
-
-The app **fails at startup** if any required variable for the active provider is missing, if `PIPER_VOICES_DIR` does not point to an existing directory, or if `PIPER_BINARY_PATH` does not point to an existing file. EdgeTTS requires no file on disk — only an internet connection at synthesis time.
-
----
-
-## Database migrations (Alembic)
-
-Schema changes are applied via [Alembic](https://alembic.sqlalchemy.org/), not `SQLModel.metadata.create_all()`. This matters because `create_all()` only ever creates *missing* tables — it never alters an existing one, so every model change previously required deleting `scriptvox.db` and losing the whole library.
-
-**You don't need to run anything manually for this.** `init_db()` (called at API startup) brings the schema up to date automatically every time the app starts:
-
-- **New database** (file doesn't exist yet) → all tables are created via the migration history, equivalent to the old `create_all()`.
-- **Existing database created before Alembic was adopted** (i.e. any `scriptvox.db` from before this feature — has tables but no migration history) → auto-stamped at the current baseline revision. Stamping only records "this DB is already at revision X" in a new `alembic_version` table; it never re-runs `CREATE TABLE` or touches existing rows.
-- **Database already tracked by Alembic** → any migrations newer than its current revision are applied normally.
-
-**When you (or an agent) change a `SQLModel` model**, generate the migration by hand:
-
-```bash
-alembic revision --autogenerate -m "short description"
-```
-
-Review the generated file in `migrations/versions/` before committing — autogenerate is a good first draft, not a guarantee (it can miss things like renamed columns, which look like a drop + an add). The migration runs automatically on next startup; there is no separate `alembic upgrade` step to remember.
-
-`migrations/env.py` reads `DATABASE_URL` from `.env`, the same source of truth as `app/config.py` — always targeting whichever database the app itself is configured for.
-
----
-
-## Launch
-
-`./start.sh` (or `start.ps1`/`start.bat` on Windows) does this for you and stops all three
-processes together on Ctrl-C. By hand, three processes must run in parallel:
-
-```bash
-# Terminal 1 — API server
-uvicorn app.main:app --reload
-
-# Terminal 2 — Huey background worker
-.venv\Scripts\python -m huey.bin.huey_consumer app.workers.tasks.huey
-
-# Terminal 3 — Frontend (Next.js)
-cd frontend
-npm run dev
-```
-
-| Process | URL |
+| Variable | Description |
 |---|---|
-| API | `http://localhost:8000` — interactive docs at `/docs` |
-| Frontend | `http://localhost:3000` |
+| `LLM_PROVIDER` | `ollama` · `gemini` · `openai_compatible` · a plugin name |
+| `TTS_PROVIDER` | `edgetts` · `piper` · `qwen` · `openai_tts` · `command` · a plugin name |
+| `OLLAMA_*`, `GEMINI_*`, `OPENAI_*` | engine address / model / key |
+| `EDGETTS_LOCALE` | default voice language (`fr-FR`); a book's own language wins |
+| `QWEN_MODEL`, `QWEN_DEVICE`, `QWEN_ATTN` | Qwen3-TTS model (`1.7b`, `0.6b` or any checkpoint), device, attention |
+| `AUDIO_*`, `TTS_*` | pauses, loudness, splitting, concurrency, idle unload |
+| `PLUGINS_DIR` | folder scanned for your engines |
+| `DATA_DIR`, `DATABASE_URL`, `HUEY_DB_PATH` | storage |
+| `FRONTEND_ORIGINS`, `ALLOWED_HOSTS` | browser origins allowed to write, accepted `Host` names |
 
-**Frontend setup (first time only):**
+The app **fails at startup** if a variable required by the active provider is missing. Providers other
+than the default validate their prerequisites lazily, with a clear error at first use.
 
-```bash
-cd frontend
-cp .env.example .env.local   # already contains NEXT_PUBLIC_API_URL=http://localhost:8000
-npm install
-```
-
----
-
-## EdgeTTS (default TTS)
-
-EdgeTTS streams audio from Microsoft's neural TTS service — the same engine behind Edge browser's Read Aloud. It is **free, requires no API key and no local binary**. The only requirement is an internet connection at synthesis time.
-
-Set `TTS_PROVIDER=edgetts` in `.env` (it is the default). Optionally set `EDGETTS_LOCALE` to control the language of the assigned voices:
-
-| Locale | Example voices |
-|---|---|
-| `en-US` (default) | Christopher · Guy · Jenny · Aria · Andrew · Brian |
-| `fr-FR` | Henri · Remy · Denise · Vivienne |
-
-The voice catalogue maps logical IDs (`narrator`, `male_0` … `neutral_1`) to neural voice names automatically — no configuration needed.
-
-> EdgeTTS output is normalised to **22050 Hz mono 16-bit WAV** by the `miniaudio` decoder before assembly, so it is fully compatible with the Piper audio format.
+**Database migrations** run automatically at startup (Alembic; a pre-Alembic database is stamped at the
+baseline, then upgraded). After changing a `SQLModel` model, generate the migration by hand:
+`alembic revision --autogenerate -m "short description"` and review it before committing.
 
 ---
 
-## Piper binary (local TTS)
+## Security
 
-ScriptVox invokes Piper as a **standalone executable** via subprocess — *not* the
-`piper-tts` pip package. Reason: `piper-tts` depends on `piper-phonemize`, which
-ships no Windows wheel. The binary approach works on every platform and keeps the
-dependency out of `requirements.txt`.
+Designed for one user on one machine:
 
-1. Download the archive for your platform from
-   [github.com/rhasspy/piper/releases](https://github.com/rhasspy/piper/releases)
-   (e.g. `piper_windows_amd64.zip`).
-2. Extract it anywhere in the project (e.g. `./piper/`). Keep the bundled
-   `espeak-ng-data/` folder and the `*.dll` files **next to** `piper.exe` — Piper
-   locates them relative to its own path.
-3. Point `PIPER_BINARY_PATH` at the executable, e.g. `PIPER_BINARY_PATH=./piper/piper/piper.exe`.
+- **Bind to localhost.** `start.*` bind the API and the frontend to `127.0.0.1`.
+- **Cross-site writes are refused** (a page open in your browser cannot post to your local API: any
+  write must come from `FRONTEND_ORIGINS`), and unknown `Host` headers are rejected (DNS-rebinding
+  defence, `ALLOWED_HOSTS`).
+- **EPUB uploads** are capped at 200 MB and checked against decompression bombs (uncompressed size,
+  file count, compression ratio).
+- **The external-command engine can only be configured in `.env`**, never through the web interface;
+  no shell is ever involved.
+- **Plugins run with your rights** — install only code you trust.
+- To reach the app from another device (e.g. over a VPN), put an authenticating reverse proxy in
+  front of it; never bind the API to `0.0.0.0` on an untrusted network.
 
-> The licence for Piper is **GPL-3.0** (`OHF-Voice/piper1-gpl`). Any distribution of
-> ScriptVox bundling the Piper binary must comply with it.
-
----
-
-## Piper voices (local TTS)
-
-`PiperProvider` loads voices from `{PIPER_VOICES_DIR}/{voice_id}.onnx`.  
-The voice assignment service uses a fixed catalogue of IDs — you must supply files with **exactly these names** in your `PIPER_VOICES_DIR` folder:
-
-| File | Role |
-|---|---|
-| `narrator.onnx` | Narration / stage directions |
-| `male_0.onnx` | Male character pool — slot 0 |
-| `male_1.onnx` | Male character pool — slot 1 |
-| `male_2.onnx` | Male character pool — slot 2 |
-| `female_0.onnx` | Female character pool — slot 0 |
-| `female_1.onnx` | Female character pool — slot 1 |
-| `female_2.onnx` | Female character pool — slot 2 |
-| `neutral_0.onnx` | Neutral / unknown gender — slot 0 |
-| `neutral_1.onnx` | Neutral / unknown gender — slot 1 |
-
-> ⚠️ **Each `.onnx` file must sit next to a config named exactly `<voice_id>.onnx.json`**
-> (e.g. `narrator.onnx` + `narrator.onnx.json`). Piper auto-loads `<model>.onnx.json`;
-> if the config is missing or misnamed (e.g. `narrator.json`), Piper **crashes with an
-> empty error** instead of reporting the problem.
-
-**How to get voices:**
-
-1. Browse [huggingface.co/rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) and download the `.onnx` + `.onnx.json` pair for each voice you want.
-2. Rename each pair to match the IDs above (e.g. `en_US-amy-medium.onnx` → `narrator.onnx`, `en_US-amy-medium.onnx.json` → `narrator.onnx.json`).
-3. Place all files in the directory pointed to by `PIPER_VOICES_DIR` (default: `./voices`).
-
----
-
-## Qwen3-TTS (optional, expressive TTS — local GPU)
-
-`QwenTTSProvider` is a 4th TTS backend that consumes the **per-line emotion** extracted by
-the LLM analysis (`Segment.emotion`, e.g. *"furious and panicked"*) via Qwen3-TTS's `instruct`
-parameter — the other 3 providers accept this field but ignore it.
-
-**Status (2026-06-22): implemented, NOT yet ear-verified.** The code path is tested with mocks
-only — the real model has not been validated for French audio quality or the actual effect of
-`instruct` in this integration. Treat it as experimental until that listening pass happens.
-
-**Cost of opting in:** GPU + CUDA required, ~4-6 GB VRAM, ~4.5 GB model download on first use,
-and roughly **11× slower per line than EdgeTTS** (measured by `tests/spike_qwen_tts.py`).
-
-1. Install `torch` for your CUDA version, then the rest of the optional deps:
-   ```bash
-   pip install torch --index-url https://download.pytorch.org/whl/cu128
-   pip install -r requirements-qwen.txt
-   ```
-2. Set `TTS_PROVIDER=qwen` in `.env` (see the `QWEN_*` variables above).
-
-> Qwen3-TTS always returns 24 000 Hz audio; `QwenTTSProvider` resamples it to 22 050 Hz
-> (stdlib `audioop`) so it stays compatible with the other providers' WAV format.
-
-> The mapping from ScriptVox's logical voice catalogue (`narrator`, `male_0`…`neutral_1`) to
-> Qwen's 9 speaker presets (`Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ryan`, `Aiden`,
-> `Ono_Anna`, `Sohee`) is a best-effort guess — Qwen's own docs don't label presets by gender.
-> Verify by ear once you generate real audio; see `app/services/tts/qwen.py`.
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ---
 
 ## Tests
 
-Each phase has its own standalone test suite (`tests/check_phaseN.py`), all mocking external
-providers (LLM, TTS, network) and running fully offline. Run them all in numeric order:
-
-```powershell
-# Windows (PowerShell)
-Get-ChildItem tests\check_phase*.py | Sort-Object { [int]($_.BaseName -replace 'check_phase','') } |
-    ForEach-Object { .venv\Scripts\python.exe $_.FullName }
-```
+Each phase has its own standalone suite (`tests/check_phaseN.py`), all mocking external services and
+running offline. Run everything:
 
 ```bash
-# macOS / Linux
-for f in $(ls tests/check_phase*.py | sort -V); do .venv/bin/python "$f"; done
+python tests/run_all.py          # every suite, in numeric order, one subprocess each
+python tests/run_all.py 45 46    # only some suites
 ```
 
-| Suite | Covers |
-|---|---|
-| `check_phase1.py` | Config, models, DB |
-| `check_phase2.py` | EPUB ingestion, Huey wiring |
-| `check_phase3.py` | LLM pipeline |
-| `check_phase4.py` | TTS scaffold, audio assembly, `/audio` endpoint |
-| `check_phase5.py` | End-to-end worker pipeline (mocked LLM + TTS) |
-| `check_phase6.py` | Per-chapter audio endpoint |
-| `check_phase7.py` | Decoupled pipeline (`ANALYZED` / `GENERATING` statuses) |
-| `check_phase8.py` | EdgeTTS provider (config, voice mapping, synthesis) |
-| `check_phase9.py` | Voice casting & `PATCH /characters/{id}` |
-| `check_phase10.py` | Cover image extraction & endpoints |
-| `check_phase11.py` | MP3 output (`wav_to_mp3`, `GET /audio/mp3`) |
-| `check_phase12.py` | CORS (`Settings.frontend_origins`, middleware) |
-| `check_phase14.py` | Character persistence across chapters (known characters) |
-| `check_phase15.py` | QwenTTSProvider (config, voice mapping, mocked synthesis) |
-| `check_phase16.py` | Character merge suggestions (schema + LLM) |
-| `check_phase17.py` | Voice cloning (contract, providers, pipeline, API) |
-| `check_phase19.py` | Resume analysis after stop/crash |
-| `check_phase21.py` | Per-segment audio timing |
-| `check_phase23.py` | Honoring `/stop` mid-analysis/generation |
-| `check_phase24.py` | VRAM release after Qwen synthesis + Piper overridable without crash |
-| `check_phase25.py` | ElevenLabs removal (dead-code guard) |
-| `check_phase26.py` | Per-book TTS provider override |
-| `check_phase27.py` | Unified book generation on the chapter code path |
-| `check_phase28.py` | Per-segment TTS retry |
-| `check_phase29.py` | Streaming WAV→MP3 encoding |
-| `check_phase30.py` | Alembic migrations (auto-upgrade / auto-stamp) |
-| `check_phase31.py` | Voice sample generation dispatched via Huey |
-| `check_phase32.py` | Segments grouped by TTS checkpoint (VRAM swap minimisation) |
-| `check_phase33.py` | Chapter generation cancellation + priority queue |
-| `check_phase34.py` | Language profiles for segmentation (FR/EN) |
-| `check_phase35.py` | `DATA_DIR` isolation (regression guard for a real data-loss incident) |
-| `check_phase36.py` | Per-book TTS locale resolution (i18n) |
-
-Suite numbers aren't contiguous (`13`, `18`, `20`, `22` are missing) — some phases were verified by
-extending an existing suite instead of adding a new one, and a few were frontend-only work with no
-backend suite to add. See `TASKS.md` for what each phase actually shipped.
+CI (GitHub Actions) runs them on Python 3.11 / 3.12 / 3.13, plus lint and a production build of the
+frontend. See `TASKS.md` for the roadmap and `CHANGELOG.md` for what shipped.
 
 ---
 
-## API quick reference
+## Troubleshooting
 
-### Upload a book
-
-```bash
-curl -X POST http://localhost:8000/books \
-  -F "file=@my_book.epub" \
-  -F "author=Jane Doe"
-```
-
-Response (202 Accepted):
-
-```json
-{ "id": 1, "title": "my_book", "status": "PENDING", "progress": 0.0, ... }
-```
-
-### Poll status
-
-```bash
-curl http://localhost:8000/books/1
-```
-
-`status` transitions: `PENDING → PROCESSING → ANALYZED → GENERATING → DONE` (or `FAILED`).  
-`progress` goes from `0.0` to `100.0`.
-
-### Download the audiobook
-
-```bash
-curl http://localhost:8000/books/1/audio --output audiobook.wav
-```
-
-Returns 404 until `status` is `DONE`.
-
-### Trigger audio generation (after analysis)
-
-Once `status` reaches `ANALYZED`, trigger synthesis:
-
-```bash
-# Generate full audiobook
-curl -X POST http://localhost:8000/books/1/generate
-
-# Generate a single chapter (1-indexed position)
-curl -X POST http://localhost:8000/books/1/chapters/1/generate
-```
-
-### Other endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/books` | List all books |
-| `GET` | `/books/{id}/characters` | List extracted characters with their assigned `voice_id` |
-| `GET` | `/books/{id}/chapters` | List chapters with per-chapter status |
-| `GET` | `/books/{id}/chapters/{n}/audio` | Download a generated chapter (WAV) |
-| `DELETE` | `/books/{id}` | Delete a book and its source file |
+| Symptom | Cause / fix |
+|---|---|
+| `pip install` fails building `pydantic-core` (Rust) | Python 3.14: use 3.11 – 3.13 |
+| Qwen is very slow / `torch.cuda.is_available()` is `False` | wrong PyTorch build for your GPU — `python scripts/doctor.py` |
+| `ollama ps` shows `31% CPU` | model too big for the VRAM: smaller/quantised model, lower `OLLAMA_CONTEXT_TOKENS` |
+| Piper "crashes with an empty error" | `<voice>.onnx.json` missing or misnamed |
+| No `.m4b` | ffmpeg not on PATH (set `FFMPEG_PATH`); the MP3 is still there |
+| Web app shows "API unreachable" | API not running, or a different `NEXT_PUBLIC_API_URL` |
+| `403 Cross-origin write refused` | you reach the frontend through an origin missing from `FRONTEND_ORIGINS` |
+| `400 Invalid host header` | reaching the API through a hostname missing from `ALLOWED_HOSTS` |
+| `database is locked` | should not happen (SQLite runs in WAL mode); restart API + worker |
 
 ---
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design reference (strategy patterns, token budgeting, job state machine).
-
----
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design reference (label-based LLM protocol, engine
+registry, token budgeting, job state machine, storage layout) and [docs/PLUGINS.md](docs/PLUGINS.md)
+for writing engines.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, hobby, and other noncommercial use. Commercial use requires a separate agreement with the author.
+[PolyForm Noncommercial 1.0.0](LICENSE) (`SPDX: PolyForm-Noncommercial-1.0.0`) — free for personal, hobby and
+other noncommercial use. Commercial use requires a separate agreement with the author.

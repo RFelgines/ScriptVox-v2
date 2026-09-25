@@ -13,8 +13,9 @@ dans [docs/journal/2026.md](docs/journal/2026.md) ; ce qui est livré est dans [
   gros quantifié, `gemini-3.1-flash-lite`.
 - **PyTorch ROCm sur la RX 9070 XT** : vérifier `python scripts/doctor.py` (GPU visible via ROCm) puis un
   chapitre réel avec `TTS_PROVIDER=qwen`.
-- **Vérifier le frontend en conditions réelles** : `npm run lint` et `npm run build` (le lot UX de
-  l'audit du 2026-09-25 a été écrit sans pouvoir compiler — voir CHANGELOG).
+- **Tester sur la vraie machine** (RX 9070 XT, vrais modèles) tout ce que l'audit du 2026-09-25 n'a pu
+  valider qu'avec des faux moteurs : Media Session sur téléphone, écoute réelle des voix, clonage avec
+  transcription, déchargement VRAM réel.
 
 ## Ensuite
 
@@ -31,13 +32,17 @@ dans [docs/journal/2026.md](docs/journal/2026.md) ; ce qui est livré est dans [
 ## Plus tard
 
 - Migration des suites `check_phaseN.py` vers `pytest`.
+- Test navigateur automatisé (Playwright) dans la CI : le parcours upload → casting → génération → écoute a été
+  validé à la main le 2026-09-25 (18 vérifications) mais le script n'est pas versionné.
 - Vrai temps réel (streaming) de la lecture pendant la génération.
 
 ## Problèmes connus
 
 - Python 3.14 : non supporté (dépendances épinglées sans roue).
-- Le lot frontend du 2026-09-25 n'a pas été compilé (proxy npm indisponible dans l'environnement de
-  développement) : corriger d'éventuelles erreurs de type / lint au premier `npm run build`.
+- Validé le 2026-09-25 avec de FAUX moteurs (serveur LLM factice, plugin TTS « bip ») : `tsc --noEmit`
+  (strict), `eslint`, `next build`, un test navigateur Chromium (upload → analyse → casting → génération →
+  M4B → lecteur → réglages) et `scripts/e2e_smoke.py` (vrais processus API + worker). Jamais exécuté avec
+  un vrai LLM, un vrai TTS local ni un GPU.
 
 ## Conventions
 
