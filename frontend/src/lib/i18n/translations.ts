@@ -255,6 +255,106 @@ export interface Dictionary {
     removeFromCatalogueTitle: string;
     clonedBadge: string;
   };
+  // ── Audit 2026-09-25 ─────────────────────────────────────────────────────────
+  models: {
+    sectionTitle: string;
+    sectionHint: string;
+    llmTitle: string;
+    ttsTitle: string;
+    providerLabel: string;
+    modelLabel: string;
+    modelPlaceholder: string;
+    modelHint: string;
+    baseModelLabel: string;
+    baseUrlLabel: string;
+    baseUrlHint: string;
+    localeLabel: string;
+    envDefault: string;
+    saveButton: string;
+    savingButton: string;
+    savedToast: string;
+    refreshList: string;
+    listError: (detail: string) => string;
+    effectiveModel: (model: string) => string;
+    testButton: string;
+    testingButton: string;
+    pluginErrorsTitle: string;
+    pluginHint: string;
+    presetsTitle: string;
+    presetLocal: string;
+    presetCloud: string;
+    presetLocalNote: string;
+    presetCloudNote: string;
+    freeGpu: string;
+    freeGpuDone: string;
+  };
+  flow: {
+    stepAnalysis: string;
+    stepCasting: string;
+    stepGeneration: string;
+    stepListen: string;
+    generateBook: string;
+    regenerate: string;
+    resume: string;
+    restart: string;
+    listen: string;
+    resumeListening: (chapter: string, time: string) => string;
+    more: string;
+    details: string;
+    download: string;
+    downloadM4b: string;
+    downloadMp3: string;
+    m4bMissing: string;
+    stageAnalysis: string;
+    stageGeneration: string;
+    stageAssembly: string;
+    chapterProgress: (current: number, total: number) => string;
+    etaLessThanMinute: string;
+    etaMinutes: (minutes: number) => string;
+    etaHours: (hours: number, minutes: number) => string;
+    includeChapter: string;
+    excludeChapter: string;
+    chapterExcluded: string;
+    voiceSaved: (character: string, voice: string) => string;
+    previewOnLine: string;
+    previewLoading: string;
+    previewFailed: string;
+    privacyCloudLlm: string;
+    privacyCloudTts: string;
+    languageAuto: string;
+    languageFr: string;
+    languageEn: string;
+  };
+  feedback: {
+    confirm: string;
+    cancel: string;
+    undo: string;
+    close: string;
+    bookDeleted: (title: string) => string;
+    deleteConfirmTitle: string;
+  };
+  player2: {
+    sleepLabel: string;
+    sleepOff: string;
+    sleepEndOfChapter: string;
+    sleepMinutes: (minutes: number) => string;
+    sleepRemaining: (mmss: string) => string;
+    shortcutsHint: string;
+  };
+  library2: {
+    filters: string;
+    filtersActive: (count: number) => string;
+    resetFilters: string;
+    importEpub: string;
+    dropOverlay: string;
+    continueListening: string;
+    generationBadge: (count: number) => string;
+  };
+  voices2: {
+    referenceTextLabel: string;
+    referenceTextPlaceholder: string;
+    referenceTextHint: string;
+  };
 }
 
 const fr: Dictionary = {
@@ -540,6 +640,107 @@ const fr: Dictionary = {
     removeFromCatalogueTitle: "Retirer du catalogue",
     clonedBadge: "🎙 cloné",
   },
+  models: {
+    sectionTitle: "Modèles",
+    sectionHint:
+      "Choisissez le moteur et le modèle. La liste propose ce qui est installé, mais vous pouvez saisir n'importe quel nom : un modèle absent de la liste fonctionne s'il est servi par le moteur.",
+    llmTitle: "Analyse du texte (LLM)",
+    ttsTitle: "Voix (synthèse vocale)",
+    providerLabel: "Moteur",
+    modelLabel: "Modèle",
+    modelPlaceholder: "Nom du modèle (ex. qwen3.8:27b)",
+    modelHint: "Vide = valeur du fichier .env",
+    baseModelLabel: "Modèle de clonage de voix",
+    baseUrlLabel: "Adresse du serveur",
+    baseUrlHint: "Vide = valeur du fichier .env",
+    localeLabel: "Langue des voix",
+    envDefault: "Défaut (.env)",
+    saveButton: "Enregistrer",
+    savingButton: "Enregistrement…",
+    savedToast: "Réglages enregistrés",
+    refreshList: "Actualiser la liste",
+    listError: (detail) => `Liste indisponible : ${detail}`,
+    effectiveModel: (model) => `Modèle utilisé : ${model}`,
+    testButton: "Tester la connexion",
+    testingButton: "Test…",
+    pluginErrorsTitle: "Plugins non chargés",
+    pluginHint: "Ajoutez vos propres moteurs dans le dossier plugins/ (voir docs/PLUGINS.md).",
+    presetsTitle: "Profil rapide",
+    presetLocal: "100 % local",
+    presetCloud: "Rapide (cloud)",
+    presetLocalNote: "Rien ne quitte votre machine.",
+    presetCloudNote: "Le texte du livre est envoyé à Google et Microsoft.",
+    freeGpu: "Libérer la mémoire GPU",
+    freeGpuDone: "Déchargement demandé au worker",
+  },
+  flow: {
+    stepAnalysis: "Analyse",
+    stepCasting: "Casting",
+    stepGeneration: "Génération",
+    stepListen: "Écoute",
+    generateBook: "Générer le livre audio",
+    regenerate: "Régénérer",
+    resume: "Reprendre",
+    restart: "Recommencer à zéro",
+    listen: "Écouter",
+    resumeListening: (chapter, time) => `Reprendre · ${chapter}, ${time}`,
+    more: "Plus d'actions",
+    details: "Détails du livre",
+    download: "Télécharger",
+    downloadM4b: "Livre audio (M4B, chapitres)",
+    downloadMp3: "MP3",
+    m4bMissing: "M4B indisponible (ffmpeg absent à la génération)",
+    stageAnalysis: "Analyse",
+    stageGeneration: "Génération",
+    stageAssembly: "Assemblage",
+    chapterProgress: (current, total) => `chapitre ${current}/${total}`,
+    etaLessThanMinute: "moins d'une minute restante",
+    etaMinutes: (minutes) => `environ ${minutes} min restantes`,
+    etaHours: (hours, minutes) => `environ ${hours} h ${minutes} min restantes`,
+    includeChapter: "Inclure ce chapitre",
+    excludeChapter: "Exclure ce chapitre (page non narrative)",
+    chapterExcluded: "Exclu",
+    voiceSaved: (character, voice) => `Voix de ${character} : ${voice}`,
+    previewOnLine: "Écouter sur une réplique du personnage",
+    previewLoading: "Génération de l'aperçu…",
+    previewFailed: "Aperçu indisponible",
+    privacyCloudLlm: "L'analyse envoie le texte du livre à Google (Gemini).",
+    privacyCloudTts: "La synthèse envoie le texte du livre à Microsoft (EdgeTTS).",
+    languageAuto: "Auto",
+    languageFr: "Français",
+    languageEn: "Anglais",
+  },
+  feedback: {
+    confirm: "Confirmer",
+    cancel: "Annuler",
+    undo: "Annuler",
+    close: "Fermer",
+    bookDeleted: (title) => `« ${title} » supprimé`,
+    deleteConfirmTitle: "Supprimer ce livre ?",
+  },
+  player2: {
+    sleepLabel: "Minuterie",
+    sleepOff: "Désactivée",
+    sleepEndOfChapter: "Fin du chapitre",
+    sleepMinutes: (minutes) => `${minutes} min`,
+    sleepRemaining: (mmss) => `Veille dans ${mmss}`,
+    shortcutsHint: "Espace : lecture · ← → : −15 s / +30 s · [ ] : vitesse",
+  },
+  library2: {
+    filters: "Filtres",
+    filtersActive: (count) => `Filtres (${count})`,
+    resetFilters: "Réinitialiser",
+    importEpub: "Importer un EPUB",
+    dropOverlay: "Déposez votre EPUB pour l'importer",
+    continueListening: "Reprendre l'écoute",
+    generationBadge: (count) => `${count} en cours`,
+  },
+  voices2: {
+    referenceTextLabel: "Transcription de l'échantillon (facultatif)",
+    referenceTextPlaceholder: "Ce qui est dit dans l'enregistrement, mot pour mot",
+    referenceTextHint:
+      "Avec la transcription, le clonage reproduit aussi la manière de parler (Qwen3-TTS) ; sans, seul le timbre est copié.",
+  },
 };
 
 const en: Dictionary = {
@@ -824,6 +1025,107 @@ const en: Dictionary = {
     deleteClonedTitle: "Delete this cloned voice",
     removeFromCatalogueTitle: "Remove from catalogue",
     clonedBadge: "🎙 cloned",
+  },
+  models: {
+    sectionTitle: "Models",
+    sectionHint:
+      "Pick the engine and the model. The list shows what is installed, but you can type any name: a model missing from the list works as long as the engine serves it.",
+    llmTitle: "Text analysis (LLM)",
+    ttsTitle: "Voices (text-to-speech)",
+    providerLabel: "Engine",
+    modelLabel: "Model",
+    modelPlaceholder: "Model name (e.g. qwen3.8:27b)",
+    modelHint: "Empty = value from the .env file",
+    baseModelLabel: "Voice-cloning model",
+    baseUrlLabel: "Server address",
+    baseUrlHint: "Empty = value from the .env file",
+    localeLabel: "Voice language",
+    envDefault: "Default (.env)",
+    saveButton: "Save",
+    savingButton: "Saving…",
+    savedToast: "Settings saved",
+    refreshList: "Refresh list",
+    listError: (detail) => `List unavailable: ${detail}`,
+    effectiveModel: (model) => `Model in use: ${model}`,
+    testButton: "Test connection",
+    testingButton: "Testing…",
+    pluginErrorsTitle: "Plugins that failed to load",
+    pluginHint: "Add your own engines in the plugins/ folder (see docs/PLUGINS.md).",
+    presetsTitle: "Quick profile",
+    presetLocal: "100% local",
+    presetCloud: "Fast (cloud)",
+    presetLocalNote: "Nothing leaves your machine.",
+    presetCloudNote: "The book's text is sent to Google and Microsoft.",
+    freeGpu: "Free GPU memory",
+    freeGpuDone: "Unload requested from the worker",
+  },
+  flow: {
+    stepAnalysis: "Analysis",
+    stepCasting: "Casting",
+    stepGeneration: "Generation",
+    stepListen: "Listen",
+    generateBook: "Generate the audiobook",
+    regenerate: "Regenerate",
+    resume: "Resume",
+    restart: "Start over",
+    listen: "Listen",
+    resumeListening: (chapter, time) => `Resume · ${chapter}, ${time}`,
+    more: "More actions",
+    details: "Book details",
+    download: "Download",
+    downloadM4b: "Audiobook (M4B, chapters)",
+    downloadMp3: "MP3",
+    m4bMissing: "M4B unavailable (ffmpeg was missing at generation)",
+    stageAnalysis: "Analysis",
+    stageGeneration: "Generation",
+    stageAssembly: "Assembly",
+    chapterProgress: (current, total) => `chapter ${current}/${total}`,
+    etaLessThanMinute: "less than a minute left",
+    etaMinutes: (minutes) => `about ${minutes} min left`,
+    etaHours: (hours, minutes) => `about ${hours} h ${minutes} min left`,
+    includeChapter: "Include this chapter",
+    excludeChapter: "Exclude this chapter (non-narrative page)",
+    chapterExcluded: "Excluded",
+    voiceSaved: (character, voice) => `${character}'s voice: ${voice}`,
+    previewOnLine: "Listen on one of the character's lines",
+    previewLoading: "Generating the preview…",
+    previewFailed: "Preview unavailable",
+    privacyCloudLlm: "Analysis sends the book's text to Google (Gemini).",
+    privacyCloudTts: "Synthesis sends the book's text to Microsoft (EdgeTTS).",
+    languageAuto: "Auto",
+    languageFr: "French",
+    languageEn: "English",
+  },
+  feedback: {
+    confirm: "Confirm",
+    cancel: "Cancel",
+    undo: "Undo",
+    close: "Close",
+    bookDeleted: (title) => `"${title}" deleted`,
+    deleteConfirmTitle: "Delete this book?",
+  },
+  player2: {
+    sleepLabel: "Sleep timer",
+    sleepOff: "Off",
+    sleepEndOfChapter: "End of chapter",
+    sleepMinutes: (minutes) => `${minutes} min`,
+    sleepRemaining: (mmss) => `Sleeping in ${mmss}`,
+    shortcutsHint: "Space: play · ← →: −15 s / +30 s · [ ]: speed",
+  },
+  library2: {
+    filters: "Filters",
+    filtersActive: (count) => `Filters (${count})`,
+    resetFilters: "Reset",
+    importEpub: "Import an EPUB",
+    dropOverlay: "Drop your EPUB to import it",
+    continueListening: "Continue listening",
+    generationBadge: (count) => `${count} running`,
+  },
+  voices2: {
+    referenceTextLabel: "Sample transcript (optional)",
+    referenceTextPlaceholder: "What is said in the recording, word for word",
+    referenceTextHint:
+      "With the transcript, cloning also reproduces the speaking style (Qwen3-TTS); without it, only the timbre is copied.",
   },
 };
 

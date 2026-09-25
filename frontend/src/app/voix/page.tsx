@@ -18,6 +18,7 @@ import Button from "@/components/ui/Button";
 import VoiceOrb from "@/components/VoiceOrb";
 import { buildHueMap } from "@/lib/voiceHues";
 import { useT } from "@/lib/i18n/LanguageContext";
+import { useFeedback } from "@/components/ui/Feedback";
 
 function localeToFlag(locale: string): string | null {
   const region = locale.split("-")[1];
@@ -44,6 +45,7 @@ const SAMPLE_POLL_MAX_ATTEMPTS = 20; // ~1 min
 
 export default function VoixPage() {
   const t = useT();
+  const { confirm } = useFeedback();
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -66,6 +68,7 @@ export default function VoixPage() {
   const [cloneName, setCloneName] = useState("");
   const [cloneGender, setCloneGender] = useState<Gender | "">("");
   const [cloneFile, setCloneFile] = useState<File | null>(null);
+  const [cloneText, setCloneText] = useState("");
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -117,12 +120,13 @@ export default function VoixPage() {
       .finally(() => setSavingId(null));
   }
 
-  function handleDeleteVoice(voice: VoiceSummary) {
+  async function handleDeleteVoice(voice: VoiceSummary) {
     const msg =
       voice.kind === "CLONED"
         ? t.voices.deleteClonedConfirm(voice.name)
         : t.voices.deleteCatalogueConfirm(voice.name);
-    if (!window.confirm(msg)) return;
+    const ok = await confirm({ title: msg, danger: true });
+    if (!ok) return;
     setDeletingId(voice.id);
     deleteVoice(voice.id)
       .then(() => setVoices((prev) => prev.filter((v) => v.id !== voice.id)))
@@ -160,12 +164,18 @@ export default function VoixPage() {
     setCloneError(null);
     setCloning(true);
     try {
-      const created = await createVoice(cloneName.trim(), (cloneGender as Gender) || null, cloneFile);
+      const created = await createVoice(
+        cloneName.trim(),
+        (cloneGender as Gender) || null,
+        cloneFile,
+        cloneText,
+      );
       setVoices((prev) => [...prev, created]);
       setCloneOpen(false);
       setCloneName("");
       setCloneGender("");
       setCloneFile(null);
+      setCloneText("");
       // Auto-génère le sample si pas encore disponible (TTS_PROVIDER=qwen)
       if (!created.has_sample && created.kind === "CLONED") {
         setRequestingId(created.id);
@@ -342,6 +352,17 @@ export default function VoixPage() {
               />
             </label>
           </div>
+          <label className="mt-4 flex flex-col gap-1 text-sm">
+            {t.voices2.referenceTextLabel}
+            <textarea
+              value={cloneText}
+              onChange={(e) => setCloneText(e.target.value)}
+              placeholder={t.voices2.referenceTextPlaceholder}
+              rows={2}
+              className="rounded-control border border-border bg-surface-2 px-2.5 py-1.5 text-sm placeholder:text-muted/60"
+            />
+            <span className="text-xs text-muted">{t.voices2.referenceTextHint}</span>
+          </label>
           {cloneError && <p className="mt-3 text-sm text-danger">{cloneError}</p>}
           <div className="mt-4 flex justify-end">
             <Button type="submit" variant="primary" disabled={cloning}>

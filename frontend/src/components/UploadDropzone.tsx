@@ -49,6 +49,16 @@ export default function UploadDropzone({
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
+        // Accessible au clavier : la zone est un bouton (Entrée / Espace ouvrent le sélecteur).
+        role="button"
+        tabIndex={0}
+        aria-label={t.upload.dropHint}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
         className={`group cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
           dragging
             ? "scale-[1.01] border-primary bg-surface-2 shadow-[0_0_32px_rgba(245,243,241,0.1)]"

@@ -25,11 +25,30 @@ export interface BookSummary {
   created_at: string;
   audio_path: string | null;
   mp3_path: string | null;
+  m4b_path: string | null;
   cover_path: string | null;
   tts_provider: string | null;
   genre: string | null;
   language: string | null;
   published_at: string | null;
+  // Étape en cours, avancement dans l'étape (0-100) et temps restant estimé.
+  stage: "analysis" | "generation" | "assembly" | null;
+  stage_progress: number;
+  eta_seconds: number | null;
+}
+
+// Réglages à chaud d'un moteur (priment sur le .env). Toute valeur est libre : un modèle
+// absent des listes proposées est accepté tel quel.
+export interface EngineOptions {
+  model?: string;
+  base_url?: string;
+  base_model?: string;
+  locale?: string;
+}
+
+export interface PluginError {
+  file: string;
+  error: string;
 }
 
 export interface AppSettings {
@@ -39,6 +58,26 @@ export interface AppSettings {
   default_llm_provider: string;
   preferred_llm_provider: string | null;
   available_llm_providers: string[];
+  llm_options: EngineOptions;
+  tts_options: EngineOptions;
+  effective_llm_model: string | null;
+  effective_tts_model: string | null;
+  llm_provider_descriptions: Record<string, string>;
+  tts_provider_descriptions: Record<string, string>;
+  plugin_errors: PluginError[];
+}
+
+export interface SettingsPatch {
+  preferred_tts_provider?: string | null;
+  preferred_llm_provider?: string | null;
+  llm_options?: EngineOptions;
+  tts_options?: EngineOptions;
+}
+
+export interface ModelList {
+  provider: string;
+  models: string[];
+  error: string | null;
 }
 
 export type ProviderStatusLevel = "ok" | "warning" | "error";
@@ -64,6 +103,8 @@ export interface ChapterSummary {
   status: ChapterStatus;
   error_message: string | null;
   priority: number;
+  included: boolean;
+  duration_ms: number | null;
 }
 
 export interface QueueItem {
@@ -89,6 +130,7 @@ export interface VoiceSummary {
   locale: string | null;
   is_favorite: boolean;
   has_reference_audio: boolean;
+  has_reference_text: boolean;
   has_sample: boolean;
 }
 
@@ -196,21 +238,50 @@ export async function getAppSettings(): Promise<AppSettings> {
   return res.json();
 }
 
-export async function updateAppSettings(
-  patch: Partial<Pick<AppSettings, "preferred_tts_provider" | "preferred_llm_provider">>
-): Promise<AppSettings> {
+// Message d'erreur lisible d'une réponse d'API (champ `detail` de FastAPI, texte ou liste).
+export async function detailOf(res: Response): Promise<string> {
+  let detail = String(res.status);
+  try {
+    const body = await res.json();
+    if (body?.detail) {
+      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    }
+  } catch {
+    // réponse non-JSON : on garde le code HTTP
+  }
+  return detail;
+}
+
+export async function updateAppSettings(patch: SettingsPatch): Promise<AppSettings> {
   const res = await fetch(`${API_URL}/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`PATCH /settings failed: ${res.status}`);
+  if (!res.ok) throw new Error(`PATCH /settings : ${await detailOf(res)}`);
   return res.json();
 }
 
-export async function getAppStatus(): Promise<AppStatus> {
-  const res = await fetch(`${API_URL}/settings/status`);
+// deep=true : appels réels aux services distants (bouton « Tester la connexion »).
+export async function getAppStatus(deep = false): Promise<AppStatus> {
+  const res = await fetch(`${API_URL}/settings/status${deep ? "?deep=true" : ""}`);
   if (!res.ok) throw new Error(`GET /settings/status failed: ${res.status}`);
+  return res.json();
+}
+
+// Décharge les modèles TTS gardés en mémoire (VRAM) — tâche courte côté worker.
+export async function unloadModels(): Promise<void> {
+  const res = await fetch(`${API_URL}/models/qwen/unload`, { method: "POST" });
+  if (!res.ok) throw new Error(`POST /models/qwen/unload : ${await detailOf(res)}`);
+}
+
+// Suggestions de modèles (installés localement quand le moteur sait les lister). Ne lève
+// jamais côté serveur : une erreur réseau arrive dans `error`.
+export async function listModels(kind: "llm" | "tts", provider?: string): Promise<ModelList> {
+  const params = new URLSearchParams({ kind });
+  if (provider) params.set("provider", provider);
+  const res = await fetch(`${API_URL}/settings/models?${params.toString()}`);
+  if (!res.ok) throw new Error(`GET /settings/models : ${await detailOf(res)}`);
   return res.json();
 }
 
@@ -271,10 +342,12 @@ export async function createVoice(
   name: string,
   gender: Gender | null,
   file: File,
+  referenceText?: string,
 ): Promise<VoiceSummary> {
   const form = new FormData();
   form.append("name", name);
   if (gender) form.append("gender", gender);
+  if (referenceText && referenceText.trim()) form.append("reference_text", referenceText.trim());
   form.append("file", file);
   const res = await fetch(`${API_URL}/voices`, { method: "POST", body: form });
   if (!res.ok) {
@@ -356,8 +429,8 @@ async function _postBook(
   return res.json();
 }
 
-export function analyzeBook(bookId: number): Promise<BookSummary> {
-  return _postBook(bookId, "analyze", "analyze");
+export function analyzeBook(bookId: number, force = false): Promise<BookSummary> {
+  return _postBook(bookId, force ? "analyze?force=true" : "analyze", "analyze");
 }
 
 export function generateBook(bookId: number, force = false): Promise<BookSummary> {
@@ -392,6 +465,50 @@ export function voiceSampleUrl(voiceId: string): string {
 
 export function bookMp3Url(id: number): string {
   return `${API_URL}/books/${id}/audio/mp3`;
+}
+
+export function bookM4bUrl(id: number): string {
+  return `${API_URL}/books/${id}/audio/m4b`;
+}
+
+export function characterPreviewUrl(characterId: number, voiceId: string): string {
+  return `${API_URL}/characters/${characterId}/preview?voice_id=${encodeURIComponent(voiceId)}`;
+}
+
+// Inclure / exclure un chapitre (page non narrative : couverture, copyright, sommaire…).
+export async function patchChapterIncluded(
+  bookId: number,
+  position: number,
+  included: boolean,
+): Promise<ChapterSummary> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/${position}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ included }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+// Lance la génération (tâche courte et prioritaire côté worker) d'un aperçu de la voix sur une
+// réplique du personnage ; `ready: true` = déjà en cache.
+export async function requestCharacterPreview(
+  characterId: number,
+  voiceId: string,
+): Promise<{ ready: boolean }> {
+  const res = await fetch(`${API_URL}/characters/${characterId}/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice_id: voiceId }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+export async function characterPreviewReady(characterId: number, voiceId: string): Promise<boolean> {
+  // GET (l'API ne répond pas à HEAD) : l'aperçu est un petit WAV de quelques secondes.
+  const res = await fetch(characterPreviewUrl(characterId, voiceId));
+  return res.ok;
 }
 
 export function chapterAudioUrl(bookId: number, position: number): string {
