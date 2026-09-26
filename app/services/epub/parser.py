@@ -18,7 +18,8 @@ _MAX_RATIO = 100  # rapport décompressé/compressé toléré par fichier > 1 Mo
 _NON_NARRATIVE_RE = re.compile(
     r"(?i)\b(cover|couverture|copyright|colophon|toc|table[-_ ]des[-_ ]mati|sommaire|contents|"
     r"titlepage|title[-_ ]page|page[-_ ]de[-_ ]titre|d[ée]dicace|dedication|remerciements|"
-    r"acknowledg|about[-_ ]the[-_ ]author|nav)\b"
+    r"acknowledg|about[-_ ]the[-_ ]author|nav|project gutenberg|pg[-_ ]header|pg[-_ ]footer|"
+    r"coverpage|wrapper)\b"
 )
 _SHORT_CHAPTER_CHARS = 300
 _REAL_BOOK_CHARS = 5000  # le critère de longueur ne s'applique que si le livre a un vrai chapitre
@@ -155,6 +156,54 @@ def _toc_titles(book) -> dict[str, str]:
     return titles
 
 
+def _toc_anchors(book) -> dict[str, list[tuple[str, str]]]:
+    """Ancres de la table des matières par fichier, dans l'ordre du sommaire :
+    {fichier: [(id_ancre, titre), ...]}. Sert à découper un fichier qui contient PLUSIEURS
+    chapitres (cas des EPUB du Projet Gutenberg : tout le livre en 3-4 fichiers)."""
+    anchors: dict[str, list[tuple[str, str]]] = {}
+
+    def walk(nodes) -> None:
+        for node in nodes:
+            if isinstance(node, (list, tuple)):
+                if node:
+                    walk([node[0]])
+                    if len(node) > 1 and isinstance(node[1], (list, tuple)):
+                        walk(node[1])
+                continue
+            href = getattr(node, "href", None)
+            title = getattr(node, "title", None)
+            if href and title and "#" in href:
+                file_part, anchor = href.split("#", 1)
+                key = file_part.rsplit("/", 1)[-1]
+                if anchor and all(a != anchor for a, _ in anchors.get(key, [])):
+                    anchors.setdefault(key, []).append((anchor, str(title).strip()))
+
+    try:
+        walk(book.toc)
+    except Exception:  # noqa: BLE001
+        return {}
+    return anchors
+
+
+def _split_by_anchors(soup: BeautifulSoup, anchors: list[tuple[str, str]]) -> list[tuple[str | None, str]]:
+    """Découpe un document aux éléments dont l'id figure dans `anchors` (ordre du document).
+    Retourne [(titre, texte)] ; le texte avant la première ancre forme une section sans titre.
+    Même extraction qu'_extract_text (un paragraphe = une ligne) : aucun texte n'est perdu."""
+    wanted = {a: t for a, t in anchors}
+    sections: list[tuple[str | None, list[str]]] = [(None, [])]
+    for el in soup.descendants:
+        if not getattr(el, "name", None):
+            continue
+        el_id = el.get("id")
+        if el_id in wanted:
+            sections.append((wanted.pop(el_id), []))
+        if el.name in _BLOCK_TAGS and _is_leaf_block(el):
+            line = " ".join(el.get_text().split())
+            if line:
+                sections[-1][1].append(line)
+    return [(title, "\n".join(lines)) for title, lines in sections if lines]
+
+
 class EpubParser:
     def parse(self, path: str) -> ParsedBook:
         _check_zip_safety(path)
@@ -179,6 +228,7 @@ class EpubParser:
         chapters: list[ParsedChapter] = []
         position = 0
         toc = _toc_titles(book)
+        anchors = _toc_anchors(book)
         file_names: list[str] = []
 
         for spine_id, _ in book.spine:
@@ -190,11 +240,22 @@ class EpubParser:
             for tag in soup(["script", "style"]):
                 tag.decompose()
 
+            item_file = (item.get_name() or "").rsplit("/", 1)[-1]
+            file_anchors = anchors.get(item_file, [])
+            if len(file_anchors) >= 2:
+                # Plusieurs chapitres dans ce fichier : un chapitre par entrée du sommaire.
+                for section_title, section_text in _split_by_anchors(soup, file_anchors):
+                    position += 1
+                    file_names.append(item.get_name() or "")
+                    chapters.append(ParsedChapter(
+                        position=position, title=section_title, raw_text=section_text,
+                    ))
+                continue
+
             raw_text = _extract_text(soup)
             if not raw_text:
                 continue
 
-            item_file = (item.get_name() or "").rsplit("/", 1)[-1]
             chapter_title: str | None = toc.get(item_file)
             if not chapter_title:
                 heading = soup.find(["h1", "h2", "h3"])
@@ -216,7 +277,9 @@ class EpubParser:
         if has_real_chapter:
             for chapter, name in zip(chapters, file_names):
                 label = f"{name} {chapter.title or ''}"
-                if _NON_NARRATIVE_RE.search(label) or len(chapter.raw_text) < _SHORT_CHAPTER_CHARS:
+                boilerplate = "project gutenberg" in chapter.raw_text[:400].lower()
+                if (_NON_NARRATIVE_RE.search(label) or boilerplate
+                        or len(chapter.raw_text) < _SHORT_CHAPTER_CHARS):
                     chapter.included = False
 
         cover_image, cover_media_type = _extract_cover(book)

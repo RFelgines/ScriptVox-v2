@@ -274,6 +274,26 @@ check("titres issus de la table des matières EPUB", [c.title for c in pb.chapte
 small = EpubParser().parse(str(ROOT / "tests" / "fixtures" / "test.epub"))
 check("un livre entièrement court n'est jamais vidé de son contenu", all(c.included for c in small.chapters))
 
+# Plusieurs chapitres dans UN fichier (EPUB Projet Gutenberg) : découpe selon les ancres du sommaire
+multi = epub.EpubBook()
+multi.set_identifier("m"); multi.set_title("Recueil"); multi.set_language("fr")
+hdr = epub.EpubHtml(title="h", file_name="pg-header.xhtml"); hdr.content = "<html><body><p>The Project Gutenberg eBook of Recueil</p></body></html>"
+body = epub.EpubHtml(title="b", file_name="body.xhtml")
+body.content = ("<html><body><h2 id='a1'>Premier conte</h2>" + "<p>" + real + "</p>"
+                + "<h2 id='a2'>Second conte</h2>" + "<p>" + real + "</p></body></html>")
+lic = epub.EpubHtml(title="l", file_name="pg-footer.xhtml"); lic.content = "<html><body><p>" + ("License text " * 400) + "</p></body></html>"
+for it in (hdr, body, lic):
+    multi.add_item(it)
+multi.toc = (epub.Link("body.xhtml#a1", "Premier conte", "a1"), epub.Link("body.xhtml#a2", "Second conte", "a2"),
+             epub.Link("pg-footer.xhtml#f", "THE FULL PROJECT GUTENBERG LICENSE", "f"))
+multi.add_item(epub.EpubNcx()); multi.spine = [hdr, body, lic]
+epub.write_epub(str(_TMP / "multi.epub"), multi)
+pm = EpubParser().parse(str(_TMP / "multi.epub"))
+kept = [c.title for c in pm.chapters if c.included]
+check("un fichier à 2 ancres du sommaire -> 2 chapitres", kept == ["Premier conte", "Second conte"], str([(c.title, c.included) for c in pm.chapters]))
+check("en-tête et licence Gutenberg exclus", all(not c.included for c in pm.chapters if c.title not in ("Premier conte", "Second conte")))
+check("aucun texte perdu à la découpe", sum(len(c.raw_text) for c in pm.chapters if c.included) >= 2 * len(real.strip()) - 10)
+
 bomb = _TMP / "bomb.epub"
 with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("mimetype", "application/epub+zip")
