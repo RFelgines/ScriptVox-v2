@@ -52,7 +52,7 @@ lameenc~=1.8         # WAV->MP3 encoder (pure Python, no native lib / no binary 
 numpy>=1.26
 
 # ─── EPUB parsing ─────────────────────────────────────────────────────────────
-ebooklib~=0.18
+ebooklib~=0.20
 beautifulsoup4~=4.12
 # ebooklib parses XML: lxml >= 5 no longer resolves external entities by default (security).
 lxml>=5.0
