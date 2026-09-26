@@ -22,7 +22,7 @@ alembic~=1.18.0      # schema migrations — replaces create_all-only (audit 202
 pydantic~=2.11.0
 
 # ─── Task queue ───────────────────────────────────────────────────────────────
-huey~=2.5.0
+huey~=3.4.0
 
 # ─── HTTP client ──────────────────────────────────────────────────────────────
 httpx~=0.28.0
