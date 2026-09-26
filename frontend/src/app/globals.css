@@ -152,3 +152,14 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* Orbe de voix, variante "glass" (VoiceOrb.tsx variant="glass") : conservée
+   pour comparaison / retour arrière. La variante "flat" par défaut n'utilise
+   aucune keyframe CSS -- son mouvement est calculé en JS (useOrganicDrift). */
+@keyframes orbSpinSlow {
+  to { transform: rotate(360deg); }
+}
+@keyframes orbGlassBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
+}

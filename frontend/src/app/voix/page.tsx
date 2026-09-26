@@ -17,15 +17,9 @@ import Skeleton from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
 import VoiceOrb from "@/components/VoiceOrb";
 import { buildHueMap } from "@/lib/voiceHues";
+import { localeToFlag } from "@/lib/locale";
 import { useT } from "@/lib/i18n/LanguageContext";
 import { useFeedback } from "@/components/ui/Feedback";
-
-function localeToFlag(locale: string): string | null {
-  const region = locale.split("-")[1];
-  if (!region || region.length !== 2) return null;
-  const codePoints = [...region.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65);
-  return String.fromCodePoint(...codePoints);
-}
 
 const GENDER_SYMBOL: Partial<Record<Gender, string>> = {
   MALE: "♂",

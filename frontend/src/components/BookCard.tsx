@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BookSummary, coverUrl, deleteBook } from "@/lib/api";
+import { languageName, languageToFlag } from "@/lib/locale";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { useFeedback } from "@/components/ui/Feedback";
 import { useT } from "@/lib/i18n/LanguageContext";
@@ -102,6 +103,20 @@ export default function BookCard({
         {/* Scrim fixe (indépendant du thème clair/sombre) -- lisibilité du
             texte incrusté garantie quelle que soit la couverture. */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
+
+        {/* Langue du livre (dc:language de l'EPUB) : pastille ronde en coin de
+            couverture. Le drapeau seul serait illisible pour qui ne le
+            reconnaît pas, d'où le nom de la langue au survol et en aria-label. */}
+        {book.language && languageToFlag(book.language) && (
+          <span
+            role="img"
+            title={languageName(book.language)}
+            aria-label={languageName(book.language)}
+            className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-sm leading-none backdrop-blur-sm"
+          >
+            {languageToFlag(book.language)}
+          </span>
+        )}
 
         <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1.5 p-3.5">
           <p
