@@ -58,6 +58,11 @@ export interface AppSettings {
   default_llm_provider: string;
   preferred_llm_provider: string | null;
   available_llm_providers: string[];
+  /** Codes de langue que l'application sait traiter de bout en bout (un
+   *  LanguageProfile existe côté serveur). Sert à signaler les livres dont la
+   *  langue n'est pas prise en charge -- voir BookCard. */
+  available_languages: string[];
+  preferred_language: string | null;
   llm_options: EngineOptions;
   tts_options: EngineOptions;
   effective_llm_model: string | null;

@@ -453,7 +453,12 @@ export default function Home() {
       {visibleBooks.length > 0 && (
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {visibleBooks.map((book) => (
-            <BookCard key={book.id} book={book} onDeleted={refresh} />
+            <BookCard
+              key={book.id}
+              book={book}
+              onDeleted={refresh}
+              availableLanguages={appSettings?.available_languages}
+            />
           ))}
         </div>
       )}

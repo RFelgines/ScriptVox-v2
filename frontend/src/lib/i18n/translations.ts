@@ -155,6 +155,7 @@ export interface Dictionary {
     backToLibrary: string;
     errorTitle: string;
     coverAlt: (title: string) => string;
+    languageUnsupported: (language: string) => string;
     genrePlaceholder: string;
     genreAriaLabel: string;
     languagePlaceholder: string;
@@ -532,6 +533,8 @@ const fr: Dictionary = {
     backToLibrary: "← Bibliothèque",
     errorTitle: "Erreur",
     coverAlt: (title) => `Couverture de ${title}`,
+    languageUnsupported: (language) =>
+      `${language} — langue non prise en charge par le moteur actuel : l’audio utilisera le profil français`,
     genrePlaceholder: "Genre (ex. Fantasy)",
     genreAriaLabel: "Genre du livre",
     languagePlaceholder: "Langue (ex. fr)",
@@ -918,6 +921,8 @@ const en: Dictionary = {
     backToLibrary: "← Library",
     errorTitle: "Error",
     coverAlt: (title) => `Cover of ${title}`,
+    languageUnsupported: (language) =>
+      `${language} — not supported by the current engine: audio will fall back to the French profile`,
     genrePlaceholder: "Genre (e.g. Fantasy)",
     genreAriaLabel: "Book genre",
     languagePlaceholder: "Language (e.g. en)",

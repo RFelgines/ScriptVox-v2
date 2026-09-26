@@ -29,6 +29,31 @@ from app.services.tts.base import BaseTTSProvider
 _PLACEHOLDERS = ("{text_file}", "{text}", "{out}", "{voice}", "{emotion}", "{ref}", "{language}")
 
 
+def _split_command(template: str) -> list[str]:
+    """Découpe TTS_COMMAND en argv, sans shell.
+
+    Sous Windows on ne peut pas utiliser le mode POSIX de shlex : il traite
+    l'antislash comme un échappement et mange les séparateurs de chemin
+    (``C:\\Tools\\tts.exe`` -> ``C:Toolstts.exe``). Mais le mode non-POSIX,
+    lui, *conserve* les guillemets à l'intérieur du token : le premier argument
+    devient littéralement ``"C:\\Program Files\\tts.exe"``, guillemets compris,
+    et ``create_subprocess_exec`` — qui ne passe par aucun shell — cherche un
+    exécutable portant ce nom, d'où un WinError 2. Un chemin cité étant la
+    norme dès qu'il contient une espace, le moteur `command` était de fait
+    inutilisable sous Windows. On retire donc les guillemets encadrants après
+    coup, ce que le mode POSIX faisait déjà sur les autres plateformes.
+    """
+    if os.name != "nt":
+        return shlex.split(template, posix=True)
+    tokens = shlex.split(template, posix=False)
+    unquoted = []
+    for tok in tokens:
+        if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ('"', "'"):
+            tok = tok[1:-1]
+        unquoted.append(tok)
+    return unquoted
+
+
 class CommandTTSProvider(BaseTTSProvider):
     max_chars = 800
 
@@ -37,7 +62,7 @@ class CommandTTSProvider(BaseTTSProvider):
         template = getattr(settings, "tts_command", None)
         if not template:
             raise TTSError("command:config", ValueError("TTS_COMMAND n'est pas défini (.env)."))
-        self._argv_template = shlex.split(template, posix=(os.name != "nt"))
+        self._argv_template = _split_command(template)
         self._timeout = float(getattr(settings, "tts_command_timeout", 300))
         voice_map = getattr(settings, "tts_command_voice_map", None)
         self._voice_map = voice_map if isinstance(voice_map, dict) else {}

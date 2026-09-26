@@ -11,9 +11,14 @@ import { useT } from "@/lib/i18n/LanguageContext";
 export default function BookCard({
   book,
   onDeleted,
+  availableLanguages,
 }: {
   book: BookSummary;
   onDeleted: () => void;
+  /** Codes de langue traités de bout en bout par le serveur (AppSettings.
+   *  available_languages). Absent = on n'affiche aucun avertissement plutôt
+   *  que d'en inventer un pendant le chargement des réglages. */
+  availableLanguages?: string[];
 }) {
   const t = useT();
   const { toast, confirm } = useFeedback();
@@ -107,16 +112,32 @@ export default function BookCard({
         {/* Langue du livre (dc:language de l'EPUB) : pastille ronde en coin de
             couverture. Le drapeau seul serait illisible pour qui ne le
             reconnaît pas, d'où le nom de la langue au survol et en aria-label. */}
-        {book.language && languageToFlag(book.language) && (
-          <span
-            role="img"
-            title={languageName(book.language)}
-            aria-label={languageName(book.language)}
-            className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-sm leading-none backdrop-blur-sm"
-          >
-            {languageToFlag(book.language)}
-          </span>
-        )}
+        {book.language && languageToFlag(book.language) && (() => {
+          // Langue non prise en charge : on affiche quand même le drapeau -- la
+          // langue est un fait sur le livre, pas sur le moteur -- mais grisé et
+          // explicité au survol. Le masquer rendrait la dégradation invisible :
+          // l'utilisateur entendrait une phonétique française sans comprendre.
+          const supported =
+            !availableLanguages ||
+            availableLanguages.includes(book.language.toLowerCase().split(/[-_]/)[0]);
+          const label = supported
+            ? languageName(book.language)
+            : t.book.languageUnsupported(languageName(book.language));
+          return (
+            <span
+              role="img"
+              title={label}
+              aria-label={label}
+              className={`absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full text-sm leading-none backdrop-blur-sm ${
+                supported
+                  ? "bg-black/55"
+                  : "bg-black/40 opacity-50 grayscale ring-1 ring-white/30"
+              }`}
+            >
+              {languageToFlag(book.language)}
+            </span>
+          );
+        })()}
 
         <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1.5 p-3.5">
           <p
