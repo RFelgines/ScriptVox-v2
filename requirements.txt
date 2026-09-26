@@ -58,4 +58,4 @@ beautifulsoup4~=4.12
 lxml>=5.0
 
 # ─── File upload (required by FastAPI Form/File) ──────────────────────────────
-python-multipart~=0.0.20
+python-multipart~=0.0.32
