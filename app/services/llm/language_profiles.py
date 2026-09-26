@@ -123,8 +123,11 @@ _ES_INCISE_VERBS = (
 # devant le nom propre : « don Quijote », « la duquesa », « el cura ».
 _ES_SUBJECT = r"(?:(?:el|la|los|las|don|doña|fray|su|mi)\s+)?[A-ZÁÉÍÓÚÑÜ][\wÁ-ÿñ'’-]*"
 
+# Clitique antéposé au verbe : « —Puedes irte—le dijo al criado. »
+_ES_CLITIC = r"(?:(?:me|te|le|les|se|nos|os)\s+)?"
+
 _ES_INCISE_VERB = (
-    r"(?:" + _ES_INCISE_VERBS + r")\s+(?:" + _ES_SUBJECT + r"|él|ella|ellos|ellas|yo)"
+    _ES_CLITIC + r"(?:" + _ES_INCISE_VERBS + r")\s+(?:" + _ES_SUBJECT + r"|él|ella|ellos|ellas|yo)"
 )
 
 ES_PROFILE = LanguageProfile(
@@ -138,8 +141,17 @@ ES_PROFILE = LanguageProfile(
         )),
         re.MULTILINE,
     ),
+    # Différence structurelle majeure avec le français, mesurée sur 5 romans
+    # espagnols : l'incise est introduite par un TIRET CADRATIN collé au verbe
+    # (« —Sí, señorito—respondió Domingo »), là où le français emploie une
+    # virgule (« , dit-il »). Un motif calqué sur le français ne matche donc
+    # jamais — mesuré : 0 incise sur Niebla, Los argonautas, Cuentos de amor et
+    # El crimen y el castigo avant correction.
+    # Comme en français, on n'extrait que l'incise TERMINALE et propre : un
+    # « —dijo Víctor a Augusto—, ¡tú… » (dialogue repris après) est laissé
+    # intact, d'où l'exclusion des tirets dans la queue.
     incise_re=re.compile(
-        r"(?P<dlg>.*[,?!…])(?P<inc>\s+" + _ES_INCISE_VERB + r"[^,]*)$",
+        r"(?P<dlg>.*[,?!…—–―])(?P<inc>\s*" + _ES_INCISE_VERB + r"[^,—–―]*)$",
         re.UNICODE,
     ),
     # Même principe qu'en français : un nom propre explicite dans le texte source
