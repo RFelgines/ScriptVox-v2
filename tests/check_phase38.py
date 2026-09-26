@@ -91,8 +91,8 @@ def _make_test_engine():
 
 
 # ── 2. AVAILABLE_LANGUAGES reflète les profils enregistrés ──────────────────
-section("AVAILABLE_LANGUAGES == {'fr', 'en'}")
-check("codes attendus", set(AVAILABLE_LANGUAGES) == {"fr", "en"}, f"got {AVAILABLE_LANGUAGES}")
+section("AVAILABLE_LANGUAGES == {'fr', 'en', 'es'}")
+check("codes attendus", set(AVAILABLE_LANGUAGES) == {"fr", "en", "es"}, f"got {AVAILABLE_LANGUAGES}")
 
 
 # ── 3. _effective_book_language : ordre de priorité complet ─────────────────
@@ -135,8 +135,8 @@ _client = TestClient(app)
 _resp_get = _client.get("/settings")
 check("GET /settings -> 200", _resp_get.status_code == 200, _resp_get.text)
 _body = _resp_get.json()
-check("available_languages contient fr et en",
-      set(_body.get("available_languages", [])) == {"fr", "en"}, f"got {_body}")
+check("available_languages contient fr, en et es",
+      set(_body.get("available_languages", [])) == {"fr", "en", "es"}, f"got {_body}")
 check("preferred_language par défaut -> None", _body.get("preferred_language") is None)
 
 _resp_patch = _client.patch("/settings", json={"preferred_language": "en"})

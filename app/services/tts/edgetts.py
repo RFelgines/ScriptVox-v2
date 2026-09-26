@@ -41,11 +41,26 @@ _VOICE_MAP: dict[str, dict[str, str]] = {
         "neutral_0": "fr-CH-ArianeNeural",
         "neutral_1": "fr-CA-ThierryNeural",
     },
+    # es-ES ne compte que 3 voix (1 masculine, 2 féminines) : comme pour fr-FR, les
+    # emplacements restants empruntent aux autres locales hispanophones pour qu'aucun
+    # personnage ne parle avec la voix du narrateur. Noms vérifiés en direct via
+    # edge_tts.list_voices() le 2026-09-26.
+    "es-ES": {
+        "narrator":  "es-ES-AlvaroNeural",
+        "male_0":    "es-MX-JorgeNeural",
+        "male_1":    "es-AR-TomasNeural",
+        "male_2":    "es-CO-GonzaloNeural",
+        "female_0":  "es-ES-ElviraNeural",
+        "female_1":  "es-ES-XimenaNeural",
+        "female_2":  "es-MX-DaliaNeural",
+        "neutral_0": "es-CL-CatalinaNeural",
+        "neutral_1": "es-PE-AlexNeural",
+    },
 }
 
 _DEFAULT_LOCALE = "en-US"
 # Profile code (language_profiles.resolve_profile) -> EdgeTTS locale.
-_PROFILE_LOCALE: dict[str, str] = {"en": "en-US", "fr": "fr-FR"}
+_PROFILE_LOCALE: dict[str, str] = {"en": "en-US", "fr": "fr-FR", "es": "es-ES"}
 # Fréquence de sortie commune à tout le pipeline (voir app/services/audio/format.py).
 _OUTPUT_SAMPLE_RATE = OUTPUT_SAMPLE_RATE
 

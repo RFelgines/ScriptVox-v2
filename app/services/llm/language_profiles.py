@@ -103,7 +103,55 @@ EN_PROFILE = LanguageProfile(
     explicit_name_re=None,
 )
 
-_PROFILES: dict[str, LanguageProfile] = {"fr": FR_PROFILE, "en": EN_PROFILE}
+# ── Espagnol ──────────────────────────────────────────────────────────────────
+# Typographie mesurée sur Don Quijote (Gutenberg 2000) : le tiret cadratin
+# domine largement (99 occurrences sur 14 chapitres, contre 2 guillemets
+# droits). Le dialogue_re français attrape déjà 47 répliques espagnoles tel
+# quel — on réutilise donc la même construction.
+# Incise : l'espagnol n'a PAS l'inversion clitique à trait d'union du français
+# (« dit-il »). L'attribution passe par un sujet postposé — « dijo Sancho »,
+# « respondió don Quijote ». On exige donc le verbe SUIVI d'un nom propre ou
+# d'un pronom : un « dijo » nu n'identifie personne.
+_ES_INCISE_VERBS = (
+    r"dijo|dijeron|respondió|respondieron|replicó|replicaron|preguntó|preguntaron|"
+    r"exclamó|añadió|murmuró|gritó|contestó|prosiguió|continuó|agregó|susurró|"
+    r"insistió|objetó|protestó|explicó|afirmó|declaró|concluyó|repuso|observó|"
+    r"suspiró|rugió|balbuceó|gruñó|interrumpió|advirtió|repitió"
+)
+
+# Le sujet postposé espagnol admet un déterminant ou un titre en minuscule
+# devant le nom propre : « don Quijote », « la duquesa », « el cura ».
+_ES_SUBJECT = r"(?:(?:el|la|los|las|don|doña|fray|su|mi)\s+)?[A-ZÁÉÍÓÚÑÜ][\wÁ-ÿñ'’-]*"
+
+_ES_INCISE_VERB = (
+    r"(?:" + _ES_INCISE_VERBS + r")\s+(?:" + _ES_SUBJECT + r"|él|ella|ellos|ellas|yo)"
+)
+
+ES_PROFILE = LanguageProfile(
+    code="es",
+    dialogue_re=re.compile(
+        "|".join((
+            r"«[^»]*»",
+            r"“[^”]*”",
+            r'"[^"]*"',
+            r"^[ \t]*[—–―][^\n]*",   # convention dominante en espagnol
+        )),
+        re.MULTILINE,
+    ),
+    incise_re=re.compile(
+        r"(?P<dlg>.*[,?!…])(?P<inc>\s+" + _ES_INCISE_VERB + r"[^,]*)$",
+        re.UNICODE,
+    ),
+    # Même principe qu'en français : un nom propre explicite dans le texte source
+    # est une attribution certaine, indépendante du LLM.
+    explicit_name_re=re.compile(
+        r"(?:" + _ES_INCISE_VERBS + r")\s+(" + _ES_SUBJECT
+        + r"(?:\s+[A-ZÁÉÍÓÚÑÜ][\wÁ-ÿñ'’-]*)?)"
+    ),
+)
+
+
+_PROFILES: dict[str, LanguageProfile] = {"fr": FR_PROFILE, "en": EN_PROFILE, "es": ES_PROFILE}
 
 # Codes reconnus par resolve_profile, exposés pour valider/lister les choix
 # utilisateur (ex. AppSetting.preferred_language) sans dupliquer cette liste.
@@ -121,4 +169,6 @@ def resolve_profile(language: str | None) -> LanguageProfile:
     normalized = language.strip().lower()
     if normalized.startswith("en") or normalized in ("eng", "english", "anglais"):
         return EN_PROFILE
+    if normalized.startswith("es") or normalized in ("spa", "spanish", "espagnol", "español"):
+        return ES_PROFILE
     return FR_PROFILE
