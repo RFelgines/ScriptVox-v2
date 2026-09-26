@@ -49,7 +49,7 @@ function UtilBlock({
 export default function PlayerBar() {
   const t = useT();
   const { track, isPlaying, audioError, currentTime, duration, rate, play, toggle, seek, setRate, close,
-          currentSegment, voiceHues, voiceNames } = usePlayer();
+          currentSegment, voiceHues, voiceNames, sleepMode, sleepRemaining, setSleep } = usePlayer();
   const [expanded, setExpanded] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [chapters, setChapters] = useState<ChapterSummary[]>([]);
@@ -252,7 +252,7 @@ export default function PlayerBar() {
           </div>
 
           {/* Rangée utilitaire */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <UtilBlock
               onClick={cycleRate}
               ariaLabel={t.player.rateAriaLabel}
@@ -282,7 +282,30 @@ export default function PlayerBar() {
               }
               label={t.player.bookmarkLabel}
             />
+            <div className="flex flex-col items-center gap-1 px-2 py-2">
+              <Select
+                value={sleepMode === "timer" ? "timer" : sleepMode}
+                onChange={(v) => {
+                  if (v === "off" || v === "chapter") setSleep(v);
+                  else if (v.startsWith("m")) setSleep(Number(v.slice(1)));
+                }}
+                ariaLabel={t.player2.sleepLabel}
+                options={[
+                  { value: "off", label: t.player2.sleepOff },
+                  { value: "chapter", label: t.player2.sleepEndOfChapter },
+                  ...[15, 30, 45, 60].map((m) => ({
+                    value: `m${m}`,
+                    label: t.player2.sleepMinutes(m),
+                  })),
+                  ...(sleepMode === "timer" && sleepRemaining !== null
+                    ? [{ value: "timer", label: t.player2.sleepRemaining(fmt(sleepRemaining)) }]
+                    : []),
+                ]}
+              />
+              <span className="text-[11px] text-muted">{t.player2.sleepLabel}</span>
+            </div>
           </div>
+          <p className="hidden text-[11px] text-muted/70 sm:block">{t.player2.shortcutsHint}</p>
         </div>
 
         {/* Seul bloc scrollable du panneau déplié -- chapitres + transcription. */}

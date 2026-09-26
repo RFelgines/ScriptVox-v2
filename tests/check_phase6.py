@@ -14,6 +14,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 os.environ.update({
+    # Assemblage brut : ni pauses ni normalisation de niveau (testés dans check_phase46).
+    "AUDIO_PAUSE_SAME_VOICE_MS": "0", "AUDIO_PAUSE_VOICE_CHANGE_MS": "0", "AUDIO_NORMALIZE": "false",
     "LLM_PROVIDER": "ollama",
     "TTS_PROVIDER": "piper",
     "OLLAMA_BASE_URL": "http://localhost:11434",
@@ -80,7 +82,7 @@ def _make_test_engine():
 
 def _make_mock_tts() -> MagicMock:
     m = MagicMock()
-    m.synthesise = AsyncMock(return_value=_make_wav_bytes(50))
+    m.synthesise = AsyncMock(return_value=_make_wav_bytes(50, 24000))
     return m
 
 

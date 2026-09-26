@@ -6,7 +6,7 @@ Contexte : le provider LLM était figé au démarrage via Settings.llm_provider
 basculer entre "ollama" et "gemini" sans redémarrer l'application.
 
 Valide :
-  - VALID_LLM_PROVIDERS == {"gemini", "ollama"} (export public de config.py).
+  - VALID_LLM_PROVIDERS == {"gemini", "ollama", "openai_compatible"} (export public de config.py).
   - AppSetting.preferred_llm_provider est nullable et persistable.
   - _effective_llm_provider : None si pas de préférence ; sinon la valeur en DB.
   - get_llm_provider(settings, override=...) : override prime sur settings.llm_provider
@@ -97,7 +97,7 @@ def _make_engine():
 
 # ── 2. VALID_LLM_PROVIDERS ───────────────────────────────────────────────────
 section("VALID_LLM_PROVIDERS == {'gemini', 'ollama'}")
-check("valeurs attendues", VALID_LLM_PROVIDERS == frozenset({"gemini", "ollama"}),
+check("valeurs attendues", VALID_LLM_PROVIDERS == frozenset({"gemini", "ollama", "openai_compatible"}),
       f"got {VALID_LLM_PROVIDERS}")
 
 
@@ -221,8 +221,8 @@ check("default_llm_provider == 'ollama'", _body.get("default_llm_provider") == "
 check("preferred_llm_provider par défaut -> None",
       _body.get("preferred_llm_provider") is None,
       f"got {_body.get('preferred_llm_provider')!r}")
-check("available_llm_providers == ['gemini', 'ollama']",
-      set(_body.get("available_llm_providers", [])) == {"gemini", "ollama"},
+check("available_llm_providers == ['gemini', 'ollama', 'openai_compatible']",
+      set(_body.get("available_llm_providers", [])) == {"gemini", "ollama", "openai_compatible"},
       f"got {_body.get('available_llm_providers')}")
 
 

@@ -1,12 +1,13 @@
-# CI « clone frais » — vérifie qu'un checkout vierge du dépôt build et démarre.
+# CI « clone frais » — vérifie qu'un checkout vierge du dépôt build, se lint et passe ses tests.
 # Née de l'incident des fichiers fantômes (2026-07-11) : framer-motion non déclaré,
 # ui/Select.tsx jamais commité, prop tone de StatusBadge jamais poussée — trois
 # casses invisibles depuis la machine de dev, détectées seulement sur clone frais.
+# Audit 2026-09-25 : la CI lance maintenant TOUTES les suites de tests (elle n'en lançait aucune).
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**", "audit/**"]
   pull_request:
 
 jobs:
@@ -27,19 +28,33 @@ jobs:
       # Le build de production résout tous les imports et types de toutes les
       # routes — c'est lui qui attrape les fichiers oubliés en local.
       - run: npm run build
+      # Avis de sécurité sur les dépendances de production (informatif : n'échoue pas le build).
+      - run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
 
   backend:
     runs-on: ubuntu-latest
+    # 3.13 est signalé mais non bloquant tant que toutes les dépendances épinglées n'y ont pas
+    # de roue validée (3.11 et 3.12 sont la référence).
+    continue-on-error: ${{ matrix.python-version == '3.13' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: pip install -r requirements.txt
+      # ffmpeg : nécessaire aux tests de l'export M4B chapitré.
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r requirements.txt ruff pip-audit
       # Même setup que le README : la config de l'exemple doit suffire à charger l'app.
       - run: cp .env.example .env
       - run: python -m compileall -q app
+      # Erreurs de syntaxe / imports inutilisés / noms indéfinis (pas de règles de style).
+      - run: ruff check --select E9,F app scripts plugins tests/run_all.py
       # Importe chaque module de app/ — attrape les fichiers manquants et les
       # imports cassés que compileall ne résout pas.
       - name: Import de tous les modules
@@ -57,3 +72,8 @@ jobs:
               print(f"{m} -> {e}")
           raise SystemExit(1 if fails else 0)
           EOF
+      # Toutes les suites tests/check_phase*.py (hors ligne : LLM, TTS et réseau sont simulés).
+      - run: python tests/run_all.py
+      # Avis de sécurité sur les dépendances (informatif : n'échoue pas le build).
+      - run: pip-audit -r requirements.txt
+        continue-on-error: true

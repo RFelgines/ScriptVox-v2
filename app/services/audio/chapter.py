@@ -1,7 +1,5 @@
 import asyncio
-import io
 import logging
-import wave
 from typing import Callable
 
 from sqlmodel import Session, select
@@ -9,6 +7,13 @@ from sqlmodel import Session, select
 from app.core.enums import SegmentType
 from app.models.entities import Character, Segment, Voice
 from app.services.audio.assembler import assemble_wav_bytes
+from app.services.audio.format import (
+    adjust_level,
+    normalize_audio,
+    silence_wav,
+    split_sentences,
+    wav_duration_ms,
+)
 from app.services.tts.base import BaseTTSProvider
 from app.services.voice_assignment import NARRATOR_VOICE_ID
 
@@ -23,10 +28,47 @@ logger = logging.getLogger(__name__)
 _TTS_MAX_RETRIES = 3
 _TTS_RETRY_DELAY = 3  # secondes
 
+# Silence entre deux morceaux d'une même réplique découpée (TTS-5).
+_SPLIT_PAUSE_MS = 150
 
-def _wav_duration_ms(wav_bytes: bytes) -> int:
-    with wave.open(io.BytesIO(wav_bytes), "rb") as w:
-        return int(w.getnframes() / w.getframerate() * 1000)
+# Ré-export (rétrocompatibilité des tests / imports existants).
+_wav_duration_ms = wav_duration_ms
+
+
+class _AudioSettings:
+    """Réglages d'assemblage, valeurs nettoyées (int/bool). Robuste à un `get_settings`
+    remplacé par un mock dans les tests : toute valeur du mauvais type retombe sur le défaut."""
+
+    def __init__(self, raw) -> None:
+        def _int(name: str, default: int) -> int:
+            v = getattr(raw, name, default)
+            return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else default
+
+        def _bool(name: str, default: bool) -> bool:
+            v = getattr(raw, name, default)
+            return v if isinstance(v, bool) else default
+
+        self.pause_same_voice_ms = _int("pause_same_voice_ms", 250)
+        self.pause_voice_change_ms = _int("pause_voice_change_ms", 450)
+        self.audio_normalize = _bool("audio_normalize", True)
+        self.tts_max_chars = _int("tts_max_chars", 0)
+        self.tts_concurrency = _int("tts_concurrency", 0)
+
+
+def _audio_settings() -> _AudioSettings:
+    """Import paresseux : ce module est importé par des tests qui posent leur environnement
+    après coup."""
+    from app.config import get_settings
+    return _AudioSettings(get_settings())
+
+
+def pause_after_ms(voice_id: str, next_voice_id: str | None, settings=None) -> int:
+    """Silence inséré après une réplique : plus court si la même voix enchaîne, plus long
+    quand la voix change (AUD-1, audit 2026-09-25). 0 après la dernière réplique."""
+    if next_voice_id is None:
+        return 0
+    s = settings or _audio_settings()
+    return s.pause_same_voice_ms if voice_id == next_voice_id else s.pause_voice_change_ms
 
 
 async def _synthesise_with_retry(
@@ -35,13 +77,15 @@ async def _synthesise_with_retry(
 ) -> bytes:
     """Up to _TTS_MAX_RETRIES attempts, spaced by _TTS_RETRY_DELAY seconds — no
     delay after the last attempt, whether it succeeds or the exception is finally
-    re-raised."""
+    re-raised. La sortie est normalisée (WAV mono 16 bits 24 kHz) : un provider peut donc
+    renvoyer n'importe quel format audio décodable."""
     last_exc: Exception | None = None
     for attempt in range(_TTS_MAX_RETRIES):
         try:
             chunk = await tts.synthesise(
                 text, voice_id, emotion=emotion, reference_audio_path=reference_audio_path,
             )
+            chunk = normalize_audio(chunk)
             if attempt > 0:
                 logger.info(
                     "synthesise_with_retry: succeeded on attempt %d/%d",
@@ -59,6 +103,32 @@ async def _synthesise_with_retry(
     raise last_exc
 
 
+async def _synthesise_text(
+    tts: BaseTTSProvider, text: str, voice_id: str,
+    emotion: str | None, reference_audio_path: str | None, settings,
+) -> bytes:
+    """Synthétise le texte d'un segment. Un texte plus long que la limite du provider est
+    découpé aux fins de phrase puis recollé (TTS-5) : une narration d'une page envoyée d'un
+    bloc fait dériver ou tronquer la plupart des TTS neuronaux. Le niveau sonore du segment
+    est homogénéisé (AUD-4) si AUDIO_NORMALIZE est actif."""
+    tts_limit = getattr(tts, "max_chars", 0)
+    limit = settings.tts_max_chars or (tts_limit if isinstance(tts_limit, int) else 0)
+    pieces = split_sentences(text, limit) if limit else [text]
+    if not pieces:
+        pieces = [text]
+    parts: list[bytes] = []
+    for i, piece in enumerate(pieces):
+        if i > 0:
+            parts.append(silence_wav(_SPLIT_PAUSE_MS))
+        parts.append(await _synthesise_with_retry(
+            tts, piece, voice_id, emotion=emotion, reference_audio_path=reference_audio_path,
+        ))
+    audio = parts[0] if len(parts) == 1 else assemble_wav_bytes(parts)
+    if settings.audio_normalize:
+        audio = adjust_level(audio)
+    return audio
+
+
 async def _synthesise_segments(
     chapter_id: int,
     session: Session,
@@ -74,7 +144,11 @@ async def _synthesise_segments(
     attempt, see _generate_chapter_async). Passed by book-driven generation
     (Lot C, audit 2026-07-02, polling Book.status) and by standalone chapter
     generation (polling Chapter.cancel_requested, see _make_chapter_stop_checker).
+
+    Les offsets incluent les silences insérés entre répliques (la surbrillance de la
+    transcription en dépend) ; `duration_ms` est la durée parlée seule.
     """
+    settings = _audio_settings()
     segments = session.exec(
         select(Segment).where(Segment.chapter_id == chapter_id).order_by(Segment.position)
     ).all()
@@ -114,25 +188,55 @@ async def _synthesise_segments(
     non_cloned = [i for i, vid in enumerate(voice_ids) if ref_path.get(vid) is None]
     cloned = [i for i, vid in enumerate(voice_ids) if ref_path.get(vid) is not None]
 
+    # Concurrence (BE-2) : un moteur cloud (EdgeTTS…) est borné par la latence réseau, pas par
+    # la machine ; plusieurs requêtes en vol divisent la durée d'autant. 1 = séquentiel (GPU
+    # local). Les tâches sont créées dans l'ordre : avec un sémaphore de 1, l'ordre
+    # « non clonées puis clonées » est conservé exactement.
+    tts_conc = getattr(tts, "supports_concurrency", 1)
+    concurrency = max(1, settings.tts_concurrency or (tts_conc if isinstance(tts_conc, int) else 1))
+    semaphore = asyncio.Semaphore(concurrency)
     chunks: dict[int, bytes] = {}
-    for i in non_cloned + cloned:
-        if should_abort is not None and should_abort():
-            return None
-        chunks[i] = await _synthesise_with_retry(
-            tts, segments[i].text, voice_ids[i],
-            emotion=segments[i].emotion,
-            reference_audio_path=ref_path.get(voice_ids[i]),
-        )
+    aborted = False
+
+    async def _run(i: int) -> None:
+        nonlocal aborted
+        async with semaphore:
+            if aborted or (should_abort is not None and should_abort()):
+                aborted = True
+                return
+            chunks[i] = await _synthesise_text(
+                tts, segments[i].text, voice_ids[i],
+                emotion=segments[i].emotion,
+                reference_audio_path=ref_path.get(voice_ids[i]),
+                settings=settings,
+            )
+
+    jobs = [asyncio.ensure_future(_run(i)) for i in non_cloned + cloned]
+    try:
+        await asyncio.gather(*jobs)
+    except BaseException:
+        for job in jobs:
+            job.cancel()
+        await asyncio.gather(*jobs, return_exceptions=True)
+        raise
+    if aborted:
+        return None
 
     wav_chunks: list[bytes] = []
     timing: list[tuple[int, int, int]] = []  # (seg_id, offset_ms, duration_ms)
     offset = 0
     for i, seg in enumerate(segments):
         chunk = chunks[i]
-        dur = _wav_duration_ms(chunk)
+        dur = wav_duration_ms(chunk)
         timing.append((seg.id, offset, dur))
-        offset += dur
         wav_chunks.append(chunk)
+        offset += dur
+        gap = pause_after_ms(
+            voice_ids[i], voice_ids[i + 1] if i + 1 < len(segments) else None, settings,
+        )
+        if gap:
+            wav_chunks.append(silence_wav(gap))
+            offset += gap
 
     return assemble_wav_bytes(wav_chunks), timing
 

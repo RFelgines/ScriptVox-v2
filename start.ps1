@@ -1,5 +1,9 @@
 # Launch the 3 ScriptVox processes (API, Huey worker, frontend) in parallel
 # and stop all of them together on Ctrl-C. Mirrors start.sh — keep both in sync.
+#
+# Usage:  .\start.ps1          production frontend (fast; rebuilt automatically when sources changed)
+#         .\start.ps1 -Dev     Next.js dev server (hot reload; slower)
+param([switch]$Dev)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -30,18 +34,42 @@ function Stop-All {
 }
 
 try {
-    Write-Host "==> Starting API (uvicorn) on :8000"
+    Write-Host "==> Starting API (uvicorn) on 127.0.0.1:8000"
     $procs += Start-Process -FilePath ".venv\Scripts\uvicorn.exe" `
-        -ArgumentList "app.main:app", "--port", "8000" -NoNewWindow -PassThru
+        -ArgumentList "app.main:app", "--host", "127.0.0.1", "--port", "8000" -NoNewWindow -PassThru
 
     Write-Host "==> Starting Huey worker"
     $procs += Start-Process -FilePath ".venv\Scripts\python.exe" `
         -ArgumentList "-m", "huey.bin.huey_consumer", "app.workers.tasks.huey", "-k", "thread", "-w", "1" `
         -NoNewWindow -PassThru
 
-    Write-Host "==> Starting frontend (Next.js) on :3000"
-    $procs += Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev" `
-        -WorkingDirectory "frontend" -NoNewWindow -PassThru
+    if ($Dev) {
+        Write-Host "==> Starting frontend (Next.js, dev mode) on :3000"
+        $procs += Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev" `
+            -WorkingDirectory "frontend" -NoNewWindow -PassThru
+    } else {
+        # Production build (audit 2026-09-25, UX-10): the dev server compiles every page on
+        # first visit. Rebuild only when the sources are newer than the last build.
+        $buildId = "frontend\.next\BUILD_ID"
+        $needBuild = -not (Test-Path $buildId)
+        if (-not $needBuild) {
+            $built = (Get-Item $buildId).LastWriteTime
+            $newest = Get-ChildItem "frontend\src", "frontend\package.json" -Recurse -File |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            $needBuild = $newest.LastWriteTime -gt $built
+        }
+        if ($needBuild) {
+            Write-Host "==> Building frontend (first run or sources changed)"
+            Push-Location frontend
+            try {
+                npm run build
+                if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+            } finally { Pop-Location }
+        }
+        Write-Host "==> Starting frontend (Next.js, production) on 127.0.0.1:3000"
+        $procs += Start-Process -FilePath "npm.cmd" -ArgumentList "run", "start", "--", "-H", "127.0.0.1" `
+            -WorkingDirectory "frontend" -NoNewWindow -PassThru
+    }
 
     Write-Host ""
     Write-Host "API:      http://localhost:8000  (docs at /docs)"

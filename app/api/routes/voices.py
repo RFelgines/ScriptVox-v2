@@ -52,6 +52,7 @@ def _voice_to_response(voice: Voice, locale: str | None) -> VoiceResponse:
         locale=locale,
         is_favorite=voice.is_favorite,
         has_reference_audio=voice.reference_audio_path is not None,
+        has_reference_text=bool(voice.reference_text),
         has_sample=_has_sample(voice),
     )
 
@@ -71,6 +72,7 @@ async def create_voice(
     file: UploadFile = File(..., description="Reference audio (MP3, WAV, FLAC, 3-15 s)"),
     name: str = Form(...),
     gender: Optional[Gender] = Form(None),
+    reference_text: Optional[str] = Form(None, description="Transcription de l'audio de référence (clonage complet)"),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> VoiceResponse:
@@ -93,8 +95,14 @@ async def create_voice(
     ref_dir = DATA_DIR / "voices" / slug
     ref_dir.mkdir(parents=True, exist_ok=True)
     ref_path = ref_dir / f"ref{ext}"
+    ref_text = (reference_text or "").strip() or None
     try:
         ref_path.write_bytes(audio_bytes)
+        sidecar = ref_path.with_suffix(".txt")
+        if ref_text:
+            sidecar.write_text(ref_text, encoding="utf-8")
+        else:
+            sidecar.unlink(missing_ok=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save reference audio: {exc}") from exc
 
@@ -104,6 +112,7 @@ async def create_voice(
         kind=VoiceKind.CLONED,
         gender=gender,
         reference_audio_path=str(ref_path),
+        reference_text=ref_text,
     )
     session.add(voice)
     session.commit()
@@ -157,6 +166,7 @@ def delete_voice(
         ref = Path(voice.reference_audio_path)
         if ref.exists():
             ref.unlink()
+        ref.with_suffix(".txt").unlink(missing_ok=True)  # transcription de référence
         try:
             ref.parent.rmdir()
         except OSError:

@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getQueue } from "@/lib/api";
 import ThemeToggle from "./ThemeToggle";
 import LanguageToggle from "./LanguageToggle";
 import { useT } from "@/lib/i18n/LanguageContext";
@@ -27,6 +29,35 @@ function isActive(pathname: string, href: string): boolean {
 export default function Nav() {
   const pathname = usePathname();
   const t = useT();
+  // Nombre de chapitres en cours / en file : pastille sur l'onglet Génération, pour savoir
+  // qu'un traitement tourne sans ouvrir la page (l'onglet reste, il détaille la file).
+  const [running, setRunning] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function tick() {
+      if (document.visibilityState !== "visible") {
+        timer = setTimeout(tick, 8000);
+        return;
+      }
+      getQueue()
+        .then((queue) => {
+          if (active) setRunning(queue.length);
+        })
+        .catch(() => {
+          if (active) setRunning(0);
+        })
+        .finally(() => {
+          if (active) timer = setTimeout(tick, 8000);
+        });
+    }
+    tick();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur">
@@ -50,6 +81,14 @@ export default function Nav() {
                 }`}
               >
                 {t.nav[tab.key]}
+                {tab.href === "/generation" && running > 0 && (
+                  <span
+                    title={t.library2.generationBadge(running)}
+                    className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground"
+                  >
+                    {running}
+                  </span>
+                )}
               </Link>
             );
           })}

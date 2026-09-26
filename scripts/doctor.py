@@ -12,6 +12,7 @@ anything (e.g. `python3 scripts/doctor.py` with a bare system Python).
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -54,13 +55,49 @@ def parse_env_file(path: Path) -> dict[str, str]:
 
 def check_python() -> None:
     version = sys.version.split()[0]
-    if sys.version_info >= (3, 11):
-        ok(f"Python {version}")
-    else:
+    if sys.version_info < (3, 11):
         warn(
-            f"Python {version} — 3.11+ recommended",
+            f"Python {version} — 3.11+ required",
             "download: https://www.python.org/downloads/",
         )
+    elif sys.version_info >= (3, 14):
+        warn(
+            f"Python {version} — 3.14 is not supported yet (pinned packages ship no wheel for it)",
+            "use Python 3.11 – 3.13 (3.12 recommended, see .python-version), then re-run setup",
+        )
+    else:
+        ok(f"Python {version}")
+
+
+def check_ffmpeg(env: dict[str, str]) -> None:
+    configured = env.get("FFMPEG_PATH", "")
+    if (configured and Path(configured).is_file()) or shutil.which("ffmpeg"):
+        ok("ffmpeg found (chaptered M4B audiobook export enabled)")
+    else:
+        info(
+            "ffmpeg not found — the MP3 is still produced, but the chaptered M4B export is disabled. "
+            "Install ffmpeg (https://ffmpeg.org/download.html) or set FFMPEG_PATH in .env"
+        )
+
+
+def plugin_names(kind: str, env: dict[str, str]) -> list[str]:
+    """Plugin file names (without importing them) — enough to recognise a custom provider."""
+    raw = env.get("PLUGINS_DIR", "plugins") or "plugins"
+    folder = Path(raw) if Path(raw).is_absolute() else ROOT / raw
+    folder = folder / kind
+    if not folder.is_dir():
+        return []
+    return sorted(p.stem for p in folder.glob("*.py") if not p.name.startswith("_"))
+
+
+def http_reachable(url: str, timeout: float = 3.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout):
+            return True
+    except urllib.error.HTTPError:
+        return True  # the server answered (e.g. 401/404 on this path) — it is up
+    except Exception:
+        return False
 
 
 def check_node() -> None:
@@ -113,7 +150,12 @@ def check_ollama(base_url: str) -> None:
         )
 
 
-def check_gemini(api_key: str) -> None:
+def check_gemini(api_key: str, model: str = "") -> None:
+    if model.startswith("gemini-2."):
+        warn(
+            f"GEMINI_MODEL={model!r} is retired or about to be (2.0 shut down 2026-06-01, 2.5 on 2026-10-16)",
+            "pick a current model in Settings (or list them with client.models.list()), e.g. gemini-3.1-flash-lite",
+        )
     if api_key and api_key != "your_gemini_api_key_here":
         ok("GEMINI_API_KEY set")
     else:
@@ -126,20 +168,71 @@ def check_gemini(api_key: str) -> None:
 
 def check_llm_provider(env: dict[str, str]) -> None:
     provider = env.get("LLM_PROVIDER", "")
+    plugins = plugin_names("llm", env)
     if provider == "ollama":
         ok("LLM_PROVIDER=ollama (fully local)")
         check_ollama(env.get("OLLAMA_BASE_URL", "http://localhost:11434"))
     elif provider == "gemini":
         ok("LLM_PROVIDER=gemini (cloud, fastest to set up)")
-        check_gemini(env.get("GEMINI_API_KEY", ""))
+        check_gemini(env.get("GEMINI_API_KEY", ""), env.get("GEMINI_MODEL", ""))
+    elif provider == "openai_compatible":
+        base = env.get("OPENAI_BASE_URL", "http://localhost:1234/v1")
+        ok("LLM_PROVIDER=openai_compatible (any OpenAI-API server)")
+        if not env.get("OPENAI_MODEL"):
+            warn("OPENAI_MODEL is empty", "set the model name your server exposes (see Settings > Models)")
+        if http_reachable(base.rstrip("/") + "/models"):
+            ok(f"server reachable at {base}")
+        else:
+            warn(f"server not reachable at {base}", "start LM Studio / llama-server / vLLM, or fix OPENAI_BASE_URL")
+    elif provider and provider in plugins:
+        ok(f"LLM_PROVIDER={provider} (plugin plugins/llm/{provider}.py)")
     elif provider:
-        warn(f"LLM_PROVIDER={provider!r} is not a recognised value (ollama | gemini)")
+        warn(
+            f"LLM_PROVIDER={provider!r} is not a recognised value "
+            f"(ollama | gemini | openai_compatible{' | ' + ' | '.join(plugins) if plugins else ''})"
+        )
     else:
         warn(
             "LLM_PROVIDER not set",
             "edit .env — set LLM_PROVIDER=gemini (+ GEMINI_API_KEY) for the fastest path,",
             "or LLM_PROVIDER=ollama for a fully local setup (see README Quick start).",
         )
+
+
+def check_qwen_gpu() -> None:
+    """Runs torch in the project's own venv (never imported in this stdlib-only script)."""
+    venv_python = ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    python = str(venv_python if venv_python.exists() else sys.executable)
+    code = (
+        "import torch;"
+        "print(torch.cuda.is_available(), getattr(torch.version, 'hip', None), "
+        "torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
+    )
+    try:
+        out = subprocess.run([python, "-c", code], capture_output=True, text=True, timeout=120)
+    except Exception as exc:  # noqa: BLE001
+        warn(f"could not run the GPU check: {exc}")
+        return
+    if out.returncode != 0:
+        warn(
+            "PyTorch is not installed in the project's Python",
+            "NVIDIA: pip install torch --index-url https://download.pytorch.org/whl/cu128",
+            "AMD Radeon: install PyTorch for ROCm (see requirements-qwen.txt), NOT the CUDA build",
+            "then: pip install -r requirements-qwen.txt",
+        )
+        return
+    available, hip, name = (out.stdout.strip().split(" ", 2) + ["", ""])[:3]
+    if available != "True":
+        warn(
+            "PyTorch is installed but sees no GPU (torch.cuda.is_available() is False)",
+            "AMD Radeon: this is what a CUDA build of PyTorch does — install the ROCm build (requirements-qwen.txt)",
+            "NVIDIA: check the driver / CUDA version matching your torch build",
+        )
+    else:
+        backend = f"ROCm/HIP {hip}" if hip and hip != "None" else "CUDA"
+        ok(f"GPU visible to PyTorch via {backend}: {name.strip()}")
+        if hip and hip != "None":
+            info("AMD tip: keep QWEN_ATTN=sdpa; if the driver resets, set TORCH_BLAS_PREFER_HIPBLASLT=0")
 
 
 def check_tts_provider(env: dict[str, str]) -> None:
@@ -158,16 +251,40 @@ def check_tts_provider(env: dict[str, str]) -> None:
                 "see README > Piper binary (local TTS)",
             )
     elif provider == "qwen":
-        info("TTS_PROVIDER=qwen — GPU-only, requires `pip install -r requirements-qwen.txt` (not checked here)")
+        ok("TTS_PROVIDER=qwen (local GPU)")
+        check_qwen_gpu()
+    elif provider == "openai_tts":
+        base = env.get("TTS_HTTP_BASE_URL", "http://localhost:8880/v1")
+        ok("TTS_PROVIDER=openai_tts (any /v1/audio/speech server)")
+        if http_reachable(base):
+            ok(f"server reachable at {base}")
+        else:
+            warn(f"server not reachable at {base}", "start your TTS server or fix TTS_HTTP_BASE_URL")
+    elif provider == "command":
+        command = env.get("TTS_COMMAND", "")
+        if not command:
+            warn("TTS_PROVIDER=command but TTS_COMMAND is empty", "see .env.example for the placeholders")
+        else:
+            exe = command.split()[0].strip('"')
+            if shutil.which(exe) or Path(exe).is_file():
+                ok(f"TTS_PROVIDER=command, executable found: {exe}")
+            else:
+                warn(f"TTS_COMMAND executable not found: {exe}")
+    elif provider in plugin_names("tts", env):
+        ok(f"TTS_PROVIDER={provider} (plugin plugins/tts/{provider}.py)")
     else:
-        warn(f"TTS_PROVIDER={provider!r} is not a recognised value (edgetts | piper | qwen)")
+        extra = plugin_names("tts", env)
+        warn(
+            f"TTS_PROVIDER={provider!r} is not a recognised value "
+            f"(edgetts | piper | qwen | openai_tts | command{' | ' + ' | '.join(extra) if extra else ''})"
+        )
 
 
 def main() -> int:
     print("=== ScriptVox environment check ===")
     check_python()
     check_node()
-    has_venv = check_venv()
+    check_venv()
     check_frontend_deps()
 
     env_path = ROOT / ".env"
@@ -181,6 +298,7 @@ def main() -> int:
         env = parse_env_file(env_path)
         check_llm_provider(env)
         check_tts_provider(env)
+        check_ffmpeg(env)
 
     print()
     if warnings:

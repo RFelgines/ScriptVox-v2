@@ -1,19 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 
 type Theme = "light" | "dark";
 
+// Le thème vit dans l'attribut data-theme de <html> (posé avant l'hydratation par le script
+// anti-flash de layout.tsx). useSyncExternalStore avec un snapshot serveur « dark » : le premier
+// rendu client est identique au HTML serveur, puis React resynchronise sur l'attribut réel — plus
+// d'erreur d'hydratation en thème clair (l'ancien initialiseur lisait le DOM dès le premier
+// rendu : « light » côté client contre « dark » côté serveur, audit navigateur 2026-09-25).
+// Sombre = absence d'attribut (défaut implicite de :root), pas une valeur "dark" explicite.
+function subscribe(callback: () => void): () => void {
+  const observer = new MutationObserver(callback);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+
+function getSnapshot(): Theme {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+function getServerSnapshot(): Theme {
+  return "dark";
+}
+
 export default function ThemeToggle() {
-  // Initialiseur paresseux : lit le DOM déjà corrigé par le script anti-flash
-  // de layout.tsx (cf. doc Next "preventing-flash-before-hydration", section
-  // "Syncing with React state") -- état React et attribut data-theme restent
-  // d'accord dès le premier rendu. Sombre = absence d'attribut (défaut
-  // implicite de :root), pas une valeur "dark" explicite.
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof document === "undefined") return "dark";
-    return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
-  });
+  const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -26,7 +38,6 @@ export default function ThemeToggle() {
       document.documentElement.removeAttribute("data-theme");
     }
     localStorage.setItem("theme", next);
-    setTheme(next);
   }
 
   return (

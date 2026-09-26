@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BookSummary, coverUrl, deleteBook } from "@/lib/api";
 import StatusBadge from "@/components/ui/StatusBadge";
+import { useFeedback } from "@/components/ui/Feedback";
 import { useT } from "@/lib/i18n/LanguageContext";
 
 export default function BookCard({
@@ -14,20 +15,61 @@ export default function BookCard({
   onDeleted: () => void;
 }) {
   const t = useT();
+  const { toast, confirm } = useFeedback();
   const [imgOk, setImgOk] = useState(true);
-  const [deleting, setDeleting] = useState(false);
+  // Suppression différée : la carte disparaît tout de suite, la suppression réelle n'a lieu
+  // qu'après 6 s, laissant le temps de cliquer « Annuler » (audit 2026-09-25, UX-4).
+  const [hidden, setHidden] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  const commitRef = useRef<() => void>(() => {});
   const showCover = Boolean(book.cover_path) && imgOk;
 
-  function handleDelete() {
-    if (!window.confirm(t.library.deleteConfirm(book.title))) return;
-    setDeleting(true);
-    deleteBook(book.id)
-      .then(onDeleted)
-      .catch((e) => {
-        window.alert(String(e));
-        setDeleting(false);
-      });
+  useEffect(() => {
+    commitRef.current = () => {
+      timerRef.current = null;
+      deleteBook(book.id)
+        .then(onDeleted)
+        .catch((e) => {
+          setHidden(false);
+          toast(e instanceof Error ? e.message : String(e), { tone: "error" });
+        });
+    };
+  });
+
+  // Quitter la page pendant le délai = confirmer la suppression demandée.
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        commitRef.current();
+      }
+    },
+    [],
+  );
+
+  async function handleDelete() {
+    const ok = await confirm({
+      title: t.feedback.deleteConfirmTitle,
+      message: book.title,
+      danger: true,
+    });
+    if (!ok) return;
+    setHidden(true);
+    timerRef.current = window.setTimeout(() => commitRef.current(), 6000);
+    toast(t.feedback.bookDeleted(book.title), {
+      durationMs: 6000,
+      action: {
+        label: t.feedback.undo,
+        onClick: () => {
+          if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+          setHidden(false);
+        },
+      },
+    });
   }
+
+  if (hidden) return null;
 
   return (
     <div className="group relative transition-transform duration-200 ease-out hover:-translate-y-1.5 hover:scale-[1.02]">
@@ -85,11 +127,10 @@ export default function BookCard({
 
       <button
         onClick={handleDelete}
-        disabled={deleting}
         title={t.library.deleteAriaLabel}
         className="absolute top-2.5 right-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-xs text-white/80 backdrop-blur-sm transition-colors hover:bg-danger/80 hover:text-white disabled:opacity-50"
       >
-        {deleting ? "…" : "✕"}
+        ✕
       </button>
     </div>
   );

@@ -202,42 +202,27 @@ check("-1.0 -> -32767", _arr[2] == -32767)
 check("clamp > 1.0 -> 32767", _arr[3] == 32767)
 check("clamp < -1.0 -> -32767", _arr[4] == -32767)
 
-# ── Section 8: _resample_to_output (audioop.ratecv, stdlib) ─────────────────
+# ── Section 8: _resample_to_output (miniaudio, plus d'audioop depuis l'audit 2026-09-25) ──
 
-section("_resample_to_output: identité à 22050 Hz, réduction proportionnelle 24000->22050")
+section("_resample_to_output: identité à 24000 Hz ; conversion proportionnelle depuis 22050 Hz")
 
 _silence_1s = b"\x00\x00" * _MODEL_SAMPLE_RATE  # 1 s de silence 16-bit @ 24000 Hz
 _same = _resample_to_output(_silence_1s, _OUTPUT_SAMPLE_RATE)
-check("identité si déjà 22050 Hz (no-op)", _same == _silence_1s)
+check("identité si déjà à la fréquence de sortie (no-op)", _same == _silence_1s)
+check("fréquence de sortie == fréquence native du modèle (24000)",
+      _OUTPUT_SAMPLE_RATE == _MODEL_SAMPLE_RATE == 24000)
 
-_resampled = _resample_to_output(_silence_1s, _MODEL_SAMPLE_RATE)
-_expected_len = len(_silence_1s) * _OUTPUT_SAMPLE_RATE // _MODEL_SAMPLE_RATE
+_silence_22k = b"\x00\x00" * 22050  # 1 s @ 22050 Hz
+_resampled = _resample_to_output(_silence_22k, 22050)
+_expected_len = len(_silence_22k) * _OUTPUT_SAMPLE_RATE // 22050
 check(
-    "longueur réduite proportionnellement (24000 Hz -> 22050 Hz)",
-    abs(len(_resampled) - _expected_len) <= 4,
+    "longueur augmentée proportionnellement (22050 Hz -> 24000 Hz)",
+    abs(len(_resampled) - _expected_len) <= 64,
+    f"{len(_resampled)} vs {_expected_len}",
 )
 
-# ── Section 8b: audioop absent (Python 3.13+, m10) — garde d'import ──────────
-# audioop a été retiré de la stdlib en Python 3.13 (PEP 594) ; le module doit
-# rester importable (audioop=None), seule une resampling réelle doit échouer,
-# avec un TTSError clair au lieu d'un NameError/AttributeError opaque.
-
-section("_resample_to_output: audioop absent + déjà 22050 Hz -> no-op, pas d'erreur")
-with patch.object(qwen_mod, "audioop", None):
-    _noop = _resample_to_output(_silence_1s, _OUTPUT_SAMPLE_RATE)
-    check("identité préservée (aucun resampling nécessaire)", _noop == _silence_1s)
-
-section("_resample_to_output: audioop absent + resampling requis -> TTSError clair")
-with patch.object(qwen_mod, "audioop", None):
-    try:
-        _resample_to_output(_silence_1s, _MODEL_SAMPLE_RATE)
-        check("TTSError levée quand audioop est absent et qu'un resampling est nécessaire",
-              False, "aucune exception levée")
-    except TTSError as exc:
-        check("message mentionne audioop", "audioop" in str(exc), str(exc))
-        check("message mentionne Python 3.13", "3.13" in str(exc), str(exc))
-    except Exception as exc:
-        check("TTSError attendue", False, f"{type(exc).__name__}: {exc}")
+section("qwen.py n'importe plus audioop (retiré de Python 3.13+)")
+check("aucun attribut audioop dans le module", not hasattr(qwen_mod, "audioop"))
 
 # ── Section 9: _ensure_model — ImportError (deps absentes) -> TTSError clair ─
 
@@ -288,9 +273,9 @@ def _fake_import_deps():
     return _FakeTorch(), _FakeModelCls
 
 
-# ── Section 10: happy path — WAV valide, resamplé à 22050 Hz ─────────────────
+# ── Section 10: happy path — WAV valide, à 24000 Hz ─────────────────
 
-section("synthesise: happy path (modèle mocké) -> WAV 22050 Hz mono 16-bit")
+section("synthesise: happy path (modèle mocké) -> WAV 24000 Hz mono 16-bit")
 
 
 async def _call_happy(emotion=None):

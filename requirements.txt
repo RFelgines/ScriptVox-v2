@@ -1,5 +1,7 @@
 # ─── ScriptVox — pinned dependencies (major.minor) ───────────────────────────
-# Not installed yet. Run: pip install -r requirements.txt
+# Run: pip install -r requirements.txt
+# Python 3.11 - 3.13 (see .python-version). Python 3.14 is not supported yet: several pinned
+# packages (pydantic-core...) ship no 3.14 wheel and need a Rust toolchain to build.
 #
 # Compatibility note:
 #   SQLModel 0.0.38 requires SQLAlchemy 2.x and supports Pydantic V2 natively
@@ -44,9 +46,16 @@ miniaudio~=1.2       # MP3->PCM decoder for EdgeTTS output; no native lib / no b
 # ─── Audio encoding ───────────────────────────────────────────────────────────
 lameenc~=1.8         # WAV->MP3 encoder (pure Python, no native lib / no binary required)
 
+# ─── Audio processing ─────────────────────────────────────────────────────────
+# Vectorised PCM conversion, silences and loudness (was a pure-Python loop over ~86 M samples
+# per hour of audio). Also required by torch, so already present for Qwen3-TTS users.
+numpy>=1.26
+
 # ─── EPUB parsing ─────────────────────────────────────────────────────────────
 ebooklib~=0.18
 beautifulsoup4~=4.12
+# ebooklib parses XML: lxml >= 5 no longer resolves external entities by default (security).
+lxml>=5.0
 
 # ─── File upload (required by FastAPI Form/File) ──────────────────────────────
 python-multipart~=0.0.20

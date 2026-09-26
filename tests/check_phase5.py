@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT))
 FIXTURE_EPUB = ROOT / "tests" / "fixtures" / "test.epub"
 
 os.environ.update({
+    # Assemblage brut : ni pauses ni normalisation de niveau (testés dans check_phase46).
+    "AUDIO_PAUSE_SAME_VOICE_MS": "0", "AUDIO_PAUSE_VOICE_CHANGE_MS": "0", "AUDIO_NORMALIZE": "false",
     "LLM_PROVIDER": "ollama",
     "TTS_PROVIDER": "piper",
     "OLLAMA_BASE_URL": "http://localhost:11434",
@@ -46,7 +48,7 @@ def die(msg: str) -> None:
     sys.exit(1)
 
 
-def _make_wav_bytes(n_frames: int, framerate: int = 22050) -> bytes:
+def _make_wav_bytes(n_frames: int, framerate: int = 24000) -> bytes:
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
@@ -165,7 +167,7 @@ with tempfile.TemporaryDirectory() as _hp_tmp:
         _hp_framerate = _wf.getframerate()
     assert _hp_nframes > 0, "WAV file is empty"
     assert _hp_nchannels == 1, f"Expected 1 channel, got {_hp_nchannels}"
-    assert _hp_framerate == 22050, f"Expected 22050 Hz, got {_hp_framerate}"
+    assert _hp_framerate == 24000, f"Expected 24000 Hz, got {_hp_framerate}"
     ok(f"WAV valid on disk: {_hp_nframes} frames, {_hp_nchannels}ch, {_hp_framerate}Hz")
 
     # ── 4. All Characters have voice_id ───────────────────────────────────────

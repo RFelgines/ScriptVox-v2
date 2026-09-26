@@ -1,11 +1,17 @@
 @import "tailwindcss";
 
+/* Le mode sombre de l'app est le DÉFAUT (aucun attribut) et le clair est [data-theme="light"] :
+   les variantes `dark:` de Tailwind doivent suivre CE réglage, pas la préférence système
+   (sinon un badge reste clair sur fond sombre quand le thème choisi diffère du système). */
+@custom-variant dark (&:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *));
+
 /* "inline" : nécessaire pour next/font (sa variable n'est posée que sur la
    classe appliquée à <html>, pas sur :root -- Tailwind doit la référencer
    telle quelle plutôt que tenter de la résoudre lui-même). */
 @theme inline {
   --font-sans: var(--font-outfit);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-fraunces);
 }
 
 /* PAS "inline" ici : "inline" FIGE la valeur résolue au moment de la

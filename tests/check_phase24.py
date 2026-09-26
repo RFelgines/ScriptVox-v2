@@ -88,6 +88,7 @@ from app.services.tts.piper import PiperProvider  # noqa: E402
 from app.services.tts.qwen import QwenTTSProvider  # noqa: E402
 from app.workers.tasks import (  # noqa: E402
     _generate_book_impl,
+    _release_all_tts,
     _release_qwen_gpu,
     _synthesise_chapter_worker,
 )
@@ -146,7 +147,10 @@ except Exception as exc:
 # livre unifiée sur le chemin chapitre) -- on exerce maintenant le point d'entrée
 # public _generate_book_impl, qui délègue à _synthesise_chapter_worker (déjà
 # couvert individuellement en section 6 ci-dessous) pour chaque chapitre.
-section("F1b: _generate_book_impl() libère provider._model après une génération réussie")
+# BE-1 (audit 2026-09-25) : le modèle RESTE chargé d'un chapitre à l'autre (cache du worker) ;
+# il est libéré sur demande (release_qwen_vram), à l'inactivité, ou avant une analyse LLM.
+section("F1b/BE-1: _generate_book_impl() garde le modèle chargé, _release_all_tts() le libère")
+_release_all_tts()
 _e4 = _make_test_engine()
 with tempfile.TemporaryDirectory() as _tmp4:
     _src4 = str(Path(_tmp4) / "book.epub")
@@ -180,12 +184,15 @@ with tempfile.TemporaryDirectory() as _tmp4:
         _b4_after = _s.get(Book, _b4_id)
         check("génération réussie (livre DONE)", _b4_after.status == BookStatus.DONE,
               f"got {_b4_after.status}")
-    check("provider._model libéré (None) après succès", _provider4._model is None,
+    check("provider._model reste chargé après succès (cache BE-1)", _provider4._model is not None)
+    check("_release_all_tts() décharge 1 provider", _release_all_tts() == 1)
+    check("provider._model libéré (None) après _release_all_tts()", _provider4._model is None,
           f"got {_provider4._model!r}")
 
 
 # ── 5. _generate_book_impl libère la VRAM même après un abandon (/stop) ──────
-section("F1b: _generate_book_impl() libère provider._model même après un /stop mi-chapitre")
+section("F1b/BE-1: après un /stop mi-chapitre le modèle reste en cache puis se libère sur demande")
+_release_all_tts()
 _e5 = _make_test_engine()
 with tempfile.TemporaryDirectory() as _tmp5:
     _src5 = str(Path(_tmp5) / "book.epub")
@@ -230,12 +237,15 @@ with tempfile.TemporaryDirectory() as _tmp5:
               f"got {_b5_after.status}")
     check("un seul segment synthétisé avant l'abandon (granularité segment, Lot C1)",
           _calls5["n"] == 1, f"got {_calls5['n']}")
-    check("provider._model libéré (None) même après un abandon", _provider5._model is None,
+    check("provider._model conservé après un abandon (cache)", _provider5._model is not None)
+    _release_all_tts()
+    check("provider._model libéré (None) après _release_all_tts()", _provider5._model is None,
           f"got {_provider5._model!r}")
 
 
 # ── 6. _synthesise_chapter_worker libère la VRAM après génération d'un chapitre
-section("F1b: _synthesise_chapter_worker() libère provider._model après un chapitre")
+section("F1b/BE-1: _synthesise_chapter_worker() garde le modèle chargé après un chapitre")
+_release_all_tts()
 _e6 = _make_test_engine()
 with Session(_e6) as _s:
     _b6 = Book(title="ChapterRelease", source_path="x.epub")
@@ -264,7 +274,9 @@ with (
     _wav6, _timing6 = asyncio.run(_synthesise_chapter_worker(_ch6_id, _e6))
 
 check("chapitre synthétisé (WAV non vide)", len(_wav6) > 0, f"got {len(_wav6)} bytes")
-check("provider._model libéré (None) après génération d'un chapitre", _provider6._model is None,
+check("provider._model conservé après un chapitre (cache)", _provider6._model is not None)
+_release_all_tts()
+check("provider._model libéré (None) après _release_all_tts()", _provider6._model is None,
       f"got {_provider6._model!r}")
 
 

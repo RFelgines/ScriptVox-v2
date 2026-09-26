@@ -1,23 +1,15 @@
-from app.config import VALID_TTS_PROVIDERS, Settings
+from app.config import Settings
+from app.services import registry
 from app.services.tts.base import BaseTTSProvider
 
 
 def get_tts_provider(
     settings: Settings, override: str | None = None, language: str | None = None,
+    options: dict | None = None,
 ) -> BaseTTSProvider:
+    """Instancie le provider TTS. `override` = nom choisi (livre / Paramètres) ; `options` =
+    réglages à chaud (model, base_url, locale…, voir AppSetting.tts_options). Les plugins
+    (plugins/tts/) sont résolus par le registre. Un nom inconnu (ex. « elevenlabs » resté sur
+    un livre avant sa suppression) lève une erreur explicite au lieu de retomber sur Piper."""
     provider = override or settings.tts_provider
-    if provider == "edgetts":
-        from app.services.tts.edgetts import EdgeTTSProvider
-        return EdgeTTSProvider(settings, language=language)
-    if provider == "qwen":
-        from app.services.tts.qwen import QwenTTSProvider
-        return QwenTTSProvider(settings, language=language)
-    if provider == "piper":
-        from app.services.tts.piper import PiperProvider
-        return PiperProvider(settings)
-    # Any other value (e.g. a stale "elevenlabs" stored on a Book before its removal,
-    # audit 2026-07-02 Lot D) used to fall through to Piper silently -- surfacing the
-    # wrong voice with no error. Fail loudly instead.
-    raise ValueError(
-        f"Unknown tts_provider {provider!r}. Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
-    )
+    return registry.build_tts_provider(provider, settings, options, language)

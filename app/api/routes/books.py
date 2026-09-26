@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session, func, select
 
-from app.config import VALID_TTS_PROVIDERS, get_settings
+from app.config import get_settings
+from app.services import registry
 from app.core.db import get_session
 from app.core.enums import BookStatus, ChapterStatus, MergeSuggestionStatus, SegmentType
 from app.core.uploads import read_upload_capped
@@ -21,6 +22,7 @@ from app.schemas.book import (
     BookUpdate,
     ChapterPriorityUpdate,
     ChapterResponse,
+    ChapterUpdate,
     CharacterResponse,
     MergeSuggestionResponse,
     RegenerateSegmentRequest,
@@ -32,7 +34,7 @@ from app.services.voice_assignment import NARRATOR_VOICE_ID
 from app.workers.tasks import (
     analyze_book,
     generate_book,
-    generate_chapter,
+    generate_chapter,  # noqa: F401 — patchable par les tests
     generate_chapter_queue_pump,
     generate_segment,
 )
@@ -108,12 +110,12 @@ def patch_book(
     fields = body.model_dump(exclude_unset=True)
     if "tts_provider" in fields:
         tts_provider = fields["tts_provider"]
-        if tts_provider is not None and tts_provider not in VALID_TTS_PROVIDERS:
+        if tts_provider is not None and tts_provider not in registry.tts_provider_names():
             raise HTTPException(
                 status_code=422,
                 detail=(
                     f"Invalid tts_provider {tts_provider!r}. "
-                    f"Accepted values: {sorted(VALID_TTS_PROVIDERS)}"
+                    f"Accepted values: {registry.tts_provider_names()}"
                 ),
             )
         book.tts_provider = tts_provider
@@ -157,9 +159,20 @@ def trigger_stop(book_id: int, session: Session = Depends(get_session)) -> BookR
         )
     # Lire le statut D'ORIGINE avant de l'écraser -- c'est lui qui dit quelle
     # étape était en cours (audit 2026-07-11, T2.3).
+    was_generating = book.status == BookStatus.GENERATING
     book.failed_stage = "analysis" if book.status == BookStatus.PROCESSING else "generation"
     book.status = BookStatus.FAILED
     book.error_message = "Arrêté par l'utilisateur."
+    book.stage = None
+    book.eta_seconds = None
+    if was_generating:
+        # La génération passe par la file de chapitres (BE-3) : vider la file de CE livre et
+        # demander l'arrêt du chapitre en cours, sinon la pompe continuerait sur ses chapitres.
+        for chapter in session.exec(select(Chapter).where(Chapter.book_id == book_id)).all():
+            if chapter.status == ChapterStatus.GENERATING:
+                chapter.cancel_requested = True
+            chapter.queued_at = None
+            session.add(chapter)
     session.add(book)
     session.commit()
     session.refresh(book)
@@ -191,7 +204,11 @@ def trigger_generate(
     # treats an empty chapter list as trivially "complete") or FAILED with a
     # cryptic "Chapter N has no segments to synthesise" deep in synthesis
     # (audit 2026-07-11).
-    chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id)).all()
+    # Seuls les chapitres INCLUS comptent : un chapitre exclu (couverture, copyright…) n'est
+    # jamais analysé, donc n'a jamais de segments.
+    chapters = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.included == True)  # noqa: E712
+    ).all()
     if not chapters:
         raise HTTPException(
             status_code=409,
@@ -245,6 +262,25 @@ def get_book_mp3(book_id: int, session: Session = Depends(get_session)) -> FileR
     return FileResponse(str(path), media_type="audio/mpeg", filename=path.name)
 
 
+@router.get("/{book_id}/audio/m4b")
+def get_book_m4b(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
+    """Livre audio chapitré + couverture (AUD-2). Généré à la fin de la génération quand
+    ffmpeg est disponible ; sinon 404 et le MP3 reste la sortie."""
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if not book.m4b_path:
+        raise HTTPException(
+            status_code=404,
+            detail="M4B not available — ffmpeg was missing at generation time (MP3 is available).",
+        )
+    path = Path(book.m4b_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="M4B file not found on disk.")
+    safe_name = f"{(book.title or 'audiobook').replace('/', '-').replace(chr(92), '-')}.m4b"
+    return FileResponse(str(path), media_type="audio/mp4", filename=safe_name)
+
+
 @router.get("/{book_id}/cover")
 def get_book_cover(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
     book = session.get(Book, book_id)
@@ -289,6 +325,32 @@ async def upload_book_cover(
     return BookResponse.model_validate(book)
 
 
+def _require_chapter_generation_allowed(book: Book) -> None:
+    """Génération par chapitre autorisée sur un livre analysé, terminé ou en échec.
+
+    DONE / FAILED comptent : c'est ce qui permet de régénérer un chapitre ou de
+    reprendre après un échec (avant : 409 ou file jamais traitée, audit 2026-09-25).
+    """
+    if book.status not in (BookStatus.ANALYZED, BookStatus.DONE, BookStatus.FAILED):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Book {book.id} is not ready for chapter generation "
+                f"(status={book.status.value}). Expected ANALYZED, DONE or FAILED."
+            ),
+        )
+
+
+def _reset_chapter_for_requeue(chapter: Chapter) -> None:
+    """La pompe (generate_chapter_queue_pump) ne sélectionne que les chapitres PENDING :
+    un chapitre DONE ou FAILED remis en file doit donc repasser PENDING, sinon il reste
+    en file indéfiniment sans jamais être traité (bug confirmé par reproduction).
+    audio_path est conservé : l'ancien fichier reste lisible jusqu'à son remplacement."""
+    if chapter.status in (ChapterStatus.DONE, ChapterStatus.FAILED):
+        chapter.status = ChapterStatus.PENDING
+        chapter.error_message = None
+
+
 @router.post("/{book_id}/chapters/{position}/generate", response_model=ChapterResponse, status_code=202)
 def trigger_chapter_generate(
     book_id: int,
@@ -298,11 +360,7 @@ def trigger_chapter_generate(
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status != BookStatus.ANALYZED:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Book {book_id} is not ready for chapter generation (status={book.status.value}). Expected ANALYZED.",
-        )
+    _require_chapter_generation_allowed(book)
     chapter = session.exec(
         select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
     ).first()
@@ -310,11 +368,17 @@ def trigger_chapter_generate(
         raise HTTPException(
             status_code=404, detail=f"Chapter {position} not found for book {book_id}."
         )
+    if not chapter.included:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chapter {position} is excluded — include it first.",
+        )
     if chapter.status == ChapterStatus.GENERATING:
         raise HTTPException(
             status_code=409,
             detail=f"Chapter {position} is already being generated.",
         )
+    _reset_chapter_for_requeue(chapter)
     chapter.queued_at = datetime.now(timezone.utc)
     session.add(chapter)
     session.commit()
@@ -351,6 +415,36 @@ def trigger_chapter_stop(
     return ChapterResponse.model_validate(chapter)
 
 
+@router.patch("/{book_id}/chapters/{position}", response_model=ChapterResponse)
+def patch_chapter(
+    book_id: int,
+    position: int,
+    body: ChapterUpdate,
+    session: Session = Depends(get_session),
+) -> ChapterResponse:
+    """Inclure / exclure un chapitre (couverture, copyright, table des matières…). Un chapitre
+    exclu est ignoré par l'analyse et la génération. Refusé pendant qu'il est en cours de
+    synthèse."""
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chapter {position} not found for book {book_id}."
+        )
+    fields = body.model_dump(exclude_unset=True)
+    if "included" in fields and fields["included"] is not None:
+        if chapter.status == ChapterStatus.GENERATING:
+            raise HTTPException(status_code=409, detail=f"Chapter {position} is being generated.")
+        chapter.included = fields["included"]
+        if not chapter.included:
+            chapter.queued_at = None
+    session.add(chapter)
+    session.commit()
+    session.refresh(chapter)
+    return ChapterResponse.model_validate(chapter)
+
+
 @router.patch("/{book_id}/chapters/{position}/priority", response_model=ChapterResponse)
 def patch_chapter_priority(
     book_id: int,
@@ -380,18 +474,17 @@ def trigger_all_chapters_generate(
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    if book.status != BookStatus.ANALYZED:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Book {book_id} is not ready for chapter generation (status={book.status.value}). Expected ANALYZED.",
-        )
+    _require_chapter_generation_allowed(book)
     chapters = session.exec(
         select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.position)
     ).all()
     now = datetime.now(timezone.utc)
     queued_any = False
     for chapter in chapters:
+        if not chapter.included:
+            continue
         if chapter.status not in (ChapterStatus.DONE, ChapterStatus.GENERATING):
+            _reset_chapter_for_requeue(chapter)
             chapter.queued_at = now
             session.add(chapter)
             queued_any = True
@@ -702,7 +795,7 @@ def delete_book(book_id: int, session: Session = Depends(get_session)) -> None:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    paths = (book.source_path, book.audio_path, book.mp3_path)
+    paths = (book.source_path, book.audio_path, book.mp3_path, book.m4b_path)
     session.delete(book)
     session.commit()
     for path in paths:

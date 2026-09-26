@@ -30,6 +30,9 @@ fi
 echo "==> Frontend: npm dependencies"
 ( cd frontend && npm install --no-fund --no-audit )
 
+echo "==> Frontend: production build (start.sh rebuilds it automatically when sources change)"
+( cd frontend && npm run build ) || echo "    build failed — ./start.sh --dev still works"
+
 echo "==> Frontend: environment file"
 if [ ! -f "frontend/.env.local" ]; then
     cp frontend/.env.example frontend/.env.local

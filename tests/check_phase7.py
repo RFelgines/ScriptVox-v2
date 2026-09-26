@@ -729,7 +729,7 @@ section("POST /books/{id}/chapters/{n}/generate — 404/409 guards")
 
 with Session(_c19_engine) as _s:
     _c20_done_book = Book(
-        title="DoneBook", source_path="/tmp/d.epub", status=BookStatus.DONE
+        title="BusyBook", source_path="/tmp/d.epub", status=BookStatus.PROCESSING
     )
     _s.add(_c20_done_book)
     _s.commit()
@@ -744,10 +744,10 @@ with TestClient(app, raise_server_exceptions=False) as _tc:
     assert _r20a.status_code == 404, f"Expected 404, got {_r20a.status_code}"
     ok("404 for non-existent book")
 
-    # 409 book status != ANALYZED
+    # 409 book en cours d'analyse (ANALYZED / DONE / FAILED sont acceptés depuis l'audit 2026-09-25)
     _r20b = _tc.post(f"/books/{_c20_done_id}/chapters/1/generate")
-    assert _r20b.status_code == 409, f"Expected 409 for DONE book, got {_r20b.status_code}"
-    ok("409 for DONE book")
+    assert _r20b.status_code == 409, f"Expected 409 for PROCESSING book, got {_r20b.status_code}"
+    ok("409 for PROCESSING book")
 
     # 404 chapter not found
     _r20c = _tc.post(f"/books/{_c19_book_id}/chapters/999/generate")
@@ -1200,7 +1200,7 @@ with TestClient(app) as _tc:
     assert _r33.status_code == 200, f"Expected 200, got {_r33.status_code} ({_r33.text})"
     _r33_data = _r33.json()
     assert _r33_data["default_tts_provider"], f"got {_r33_data}"
-    assert set(_r33_data["available_tts_providers"]) == {"piper", "edgetts", "qwen"}, (
+    assert set(_r33_data["available_tts_providers"]) >= {"piper", "edgetts", "qwen"}, (
         f"got {_r33_data['available_tts_providers']}"
     )
 ok(f"GET /settings -> {_r33_data}")

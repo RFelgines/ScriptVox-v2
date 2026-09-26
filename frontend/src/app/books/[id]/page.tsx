@@ -11,10 +11,12 @@ import {
   VoiceSummary,
   acceptMergeSuggestion,
   analyzeBook,
+  bookM4bUrl,
   bookMp3Url,
   chapterAudioUrl,
+  characterPreviewReady,
+  characterPreviewUrl,
   coverUrl,
-  generateAllChapters,
   generateBook,
   generateChapter,
   getAppSettings,
@@ -28,9 +30,10 @@ import {
   patchBookProvider,
   patchBookPublishedAt,
   patchCharacterVoice,
+  patchChapterIncluded,
   rejectMergeSuggestion,
+  requestCharacterPreview,
   stopBook,
-  voiceSampleUrl,
 } from "@/lib/api";
 import { usePlayer } from "@/components/player/PlayerProvider";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -38,8 +41,14 @@ import Button from "@/components/ui/Button";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
 import Select from "@/components/ui/Select";
-import VoiceOrb from "@/components/VoiceOrb";
+import { useFeedback } from "@/components/ui/Feedback";
+import BookStepper from "@/components/book/BookStepper";
+import BookProgress from "@/components/book/BookProgress";
+import MoreMenu, { MenuItem } from "@/components/book/MoreMenu";
+import ChapterList from "@/components/book/ChapterList";
+import CharacterRow from "@/components/book/CharacterRow";
 import { buildHueMap } from "@/lib/voiceHues";
+import { formatClock, getResume, type ResumePoint } from "@/lib/resume";
 import { useT } from "@/lib/i18n/LanguageContext";
 
 const POLL_MS = 3000;
@@ -52,6 +61,14 @@ function chapterActive(status: string): boolean {
   return status === "PENDING" || status === "GENERATING";
 }
 
+// Valeur du sélecteur de langue : « fr-FR » -> fr, « en-US » -> en, le reste -> Auto.
+function languageChoice(language: string | null): string {
+  const l = (language ?? "").toLowerCase();
+  if (l.startsWith("fr")) return "fr";
+  if (l.startsWith("en")) return "en";
+  return "";
+}
+
 export default function BookDetailPage({
   params,
 }: {
@@ -60,6 +77,7 @@ export default function BookDetailPage({
   const { id } = use(params);
   const bookId = Number(id);
   const { play } = usePlayer();
+  const { toast, confirm } = useFeedback();
   const t = useT();
 
   const [book, setBook] = useState<BookSummary | null>(null);
@@ -68,14 +86,14 @@ export default function BookDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [generatingPos, setGeneratingPos] = useState<number | null>(null);
-  const [generatingAll, setGeneratingAll] = useState(false);
-  // Bumpé après une génération pour relancer le polling (l'effet s'arrête à
-  // ANALYZED, qui n'est pas un état « actif »).
+  // Bumpé après une action pour relancer le polling (l'effet s'arrête à ANALYZED / DONE,
+  // qui ne sont pas des états « actifs »).
   const [reloadNonce, setReloadNonce] = useState(0);
   const prevBookStatusRef = useRef<string | null>(null);
 
-  // ── Casting (fusionné dans la page livre — plus de page dédiée) ────────────
+  // ── Casting (affiché d'office dès que l'analyse est terminée) ───────────────
   const [castingExpanded, setCastingExpanded] = useState(false);
+  const [castingUserClosed, setCastingUserClosed] = useState(false);
   const [castingLoaded, setCastingLoaded] = useState(false);
   const [castingLoading, setCastingLoading] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
@@ -83,41 +101,37 @@ export default function BookDetailPage({
   const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [previewingId, setPreviewingId] = useState<number | null>(null);
   const [resolvingId, setResolvingId] = useState<number | null>(null);
   const [acceptingAll, setAcceptingAll] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [analyzingBook, setAnalyzingBook] = useState(false);
   const [stoppingBook, setStoppingBook] = useState(false);
   const [savingProvider, setSavingProvider] = useState(false);
-  const [savingGenre, setSavingGenre] = useState(false);
-  const [savingLanguage, setSavingLanguage] = useState(false);
-  const [savingPublishedAt, setSavingPublishedAt] = useState(false);
   const [search, setSearch] = useState("");
   const [showSecondary, setShowSecondary] = useState(false);
   // Bumpé après une action de fusion pour relancer le fetch (personnages + suggestions).
   const [mergeReloadNonce, setMergeReloadNonce] = useState(0);
-  // Voix sélectionnée dans le UI mais pas encore committée (pré-écoute).
-  const [pendingVoices, setPendingVoices] = useState<Map<number, string>>(new Map());
+  const [resumePoint, setResumePoint] = useState<ResumePoint | null>(null);
 
-  // ?casting=auto (posé par la bibliothèque après upload) : déplie la section
-  // casting dès que l'analyse atteint ANALYZED, servant de confirmation
-  // "tout valider ou ajuster" sans action de l'utilisateur. Lu manuellement via
-  // window.location plutôt que useSearchParams pour éviter le besoin d'un
-  // Suspense boundary (cf. doc Next : useSearchParams force le CSR jusqu'au
-  // Suspense parent le plus proche pendant le prerendering).
-  const [autoFlag] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("casting") === "auto",
-  );
-
+  // Réglages globaux (moteur effectif, avertissements de confidentialité).
   useEffect(() => {
-    if (!(autoFlag && book?.status === "ANALYZED" && !castingExpanded)) return;
-    // setState différé en microtâche pour rester hors du corps synchrone de
-    // l'effet (règle react-hooks/set-state-in-effect, même convention qu'ailleurs
-    // dans ce projet).
+    getAppSettings()
+      .then(setAppSettings)
+      .catch(() => {});
+  }, []);
+
+  // Dernière position d'écoute de ce livre (localStorage, lu après l'hydratation).
+  useEffect(() => {
+    Promise.resolve().then(() => setResumePoint(getResume(bookId)));
+  }, [bookId, book?.status]);
+
+  // Casting ouvert d'office dès que le livre est ANALYZED, sauf si l'utilisateur l'a replié.
+  useEffect(() => {
+    if (!(book?.status === "ANALYZED" && !castingExpanded && !castingUserClosed)) return;
+    // setState différé en microtâche pour rester hors du corps synchrone de l'effet.
     Promise.resolve().then(() => setCastingExpanded(true));
-  }, [autoFlag, book?.status, castingExpanded]);
+  }, [book?.status, castingExpanded, castingUserClosed]);
 
   useEffect(() => {
     if (!castingExpanded) return;
@@ -151,12 +165,30 @@ export default function BookDetailPage({
     };
   }, [castingExpanded, bookId, mergeReloadNonce]);
 
+  const voiceMap = new Map(voices.map((v) => [v.id, v]));
+  // Même teinte que /voix et le player (angle d'or sur le catalogue complet) --
+  // l'orbe du casting doit être reconnaissable comme "la même voix" ailleurs.
+  const voiceHues = buildHueMap(voices);
+  const effectiveProvider =
+    book?.tts_provider ??
+    appSettings?.preferred_tts_provider ??
+    appSettings?.default_tts_provider ??
+    "edgetts";
+  const effectiveLlm =
+    appSettings?.preferred_llm_provider ?? appSettings?.default_llm_provider ?? "ollama";
+  const assignable = voices.filter(
+    (v) => v.id !== "narrator" && (v.kind === "CATALOGUE" || effectiveProvider === "qwen"),
+  );
+
+  function fail(e: unknown) {
+    toast(e instanceof Error ? e.message : String(e), { tone: "error" });
+  }
+
   function handleProviderChange(value: string) {
     setSavingProvider(true);
-    setError(null);
     patchBookProvider(bookId, value || null)
       .then((updated) => setBook(updated))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(fail)
       .finally(() => setSavingProvider(false));
   }
 
@@ -164,41 +196,32 @@ export default function BookDetailPage({
     if (!book) return;
     const next = value.trim() || null;
     if (next === (book.genre ?? null)) return;
-    setSavingGenre(true);
-    setError(null);
     patchBookGenre(bookId, next)
       .then((updated) => setBook(updated))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setSavingGenre(false));
+      .catch(fail);
   }
 
-  function handleLanguageBlur(value: string) {
-    if (!book) return;
-    const next = value.trim() || null;
-    if (next === (book.language ?? null)) return;
-    setSavingLanguage(true);
-    setError(null);
-    patchBookLanguage(bookId, next)
+  function handleLanguageChange(value: string) {
+    patchBookLanguage(bookId, value || null)
       .then((updated) => setBook(updated))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setSavingLanguage(false));
+      .catch(fail);
   }
 
   function handlePublishedAtChange(value: string) {
     if (!book) return;
     const next = value || null;
     if (next === (book.published_at ?? null)) return;
-    setSavingPublishedAt(true);
-    setError(null);
     patchBookPublishedAt(bookId, next)
       .then((updated) => setBook(updated))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setSavingPublishedAt(false));
+      .catch(fail);
   }
 
+  // Voix enregistrée immédiatement ; « Annuler » du toast rétablit la précédente.
   function handleVoiceChange(characterId: number, voiceId: string) {
+    const target = characters.find((c) => c.id === characterId);
+    const previous = target?.voice_id ?? null;
+    if (voiceId === previous) return;
     setSavingId(characterId);
-    setError(null);
     patchCharacterVoice(characterId, voiceId)
       .then((updated) => {
         // Fusionne uniquement voice_id : la réponse de PATCH ne recalcule pas
@@ -208,10 +231,41 @@ export default function BookDetailPage({
         setCharacters((prev) =>
           prev.map((c) => (c.id === updated.id ? { ...c, voice_id: updated.voice_id } : c)),
         );
-        setPendingVoices((prev) => { const m = new Map(prev); m.delete(characterId); return m; });
+        const voiceName = voiceMap.get(voiceId)?.name ?? voiceId;
+        toast(
+          t.flow.voiceSaved(target?.name ?? `#${characterId}`, voiceName),
+          previous
+            ? { action: { label: t.feedback.undo, onClick: () => handleVoiceChange(characterId, previous) } }
+            : undefined,
+        );
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(fail)
       .finally(() => setSavingId(null));
+  }
+
+  // Aperçu de la voix choisie sur une réplique du personnage : tâche courte et prioritaire côté
+  // worker, réinterrogée jusqu'à ce que le fichier existe (60 s max).
+  async function handlePreview(c: CharacterSummary) {
+    if (!c.voice_id) return;
+    const voiceId = c.voice_id;
+    setPreviewingId(c.id);
+    try {
+      const { ready } = await requestCharacterPreview(c.id, voiceId);
+      let ok = ready;
+      for (let i = 0; !ok && i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        ok = await characterPreviewReady(c.id, voiceId);
+      }
+      if (!ok) throw new Error(t.flow.previewFailed);
+      play({
+        title: t.book.previewTitle(`${c.name} — ${voiceMap.get(voiceId)?.name ?? voiceId}`),
+        src: characterPreviewUrl(c.id, voiceId),
+      });
+    } catch (e) {
+      fail(e instanceof Error ? e : new Error(t.flow.previewFailed));
+    } finally {
+      setPreviewingId(null);
+    }
   }
 
   function characterName(charId: number): string {
@@ -220,17 +274,15 @@ export default function BookDetailPage({
 
   function handleResolveMerge(suggestionId: number, action: "accept" | "reject") {
     setResolvingId(suggestionId);
-    setError(null);
     const resolve = action === "accept" ? acceptMergeSuggestion : rejectMergeSuggestion;
     resolve(suggestionId)
       .then(() => setMergeReloadNonce((n) => n + 1))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(fail)
       .finally(() => setResolvingId(null));
   }
 
   function handleAcceptAllMerges() {
     setAcceptingAll(true);
-    setError(null);
     // Séquentiel : accepter une suggestion peut en rejeter automatiquement une autre du
     // même groupe côté backend (doublon 3+) — un 409 sur une suggestion déjà résolue par
     // ce mécanisme est attendu, pas une vraie erreur, donc ignoré silencieusement ici.
@@ -247,39 +299,39 @@ export default function BookDetailPage({
       .finally(() => setAcceptingAll(false));
   }
 
-  function handleAnalyzeBook() {
-    const destructive = book?.status === "ANALYZED" || book?.status === "DONE";
-    if (destructive && !window.confirm(t.book.reanalyzeConfirm)) return;
+  async function handleAnalyzeBook(opts: { destructive?: boolean; force?: boolean } = {}) {
+    if (opts.destructive) {
+      const ok = await confirm({ title: t.book.reanalyzeConfirm, danger: true });
+      if (!ok) return;
+    }
     setAnalyzingBook(true);
-    setError(null);
-    analyzeBook(bookId)
+    analyzeBook(bookId, opts.force === true)
       .then(() => setReloadNonce((n) => n + 1))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(fail)
       .finally(() => setAnalyzingBook(false));
   }
 
-  function handleStopBook() {
-    if (!window.confirm(t.book.stopConfirm)) return;
+  async function handleStopBook() {
+    const ok = await confirm({ title: t.book.stopConfirm, danger: true });
+    if (!ok) return;
     setStoppingBook(true);
-    setError(null);
     stopBook(bookId)
       .then((updated) => setBook(updated))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(fail)
       .finally(() => setStoppingBook(false));
   }
 
-  function handleGenerateBook() {
-    // force=true uniquement pour la régénération complète explicite depuis un
-    // livre DONE (confirmation requise) -- sur ANALYZED, "Générer l'audio"
-    // préserve désormais les chapitres déjà générés individuellement au lieu
-    // de tout re-synthétiser (audit 2026-07-11, T2.1).
-    const force = book?.status === "DONE";
-    if (force && !window.confirm(t.book.regenerateAudioConfirm)) return;
+  // force=true : régénération complète explicite d'un livre terminé (confirmation requise).
+  // Sans force, les chapitres déjà générés sont conservés et seul le manquant est produit.
+  async function handleGenerateBook(force = false) {
+    if (force) {
+      const ok = await confirm({ title: t.book.regenerateAudioConfirm, danger: true });
+      if (!ok) return;
+    }
     setGenerating(true);
-    setError(null);
     generateBook(bookId, force)
       .then(() => setReloadNonce((n) => n + 1))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(fail)
       .finally(() => setGenerating(false));
   }
 
@@ -287,16 +339,54 @@ export default function BookDetailPage({
     setGeneratingPos(position);
     generateChapter(bookId, position)
       .then(() => setReloadNonce((n) => n + 1))
-      .catch((e) => setError(String(e)))
+      .catch(fail)
       .finally(() => setGeneratingPos(null));
   }
 
-  function handleGenerateAllChapters() {
-    setGeneratingAll(true);
-    generateAllChapters(bookId)
-      .then(() => setReloadNonce((n) => n + 1))
-      .catch((e) => setError(String(e)))
-      .finally(() => setGeneratingAll(false));
+  function handleToggleIncluded(position: number, included: boolean) {
+    patchChapterIncluded(bookId, position, included)
+      .then((updated) =>
+        setChapters((prev) => prev.map((c) => (c.position === updated.position ? updated : c))),
+      )
+      .catch(fail);
+  }
+
+  function playChapter(ch: ChapterSummary, startAt?: number) {
+    if (!book) return;
+    play({
+      title: `${book.title} — ${ch.title ?? t.book.chapterFallback(ch.position)}`,
+      src: chapterAudioUrl(book.id, ch.position),
+      bookId: book.id,
+      bookTitle: book.title,
+      coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
+      chapterPosition: ch.position,
+      startAt,
+    });
+  }
+
+  // « Écouter » : reprend là où l'écoute s'est arrêtée, sinon au premier chapitre terminé.
+  // Les chapitres s'enchaînent ensuite tout seuls (voir PlayerProvider).
+  function handleListenBook() {
+    if (!book) return;
+    const listenable = chapters.filter((c) => c.status === "DONE" && c.included);
+    if (listenable.length === 0) {
+      if (book.mp3_path) {
+        play({
+          title: book.title,
+          src: bookMp3Url(book.id),
+          bookId: book.id,
+          bookTitle: book.title,
+          coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
+        });
+      }
+      return;
+    }
+    const saved = resumePoint ? listenable.find((c) => c.position === resumePoint.chapterPosition) : undefined;
+    if (saved && resumePoint) {
+      playChapter(saved, resumePoint.time);
+    } else {
+      playChapter(listenable[0]);
+    }
   }
 
   useEffect(() => {
@@ -312,7 +402,6 @@ export default function BookDetailPage({
           setBook(b);
           if (prevBookStatusRef.current !== null && prevBookStatusRef.current !== "ANALYZED" && b.status === "ANALYZED") {
             setMergeReloadNonce((n) => n + 1);
-            setPendingVoices(new Map());
           }
           prevBookStatusRef.current = b.status;
           setChapters(ch);
@@ -337,19 +426,6 @@ export default function BookDetailPage({
     };
   }, [bookId, reloadNonce]);
 
-  const effectiveProvider = book?.tts_provider ?? appSettings?.default_tts_provider ?? "edgetts";
-  const voiceMap = new Map(voices.map((v) => [v.id, v]));
-  // Même teinte que /voix et le player (angle d'or sur le catalogue complet) --
-  // l'orbe du casting doit être reconnaissable comme "la même voix" ailleurs.
-  const voiceHues = buildHueMap(voices);
-  function isProviderCompatible(voiceId: string): boolean {
-    const v = voiceMap.get(voiceId);
-    if (!v) return true;
-    return v.kind === "CATALOGUE" || effectiveProvider === "qwen";
-  }
-  const assignable = voices.filter(
-    (v) => v.id !== "narrator" && (v.kind === "CATALOGUE" || effectiveProvider === "qwen"),
-  );
   const canGenerate = book?.status === "ANALYZED" && !generating;
 
   const needle = search.trim().toLowerCase();
@@ -366,96 +442,35 @@ export default function BookDetailPage({
 
   function renderCharacterRow(c: CharacterSummary) {
     return (
-      <li
+      <CharacterRow
         key={c.id}
-        className="flex items-center gap-3 rounded-2xl bg-surface-2/60 p-3.5 transition-colors hover:bg-surface-2"
-      >
-        <div className="flex-1">
-          <p className="font-medium">{c.name}</p>
-          <p className="text-xs text-muted">
-            {c.gender}
-            {c.age_category && c.age_category !== "UNKNOWN" ? ` · ${c.age_category}` : ""}
-            {c.segment_count > 0 ? ` · ${t.book.segmentCount(c.segment_count)}` : ""}
-          </p>
-          {c.description && (
-            <p className="mt-1 line-clamp-2 text-xs text-muted">{c.description}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {c.voice_id && !isProviderCompatible(c.voice_id) && (
-            <span
-              title={t.book.clonedVoiceIncompatible(effectiveProvider)}
-              className="text-amber-600"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
-                <path d="M8 1.5L1 14h14L8 1.5zM8 6v4M8 11.5v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-              </svg>
-            </span>
-          )}
-          {c.voice_id && voiceMap.get(c.voice_id)?.kind === "CLONED" && (
-            <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted whitespace-nowrap">
-              {t.book.clonedBadge}
-            </span>
-          )}
-          {(() => {
-            const selectedVoiceId = pendingVoices.get(c.id) ?? c.voice_id;
-            return selectedVoiceId ? (
-              <VoiceOrb hue={voiceHues.get(selectedVoiceId) ?? 0} size={22} />
-            ) : (
-              <span className="h-[22px] w-[22px] shrink-0 rounded-full bg-surface-2" aria-hidden="true" />
-            );
-          })()}
-          <Select
-            value={pendingVoices.get(c.id) ?? c.voice_id ?? ""}
-            disabled={savingId === c.id}
-            placeholder={t.book.chooseVoice}
-            onChange={(v) => setPendingVoices((prev) => new Map(prev).set(c.id, v))}
-            options={[
-              ...assignable
-                .filter((v) => v.kind === "CATALOGUE")
-                .map((v) => ({ value: v.id, label: `${v.name}${v.gender ? ` — ${v.gender}` : ""}` })),
-              ...assignable
-                .filter((v) => v.kind === "CLONED")
-                .map((v) => ({
-                  value: v.id,
-                  label: `${v.name}${v.gender ? ` — ${v.gender}` : ""}`,
-                  group: t.book.clonedVoicesGroup,
-                })),
-            ]}
-          />
-          {(pendingVoices.get(c.id) ?? c.voice_id) && (
-            <button
-              onClick={() => {
-                const id = pendingVoices.get(c.id) ?? c.voice_id!;
-                play({ title: t.book.previewTitle(id), src: voiceSampleUrl(id) });
-              }}
-              title={t.book.previewVoice}
-              aria-label={t.book.previewVoice}
-              className="rounded-full p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 ml-0.5">
-                <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
-              </svg>
-            </button>
-          )}
-          {pendingVoices.has(c.id) && pendingVoices.get(c.id) !== c.voice_id && (
-            <button
-              onClick={() => handleVoiceChange(c.id, pendingVoices.get(c.id)!)}
-              disabled={savingId === c.id}
-              title={t.book.confirmVoice}
-              aria-label={t.book.confirmVoice}
-              className="rounded-full p-1.5 text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                <path d="M2.5 8.5l4 4 7-8" />
-              </svg>
-            </button>
-          )}
-          {savingId === c.id && <span className="text-xs text-muted">…</span>}
-        </div>
-      </li>
+        character={c}
+        assignable={assignable}
+        voiceMap={voiceMap}
+        voiceHues={voiceHues}
+        effectiveProvider={effectiveProvider}
+        saving={savingId === c.id}
+        previewing={previewingId === c.id}
+        onVoiceChange={handleVoiceChange}
+        onPreview={handlePreview}
+      />
     );
   }
+
+  const resumeChapter = resumePoint
+    ? chapters.find((c) => c.position === resumePoint.chapterPosition && c.status === "DONE")
+    : undefined;
+  const listenLabel =
+    resumePoint && resumeChapter
+      ? t.flow.resumeListening(
+          resumeChapter.title ?? t.book.chapterFallback(resumeChapter.position),
+          formatClock(resumePoint.time),
+        )
+      : t.flow.listen;
+
+  const showCastingSection =
+    castingExpanded && book !== null &&
+    (book.status === "ANALYZED" || book.status === "GENERATING" || book.status === "DONE");
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
@@ -504,132 +519,78 @@ export default function BookDetailPage({
               {book.author && <p className="mt-1 text-muted">{book.author}</p>}
               <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <StatusBadge status={book.status} />
-                <input
-                  key={`genre-${book.genre ?? ""}`}
-                  type="text"
-                  defaultValue={book.genre ?? ""}
-                  onBlur={(e) => handleGenreBlur(e.target.value)}
-                  disabled={savingGenre}
-                  placeholder={t.book.genrePlaceholder}
-                  aria-label={t.book.genreAriaLabel}
-                  className="rounded-full border-none bg-surface-2 px-3 py-1 text-xs text-muted placeholder:text-muted/60 disabled:opacity-50"
-                />
-                <input
-                  key={`language-${book.language ?? ""}`}
-                  type="text"
-                  defaultValue={book.language ?? ""}
-                  onBlur={(e) => handleLanguageBlur(e.target.value)}
-                  disabled={savingLanguage}
-                  placeholder={t.book.languagePlaceholder}
-                  aria-label={t.book.languageAriaLabel}
-                  className="w-28 rounded-full border-none bg-surface-2 px-3 py-1 text-xs text-muted placeholder:text-muted/60 disabled:opacity-50"
-                />
-                <input
-                  key={`published-${book.published_at ?? ""}`}
-                  type="date"
-                  defaultValue={book.published_at ?? ""}
-                  onChange={(e) => handlePublishedAtChange(e.target.value)}
-                  disabled={savingPublishedAt}
-                  aria-label={t.book.publishedAtLabel}
-                  title={t.book.publishedAtLabel}
-                  className="rounded-full border-none bg-surface-2 px-3 py-1 text-xs text-muted disabled:opacity-50"
-                />
               </div>
-              {book.progress > 0 && book.progress < 100 && (
-                <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded-full bg-surface-2">
-                  <div
-                    className="h-full bg-primary"
-                    style={{ width: `${book.progress}%` }}
-                  />
-                </div>
-              )}
+
+              <BookProgress book={book} chapters={chapters} />
+
               {book.status === "FAILED" && book.error_message && (
                 <p className="mt-2 text-sm text-danger">{book.error_message}</p>
               )}
-              {autoFlag && (book.status === "PENDING" || book.status === "PROCESSING") && (
-                <p className="mt-2 text-sm text-muted">
-                  {t.book.analysisInProgressHint}
-                </p>
+              {(book.status === "PENDING" || book.status === "PROCESSING") && (
+                <p className="mt-2 text-sm text-muted">{t.book.analysisInProgressHint}</p>
+              )}
+              {appSettings &&
+                (book.status === "PENDING" || book.status === "PROCESSING") &&
+                effectiveLlm === "gemini" && (
+                  <p className="mt-1 text-xs text-muted">{t.flow.privacyCloudLlm}</p>
+                )}
+              {appSettings && book.status === "ANALYZED" && effectiveProvider === "edgetts" && (
+                <p className="mt-2 text-xs text-muted">{t.flow.privacyCloudTts}</p>
               )}
 
-              {/* ── Barre d'actions ──────────────────────────────────────────── */}
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
-                {/* Analyser / Reprendre l'analyse */}
+              {/* ── Actions : UNE action principale selon l'état, le reste dans des menus ── */}
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 {book.status === "PENDING" && (
                   <Button
                     variant="primary"
-                    size="sm"
+                    size="lg"
                     disabled={analyzingBook}
-                    onClick={handleAnalyzeBook}
+                    onClick={() => handleAnalyzeBook()}
                   >
                     {analyzingBook ? t.book.launching : t.book.analyze}
                   </Button>
                 )}
-                {book.status === "FAILED" && (
-                  <div className="flex items-center gap-1.5">
-                    {/* Le bouton PRIMAIRE suit book.failed_stage (audit 2026-07-11,
-                        T2.3) : avant, "Reprendre l'analyse" était toujours mis en
-                        avant même quand seule la GÉNÉRATION avait échoué -- un clic
-                        dessus repassait le livre en ANALYZED, cassant la reprise de
-                        génération en cours. Les deux boutons restent visibles
-                        (chapters.length > 0 = les deux étapes sont possibles) --
-                        seul le style change, pas de comportement caché. */}
-                    <Button
-                      variant={book.failed_stage === "generation" ? "secondary" : "primary"}
-                      size="sm"
-                      disabled={analyzingBook}
-                      onClick={handleAnalyzeBook}
-                    >
-                      {analyzingBook ? t.book.launching : t.book.resumeAnalysis}
-                    </Button>
-                    {chapters.length > 0 && (
-                      <Button
-                        variant={book.failed_stage === "generation" ? "primary" : "secondary"}
-                        size="sm"
-                        disabled={generating}
-                        onClick={handleGenerateBook}
-                      >
-                        {generating ? t.book.launching : t.book.resumeGeneration}
-                      </Button>
-                    )}
-                    {book.error_message !== "Arrêté par l'utilisateur." && (
-                      <span
-                        title={t.book.analysisFailedTitle(book.error_message ?? "erreur inconnue")}
-                        aria-label={t.book.analysisFailedAriaLabel}
-                        className="text-warning"
-                      >
-                        ⚠️
-                      </span>
-                    )}
-                  </div>
-                )}
-                {(book.status === "ANALYZED" || book.status === "DONE") && (
-                  <Button
-                    size="sm"
-                    disabled={analyzingBook}
-                    onClick={handleAnalyzeBook}
-                  >
-                    {analyzingBook ? t.book.launching : t.book.reanalyze}
-                  </Button>
-                )}
 
-                {/* Générer / Regénérer l'audio */}
-                {(book.status === "ANALYZED" || book.status === "DONE") && (
+                {book.status === "ANALYZED" && (
                   <Button
                     variant="primary"
-                    size="sm"
+                    size="lg"
                     disabled={generating}
-                    onClick={handleGenerateBook}
+                    onClick={() => handleGenerateBook(false)}
                   >
-                    {generating
-                      ? t.book.launching
-                      : book.status === "DONE"
-                      ? t.book.regenerateAudio
-                      : t.book.generateAudio}
+                    {generating ? t.book.launching : t.flow.generateBook}
                   </Button>
                 )}
 
-                {/* Arrêter */}
+                {book.status === "DONE" && (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    onClick={handleListenBook}
+                    className="inline-flex items-center gap-2"
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor" className="ml-0.5 h-3.5 w-3.5 shrink-0">
+                      <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
+                    </svg>
+                    {listenLabel}
+                  </Button>
+                )}
+
+                {book.status === "FAILED" && (
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    disabled={analyzingBook || generating}
+                    onClick={() =>
+                      book.failed_stage === "generation" && chapters.length > 0
+                        ? handleGenerateBook(false)
+                        : handleAnalyzeBook()
+                    }
+                  >
+                    {analyzingBook || generating ? t.book.launching : t.flow.resume}
+                  </Button>
+                )}
+
                 {(book.status === "PROCESSING" || book.status === "GENERATING") && (
                   <Button
                     variant="danger"
@@ -641,66 +602,107 @@ export default function BookDetailPage({
                   </Button>
                 )}
 
-                {/* Casting */}
-                {(book.status === "ANALYZED" || book.status === "GENERATING" || book.status === "DONE") && (
-                  <Button size="sm" onClick={() => setCastingExpanded((v) => !v)} className="inline-flex items-center gap-1.5">
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                      className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${castingExpanded ? "rotate-90" : ""}`}>
-                      <path d="M6 4l4 4-4 4" />
-                    </svg>
-                    {t.book.casting}
-                  </Button>
+                {book.status === "DONE" && (
+                  <MoreMenu label={`${t.flow.download} ▾`}>
+                    {book.m4b_path ? (
+                      <MenuItem href={bookM4bUrl(book.id)}>{t.flow.downloadM4b}</MenuItem>
+                    ) : (
+                      <MenuItem disabled title={t.flow.m4bMissing}>
+                        {t.flow.downloadM4b}
+                      </MenuItem>
+                    )}
+                    {book.mp3_path && (
+                      <MenuItem href={bookMp3Url(book.id)}>{t.flow.downloadMp3}</MenuItem>
+                    )}
+                  </MoreMenu>
                 )}
 
-                {/* Écouter */}
-                {book.status === "DONE" && book.mp3_path && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() =>
-                      play({
-                        title: book.title,
-                        src: bookMp3Url(book.id),
-                        bookId: book.id,
-                        bookTitle: book.title,
-                        coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
-                      })
-                    }
-                    className="inline-flex items-center gap-1.5"
-                  >
-                    <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
-                      <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
-                    </svg>
-                    {t.book.listen}
-                  </Button>
+                {(book.status === "ANALYZED" || book.status === "DONE" || book.status === "FAILED") && (
+                  <MoreMenu label={`${t.flow.more} ▾`}>
+                    {book.status === "DONE" && (
+                      <MenuItem onClick={() => handleGenerateBook(true)}>{t.flow.regenerate}</MenuItem>
+                    )}
+                    {book.status !== "FAILED" && (
+                      <MenuItem onClick={() => handleAnalyzeBook({ destructive: true })}>
+                        {t.book.reanalyze}
+                      </MenuItem>
+                    )}
+                    {book.status === "FAILED" && chapters.length > 0 && (
+                      <MenuItem onClick={() => handleAnalyzeBook()}>{t.book.resumeAnalysis}</MenuItem>
+                    )}
+                    {book.status === "FAILED" && (
+                      <MenuItem onClick={() => handleAnalyzeBook({ force: true })} danger>
+                        {t.flow.restart}
+                      </MenuItem>
+                    )}
+                    {(book.status === "ANALYZED" || book.status === "DONE") && (
+                      <MenuItem
+                        onClick={() => {
+                          setCastingUserClosed(castingExpanded);
+                          setCastingExpanded((v) => !v);
+                        }}
+                      >
+                        {t.book.casting}
+                      </MenuItem>
+                    )}
+                  </MoreMenu>
                 )}
               </div>
+
+              {/* Métadonnées : repliées par défaut (rarement modifiées). */}
+              <details className="mt-4 text-left">
+                <summary className="cursor-pointer text-xs text-muted hover:text-foreground">
+                  {t.flow.details}
+                </summary>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    key={`genre-${book.genre ?? ""}`}
+                    type="text"
+                    defaultValue={book.genre ?? ""}
+                    onBlur={(e) => handleGenreBlur(e.target.value)}
+                    placeholder={t.book.genrePlaceholder}
+                    aria-label={t.book.genreAriaLabel}
+                    className="rounded-full border-none bg-surface-2 px-3 py-1 text-xs text-muted placeholder:text-muted/60"
+                  />
+                  <Select
+                    value={languageChoice(book.language)}
+                    onChange={handleLanguageChange}
+                    ariaLabel={t.book.languageAriaLabel}
+                    options={[
+                      { value: "", label: t.flow.languageAuto },
+                      { value: "fr", label: t.flow.languageFr },
+                      { value: "en", label: t.flow.languageEn },
+                    ]}
+                  />
+                  <input
+                    key={`published-${book.published_at ?? ""}`}
+                    type="date"
+                    defaultValue={book.published_at ?? ""}
+                    onChange={(e) => handlePublishedAtChange(e.target.value)}
+                    aria-label={t.book.publishedAtLabel}
+                    title={t.book.publishedAtLabel}
+                    className="rounded-full border-none bg-surface-2 px-3 py-1 text-xs text-muted"
+                  />
+                </div>
+              </details>
             </div>
           </header>
 
-          {castingExpanded && (
-            // Transition d'entrée seule (starting:, Tailwind v4) : la section
-            // apparaissait sans aucun mouvement (audit UI/UX 2026-07-03).
-            // Pas de transition de sortie -- démontage React instantané au clic,
-            // cohérent avec le reste de l'app (pas de dépendance d'animation
-            // ajoutée pour gérer un état "en cours de fermeture").
+          <BookStepper status={book.status} failedStage={book.failed_stage} />
+
+          {showCastingSection && (
+            // Transition d'entrée seule (starting:, Tailwind v4).
             <section className="mt-6 rounded-2xl bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.4),0_0_0_1px_rgba(245,243,241,0.03)] transition-all duration-200 ease-out starting:translate-y-1 starting:opacity-0">
+              <h2 className="mb-3 font-display text-xl font-medium tracking-tight">{t.book.casting}</h2>
+
               {castingLoading && !castingLoaded && (
                 <p className="text-muted">{t.book.loadingCasting}</p>
               )}
 
-              {castingLoaded && book.status !== "ANALYZED" && book.status !== "GENERATING" && book.status !== "DONE" && (
-                <Alert title={t.book.castingUnavailableTitle}>
-                  <p className="text-sm text-muted">
-                    {t.book.castingUnavailableBody(book.status)}
-                  </p>
-                </Alert>
-              )}
-
               {mergeSuggestions.length > 0 && (
-                <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+                <div className="mb-4 rounded-2xl border border-warning/30 bg-warning/10 p-4">
                   <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-amber-600">
+                    <p className="text-sm font-semibold text-warning">
                       {t.book.mergeSuggestionsTitle}
                     </p>
                     <Button
@@ -789,7 +791,7 @@ export default function BookDetailPage({
               )}
 
               {castingLoaded && (
-                <div className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
                   <div className="flex items-center gap-3">
                     <p className="text-xs text-muted">
                       {voices[0]?.locale
@@ -811,19 +813,16 @@ export default function BookDetailPage({
                       </label>
                     )}
                   </div>
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    onClick={handleGenerateBook}
-                    disabled={!canGenerate}
-                    title={
-                      book.status === "ANALYZED"
-                        ? undefined
-                        : t.book.generateOnlyWhenAnalyzed
-                    }
-                  >
-                    {generating ? t.book.launching : t.book.generateAudio}
-                  </Button>
+                  {book.status === "ANALYZED" && (
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      onClick={() => handleGenerateBook(false)}
+                      disabled={!canGenerate}
+                    >
+                      {generating ? t.book.launching : t.flow.generateBook}
+                    </Button>
+                  )}
                 </div>
               )}
             </section>
@@ -832,84 +831,20 @@ export default function BookDetailPage({
           <section className="mt-10">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display text-2xl font-medium tracking-tight">
-                {t.book.chaptersTitle(chapters.length)}
+                {t.book.chaptersTitle(chapters.filter((c) => c.included).length)}
               </h2>
-              {book.status === "ANALYZED" &&
-                chapters.some((c) => c.status !== "DONE") && (
-                  <Button
-                    variant="warning"
-                    onClick={handleGenerateAllChapters}
-                    disabled={generatingAll}
-                  >
-                    {generatingAll ? "…" : t.book.generateAllAudio}
-                  </Button>
-                )}
             </div>
             {chapters.length === 0 ? (
               <p className="text-muted">{t.book.noChaptersYet}</p>
             ) : (
-              <ul className="space-y-2.5">
-                {chapters.map((ch) => (
-                  <li
-                    key={ch.id}
-                    className="flex items-center gap-3 rounded-2xl bg-surface-2/60 p-3.5 transition-colors hover:bg-surface-2"
-                  >
-                    <span className="w-8 text-right text-xs text-muted">
-                      {ch.position}
-                    </span>
-                    <div className="flex-1">
-                      <p className="text-sm">{ch.title ?? t.book.chapterFallback(ch.position)}</p>
-                      {ch.status === "FAILED" && ch.error_message && (
-                        <p className="text-xs text-danger">{ch.error_message}</p>
-                      )}
-                    </div>
-                    <StatusBadge status={ch.status} className="text-xs" />
-                    {book.status === "ANALYZED" && ch.status !== "DONE" && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleGenerateChapter(ch.position)}
-                        disabled={generatingPos === ch.position || ch.status === "GENERATING"}
-                      >
-                        {generatingPos === ch.position ? "…" : t.book.generateChapter}
-                      </Button>
-                    )}
-                    {ch.status === "DONE" && (
-                      <>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() =>
-                            play({
-                              title: `${book.title} — ${ch.title ?? t.book.chapterFallback(ch.position)}`,
-                              src: chapterAudioUrl(book.id, ch.position),
-                              bookId: book.id,
-                              bookTitle: book.title,
-                              coverUrl: book.cover_path ? coverUrl(book.id) : undefined,
-                              chapterPosition: ch.position,
-                            })
-                          }
-                          className="inline-flex items-center gap-1"
-                        >
-                          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 ml-0.5 shrink-0">
-                            <path d="M4 2.5l9 5.5-9 5.5V2.5z" />
-                          </svg>
-                          {t.book.listen}
-                        </Button>
-                        {book.status === "ANALYZED" && (
-                          <Button
-                            size="sm"
-                            onClick={() => handleGenerateChapter(ch.position)}
-                            disabled={generatingPos === ch.position}
-                            title={t.book.regenerateChapter}
-                          >
-                            {generatingPos === ch.position ? "…" : "↺"}
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <ChapterList
+                book={book}
+                chapters={chapters}
+                generatingPos={generatingPos}
+                onGenerate={handleGenerateChapter}
+                onToggleIncluded={handleToggleIncluded}
+                onListen={(ch) => playChapter(ch)}
+              />
             )}
           </section>
         </>

@@ -152,6 +152,18 @@ class MergeSuggestion:
 
 
 class BaseLLMProvider(ABC):
+    """Contrat d'un moteur LLM. Seules `analyze` et `suggest_merges` sont obligatoires.
+
+    `chunk_tokens` : budget (tokens estimés) d'un appel ; le worker découpe les chapitres
+    plus longs (ARCHITECTURE.md §2.3). Un plugin peut le surcharger.
+    """
+
+    chunk_tokens: int = 12_000
+
+    def unload(self) -> None:
+        """Libère la mémoire côté serveur (VRAM) si le moteur le permet. No-op par défaut."""
+        return None
+
     @abstractmethod
     async def analyze(
         self, text: str, known_characters: list[str] | None = None,
@@ -382,6 +394,15 @@ def _looks_like_proper_noun(name: str) -> bool:
     return bool(_PROPER_NOUN_RE.match(name.strip()))
 
 
+# Mots-titres : seuls, ils ne désignent personne (« Professeur » ⊆ « Professeur Rogue »
+# ET ⊆ « Professeur McGonagall »).
+_TITLE_WORDS = frozenset({
+    "mr", "mrs", "ms", "miss", "m.", "mme", "mlle", "monsieur", "madame", "mademoiselle",
+    "professeur", "professor", "prof", "sir", "lady", "lord", "docteur", "dr", "dr.",
+    "maître", "capitaine", "commandant", "colonel", "général", "père", "mère", "oncle", "tante",
+})
+
+
 def _resolve_character_name(name: str, known_names: set[str]) -> str | None:
     """Résout un nom d'attribution vers un personnage déjà connu, au-delà de l'égalité stricte.
 
@@ -389,15 +410,24 @@ def _resolve_character_name(name: str, known_names: set[str]) -> str | None:
     Weasley », « Dumbledore » ⊆ « Albus Dumbledore ») — jamais une similarité générique.
     Retourne toujours le nom déjà présent dans ``known_names``, jamais la variante brute,
     pour ne jamais introduire de doublon de personnage.
+
+    Déterministe : si PLUSIEURS personnages connus satisfont l'inclusion (« Weasley » avec
+    Ron/Ginny/Molly Weasley), la résolution est ambiguë et on renvoie None plutôt que de
+    choisir au hasard (l'ordre d'itération d'un set de chaînes change à chaque lancement de
+    Python — bug confirmé, audit 2026-09-25). Un nom réduit à des mots-titres ne résout rien.
     """
     if name in known_names:
         return name
     name_tokens = set(name.lower().split())
-    for known in known_names:
+    significant = name_tokens - _TITLE_WORDS
+    if not significant:
+        return None
+    candidates: list[str] = []
+    for known in sorted(known_names):
         known_tokens = set(known.lower().split())
         if name_tokens <= known_tokens or known_tokens <= name_tokens:
-            return known
-    return None
+            candidates.append(known)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
@@ -520,6 +550,69 @@ def _parse_llm_json(raw: str, spans: "list[_Span]") -> LLMChapterResult:
         raise LLMParsingError(raw, exc) from exc
 
     return LLMChapterResult(characters=characters, segments=segments)
+
+
+# ── Schémas JSON de sortie (LLM-2, audit 2026-09-25) ────────────────────────────
+# `format="json"` garantit un JSON valide mais pas sa forme ; passer le schéma au moteur
+# (Ollama `format=`, Gemini `response_json_schema`, OpenAI `response_format=json_schema`)
+# contraint la génération. _parse_llm_json reste le filet de sécurité (jamais retiré).
+
+_GENDER_VALUES = ["MALE", "FEMALE", "NEUTRAL", "UNKNOWN"]
+_AGE_VALUES = ["CHILD", "YOUNG_ADULT", "ADULT", "ELDER", "UNKNOWN"]
+
+ANALYSIS_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "characters": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "gender": {"type": "string", "enum": _GENDER_VALUES},
+                    "age_category": {"type": "string", "enum": _AGE_VALUES},
+                    "tone": {"type": "string"},
+                    "voice_quality": {"type": "string"},
+                    "voice_tone": {"type": "string"},
+                },
+                "required": ["name", "gender"],
+            },
+        },
+        "attributions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "character_name": {"type": "string"},
+                    "emotion": {"type": "string"},
+                },
+                "required": ["index", "character_name"],
+            },
+        },
+    },
+    "required": ["characters", "attributions"],
+}
+
+MERGE_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "merges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "survivor_name": {"type": "string"},
+                    "merged_name": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["survivor_name", "merged_name"],
+            },
+        },
+    },
+    "required": ["merges"],
+}
 
 
 # ── Fusion de personnages (suggest_merges) ──────────────────────────────────────

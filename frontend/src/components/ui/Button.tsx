@@ -8,8 +8,9 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   // pas dans le chrome (décision DA, voir ui_modernization_plan).
   primary: "bg-primary text-primary-foreground hover:opacity-90",
   secondary: "border border-border bg-surface-2 text-foreground hover:bg-surface-2/70",
-  warning: "bg-amber-600 hover:bg-amber-500 text-white",
-  danger: "bg-red-700 hover:bg-red-600 text-white",
+  // Jetons sémantiques (--warning / --danger) : suivent le thème clair/sombre.
+  warning: "bg-warning text-white hover:opacity-90",
+  danger: "bg-danger text-white hover:opacity-90",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

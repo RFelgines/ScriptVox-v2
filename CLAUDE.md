@@ -23,9 +23,10 @@ If a task touches > 5 files, stop and recut into smaller tasks first.
 **Tests first.** Before implementing new behaviour, write/extend the matching
 `tests/check_phaseN.py` to describe the expected outcome. Run after every change —
 never chain 10 changes without testing.
-Runner: `.venv/Scripts/python tests/check_phaseN.py`
-Existing suites: `check_phase1.py` · `check_phase2.py` · `check_phase3.py` (LLM pipeline).
-Next unstarted phase = TTS & audio (ARCHITECTURE.md § Phase 3 → will need `check_phase4.py`).
+Runner (all suites, numeric order, one subprocess each — also what CI runs):
+`python tests/run_all.py` (Windows: `.venv\Scripts\python tests\run_all.py`); one suite:
+`python tests/check_phaseN.py`. Suites `check_phase1` … `check_phase48` exist; the next number is
+reserved in `TASKS.md`. Tests are offline: LLM, TTS and network are mocked or served by a loopback server.
 
 **Failing test ≠ automatic fix.** First verify whether the test expectation is stale.
 Always cover the happy path AND the failure path. Never mock away a failure to hide it.
@@ -57,6 +58,8 @@ everywhere.
 - No surprise dependencies: never add a package without justifying it and asking first.
 - No mock data in production code: mocks live in `tests/` only.
 - Keep `.env.example` in sync with every new environment variable.
-- Phase-number note: git commits label phases 1-3 (config / EPUB-Huey / LLM); ARCHITECTURE.md
-  uses a different split (Foundations / LLM / TTS). **ARCHITECTURE.md wins on scope** —
-  "next phase" means TTS & audio regardless of the numbering used in commit messages.
+- New LLM / TTS engines are **plugins** or generic providers (docs/PLUGINS.md), not new branches in the
+  factories: register them through `app/services/registry.py`.
+- Never make a runtime API setting able to execute code or carry a secret (`TTS_COMMAND` and API keys stay
+  in `.env`; `llm_options` / `tts_options` accept a whitelist of keys only).
+- Scope: `TASKS.md` (roadmap) and `CHANGELOG.md` (what shipped). ARCHITECTURE.md is the design reference.

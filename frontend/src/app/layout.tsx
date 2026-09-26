@@ -1,13 +1,21 @@
 import type { Metadata } from "next";
-import { Outfit, Geist_Mono } from "next/font/google";
+import { Outfit, Geist_Mono, Fraunces } from "next/font/google";
 import "./globals.css";
 import Nav from "@/components/Nav";
 import PlayerProvider from "@/components/player/PlayerProvider";
 import PlayerBar from "@/components/player/PlayerBar";
 import { LanguageProvider } from "@/lib/i18n/LanguageContext";
+import FeedbackProvider from "@/components/ui/Feedback";
 
 const outfit = Outfit({
   variable: "--font-outfit",
+  subsets: ["latin"],
+});
+
+// Serif éditoriale pour les titres de livres (classe `font-display`, jamais définie
+// avant l'audit 2026-09-25 : elle n'avait aucun effet).
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
   subsets: ["latin"],
 });
 
@@ -42,7 +50,7 @@ export default function RootLayout({
     <html
       lang="fr"
       suppressHydrationWarning
-      className={`${outfit.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${outfit.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col pb-24 bg-background text-foreground font-sans">
         {/* type différencié serveur/client + suppressHydrationWarning : évite
@@ -58,11 +66,13 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
         <LanguageProvider>
-          <Nav />
-          <PlayerProvider>
-            {children}
-            <PlayerBar />
-          </PlayerProvider>
+          <FeedbackProvider>
+            <Nav />
+            <PlayerProvider>
+              {children}
+              <PlayerBar />
+            </PlayerProvider>
+          </FeedbackProvider>
         </LanguageProvider>
       </body>
     </html>
