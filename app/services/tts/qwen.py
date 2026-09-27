@@ -40,7 +40,9 @@ _MODEL_IDS_BASE: dict[str, str] = {
 # Profile code (language_profiles.resolve_profile) -> Qwen3-TTS language string.
 # Qwen3-TTS annonce 10 langues (dont l'espagnol) : ajouter une entrée ici suffit
 # côté moteur, le travail réel étant le LanguageProfile correspondant.
-_PROFILE_LANGUAGE: dict[str, str] = {"en": "English", "fr": "French", "es": "Spanish"}
+_PROFILE_LANGUAGE: dict[str, str] = {
+    "en": "English", "fr": "French", "es": "Spanish", "de": "German", "it": "Italian",
+}
 
 _MODEL_SAMPLE_RATE = 24000   # what Qwen3-TTS always returns (verified by tests/spike_qwen_tts.py)
 _OUTPUT_SAMPLE_RATE = OUTPUT_SAMPLE_RATE  # 24 kHz : plus aucun rééchantillonnage nécessaire

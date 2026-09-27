@@ -163,7 +163,86 @@ ES_PROFILE = LanguageProfile(
 )
 
 
-_PROFILES: dict[str, LanguageProfile] = {"fr": FR_PROFILE, "en": EN_PROFILE, "es": ES_PROFILE}
+# ── Allemand ──────────────────────────────────────────────────────────────────
+# Typographie mesurée sur Die Verwandlung (Gutenberg 22367) et Aus dem Leben eines
+# Taugenichts (35312) : les répliques sont entre guillemets INVERSÉS »…« (124 et
+# 303 paires), aucun „…“, aucun tiret cadratin de dialogue. Le profil français
+# (repli d'avant) était donc pire qu'inutile : son motif «[^»]*» part du « FERMANT
+# d'une réplique et court jusqu'au » OUVRANT de la suivante, c'est-à-dire qu'il
+# étiquetait DIALOGUE la narration située entre deux répliques
+# (« sagte sich Gregor und fühlte… »).
+# „…“ (convention imprimée moderne) et les guillemets droits restent acceptés.
+# Les « » suisses (« … ») sont volontairement absents : dans un texte en »…«, un
+# « isolé suffirait à réintroduire l'inversion décrite ci-dessus.
+# Incise : comme en anglais, elle tombe HORS des guillemets (»…,« sagte sie) —
+# aucune scission nécessaire, d'où incise_re=None.
+DE_PROFILE = LanguageProfile(
+    code="de",
+    dialogue_re=re.compile(
+        "|".join((
+            r"»[^«]*«",              # guillemets allemands (Gutenberg, édition classique)
+            r"„[^“”]*[“”]",          # guillemets bas-haut (édition moderne)
+            r"“[^”]*”",
+            r'"[^"]*"',
+        )),
+        re.MULTILINE,
+    ),
+    incise_re=None,
+    explicit_name_re=None,
+)
+
+
+# ── Italien ───────────────────────────────────────────────────────────────────
+# Typographie mesurée sur Pinocchio (Gutenberg 52484) : 1141 répliques ouvertes
+# par un tiret cadratin en début de ligne, contre 47 paires de « » (citations).
+# Même construction que l'espagnol, donc : le dialogue_re français convient, et
+# l'incise est séparée de la réplique par un TIRET (« — Asino! — gridò
+# Geppetto. »), pas par une virgule. Verbes relevés sur le même livre : disse
+# (107), rispose (46), gridò (44), domandò (43), replicò (26), ripetè (19),
+# soggiunse (16)…
+_IT_INCISE_VERBS = (
+    r"disse|dissero|rispose|risposero|gridò|gridarono|domandò|domandarono|"
+    r"replicò|replicarono|ripetè|ripeté|soggiunse|aggiunse|urlò|urlarono|chiese|"
+    r"esclamò|mormorò|sussurrò|riprese|continuò|osservò|borbottò|brontolò|"
+    r"concluse|interruppe|proseguì|insistè|insistette|pensò|fece"
+)
+
+# Sujet postposé : nom propre (« disse Geppetto »), ou nom commun précédé d'un
+# article ou d'un titre — en minuscule en italien : « gridò il burattino ».
+_IT_SUBJECT = (
+    r"(?:(?:il|lo|la|i|gli|le|un|uno|una|quel|quello|quella|mastro|don|donna|sor)\s+"
+    r"[\wÀ-ÿ'’-]+|l['’][\wÀ-ÿ-]+|[A-ZÀ-Ý][\wÀ-ÿ'’-]*)"
+)
+
+# Clitique antéposé au verbe : « — Vieni qui — gli disse Geppetto. »
+_IT_CLITIC = r"(?:(?:mi|ti|gli|le|ci|vi|si)\s+)?"
+
+_IT_INCISE_VERB = (
+    _IT_CLITIC + r"(?:" + _IT_INCISE_VERBS + r")\s+(?:" + _IT_SUBJECT + r"|lui|lei|loro|io)"
+)
+
+IT_PROFILE = LanguageProfile(
+    code="it",
+    dialogue_re=FR_PROFILE.dialogue_re,
+    # Seule l'incise TERMINALE et propre est extraite, comme en espagnol :
+    # « — Sbucciarle? — replicò Geppetto meravigliato. — Non avrei… » (réplique
+    # reprise après l'incise) reste intact, d'où l'exclusion des tirets dans la queue.
+    incise_re=re.compile(
+        r"(?P<dlg>.*[,?!…—–―])(?P<inc>\s*" + _IT_INCISE_VERB + r"[^,—–―]*)$",
+        re.UNICODE,
+    ),
+    # Nom propre explicite uniquement (« disse Geppetto », « rispose la Fata ») :
+    # « gridò il burattino » désigne bien Pinocchio, mais ce n'est pas un nom.
+    explicit_name_re=re.compile(
+        r"(?:" + _IT_INCISE_VERBS + r")\s+((?:(?:mastro|don|donna|sor|il|lo|la)\s+)?"
+        r"[A-ZÀ-Ý][\wÀ-ÿ'’-]*(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]*)?)"
+    ),
+)
+
+
+_PROFILES: dict[str, LanguageProfile] = {
+    "fr": FR_PROFILE, "en": EN_PROFILE, "es": ES_PROFILE, "de": DE_PROFILE, "it": IT_PROFILE,
+}
 
 # Codes reconnus par resolve_profile, exposés pour valider/lister les choix
 # utilisateur (ex. AppSetting.preferred_language) sans dupliquer cette liste.
@@ -183,4 +262,8 @@ def resolve_profile(language: str | None) -> LanguageProfile:
         return EN_PROFILE
     if normalized.startswith("es") or normalized in ("spa", "spanish", "espagnol", "español"):
         return ES_PROFILE
+    if normalized.startswith("de") or normalized in ("deu", "ger", "german", "allemand", "deutsch"):
+        return DE_PROFILE
+    if normalized.startswith("it") or normalized in ("ita", "italian", "italien", "italiano"):
+        return IT_PROFILE
     return FR_PROFILE

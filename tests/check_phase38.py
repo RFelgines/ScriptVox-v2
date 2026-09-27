@@ -91,8 +91,9 @@ def _make_test_engine():
 
 
 # ── 2. AVAILABLE_LANGUAGES reflète les profils enregistrés ──────────────────
-section("AVAILABLE_LANGUAGES == {'fr', 'en', 'es'}")
-check("codes attendus", set(AVAILABLE_LANGUAGES) == {"fr", "en", "es"}, f"got {AVAILABLE_LANGUAGES}")
+section("AVAILABLE_LANGUAGES == {'fr', 'en', 'es', 'de', 'it'}")
+check("codes attendus", set(AVAILABLE_LANGUAGES) == {"fr", "en", "es", "de", "it"},
+      f"got {AVAILABLE_LANGUAGES}")
 
 
 # ── 3. _effective_book_language : ordre de priorité complet ─────────────────
@@ -135,16 +136,17 @@ _client = TestClient(app)
 _resp_get = _client.get("/settings")
 check("GET /settings -> 200", _resp_get.status_code == 200, _resp_get.text)
 _body = _resp_get.json()
-check("available_languages contient fr, en et es",
-      set(_body.get("available_languages", [])) == {"fr", "en", "es"}, f"got {_body}")
+check("available_languages contient fr, en, es, de et it",
+      set(_body.get("available_languages", [])) == {"fr", "en", "es", "de", "it"}, f"got {_body}")
 check("preferred_language par défaut -> None", _body.get("preferred_language") is None)
 
 _resp_patch = _client.patch("/settings", json={"preferred_language": "en"})
 check("PATCH /settings preferred_language='en' -> 200", _resp_patch.status_code == 200, _resp_patch.text)
 check("preferred_language persisté", _resp_patch.json().get("preferred_language") == "en")
 
-_resp_bad = _client.patch("/settings", json={"preferred_language": "de"})
-check("PATCH /settings preferred_language='de' (non supporté) -> 422",
+# "de" est supporté depuis l'ajout de l'allemand : le portugais sert désormais d'exemple.
+_resp_bad = _client.patch("/settings", json={"preferred_language": "pt"})
+check("PATCH /settings preferred_language='pt' (non supporté) -> 422",
       _resp_bad.status_code == 422, _resp_bad.text)
 
 # Régression (audit 2026-07-11) : PATCH ne doit affecter QUE les champs

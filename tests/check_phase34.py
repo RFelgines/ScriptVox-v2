@@ -105,9 +105,9 @@ _en_inputs = ["en", "en-US", "en-GB", "eng", "English", "ENGLISH", "  en  "]
 for _val in _en_inputs:
     check(f"resolve_profile({_val!r}) -> EN_PROFILE", resolve_profile(_val) is EN_PROFILE)
 
-# "es" a son propre profil depuis l'ajout de l'espagnol : il ne fait plus partie
-# des valeurs qui retombent sur le français.
-_fr_fallback_inputs = [None, "", "fr", "fr-FR", "fre", "français", "de", "unknown_lang"]
+# "es", "de" et "it" ont leur propre profil depuis l'ajout de ces langues : ils ne
+# font plus partie des valeurs qui retombent sur le français.
+_fr_fallback_inputs = [None, "", "fr", "fr-FR", "fre", "français", "pt", "unknown_lang"]
 for _val in _fr_fallback_inputs:
     check(f"resolve_profile({_val!r}) -> FR_PROFILE (fallback)", resolve_profile(_val) is FR_PROFILE)
 

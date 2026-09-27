@@ -56,11 +56,41 @@ _VOICE_MAP: dict[str, dict[str, str]] = {
         "neutral_0": "es-CL-CatalinaNeural",
         "neutral_1": "es-PE-AlexNeural",
     },
+    # de-DE compte 6 voix (3 M, 3 F) ; de-AT / de-CH complètent. Noms vérifiés en
+    # direct via edge_tts.list_voices() le 2026-09-27.
+    "de-DE": {
+        "narrator":  "de-DE-ConradNeural",
+        "male_0":    "de-DE-KillianNeural",
+        "male_1":    "de-DE-FlorianMultilingualNeural",
+        "male_2":    "de-AT-JonasNeural",
+        "female_0":  "de-DE-KatjaNeural",
+        "female_1":  "de-DE-AmalaNeural",
+        "female_2":  "de-DE-SeraphinaMultilingualNeural",
+        "neutral_0": "de-AT-IngridNeural",
+        "neutral_1": "de-CH-JanNeural",
+    },
+    # it-IT n'a que 4 voix (2 M, 2 F) et aucune autre locale italophone n'existe
+    # (liste vérifiée le 2026-09-27). Plutôt qu'une voix étrangère « multilingue »
+    # à l'accent incertain, les emplacements restants décalent la hauteur d'une
+    # voix italienne native : aucun personnage ne parle avec la voix du narrateur.
+    "it-IT": {
+        "narrator":  "it-IT-GiuseppeMultilingualNeural",
+        "male_0":    "it-IT-DiegoNeural",
+        "male_1":    {"voice": "it-IT-DiegoNeural", "pitch": "-12Hz"},
+        "male_2":    {"voice": "it-IT-DiegoNeural", "pitch": "+10Hz", "rate": "-8%"},
+        "female_0":  "it-IT-ElsaNeural",
+        "female_1":  "it-IT-IsabellaNeural",
+        "female_2":  {"voice": "it-IT-ElsaNeural", "pitch": "+12Hz"},
+        "neutral_0": {"voice": "it-IT-IsabellaNeural", "pitch": "-15Hz"},
+        "neutral_1": {"voice": "it-IT-DiegoNeural", "pitch": "+22Hz"},
+    },
 }
 
 _DEFAULT_LOCALE = "en-US"
 # Profile code (language_profiles.resolve_profile) -> EdgeTTS locale.
-_PROFILE_LOCALE: dict[str, str] = {"en": "en-US", "fr": "fr-FR", "es": "es-ES"}
+_PROFILE_LOCALE: dict[str, str] = {
+    "en": "en-US", "fr": "fr-FR", "es": "es-ES", "de": "de-DE", "it": "it-IT",
+}
 # Fréquence de sortie commune à tout le pipeline (voir app/services/audio/format.py).
 _OUTPUT_SAMPLE_RATE = OUTPUT_SAMPLE_RATE
 
