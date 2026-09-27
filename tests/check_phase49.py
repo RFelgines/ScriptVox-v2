@@ -1,4 +1,5 @@
-"""check_phase49.py — profils de langue allemand et italien (rapport de nuit 2026-09-27).
+"""check_phase49.py — rapport de nuit 2026-09-27 : profils de langue allemand et italien,
+segment sans rien à prononcer.
 
 Avant : « de » et « it » retombaient sur le profil français. Mesuré sur Gutenberg :
   - allemand (»…«) : le motif «[^»]*» du français partait du guillemet FERMANT d'une
@@ -145,6 +146,45 @@ for lang, prefix in (("de", "de-"), ("it", "it-IT-")):
 section("Qwen3-TTS : langue transmise au modèle")
 check("de -> German", qwen_mod._PROFILE_LANGUAGE[resolve_profile("de-DE").code] == "German")
 check("it -> Italian", qwen_mod._PROFILE_LANGUAGE[resolve_profile("it").code] == "Italian")
+
+
+# ── 6. Segment sans rien à prononcer ──────────────────────────────────────────
+section("TTS : un segment sans lettre ni chiffre devient un silence (plus d'échec du chapitre)")
+import asyncio  # noqa: E402
+
+from app.services.audio import chapter as chapter_mod  # noqa: E402
+from app.services.audio.format import silence_wav, wav_duration_ms  # noqa: E402
+from app.services.tts.base import BaseTTSProvider  # noqa: E402
+
+
+class _EdgeLike(BaseTTSProvider):
+    """Se comporte comme EdgeTTS : échoue (NoAudioReceived) sur un texte imprononçable."""
+    max_chars = 0
+
+    def __init__(self):
+        self.calls = []
+
+    async def synthesise(self, text, voice_id, emotion=None, reference_audio_path=None):
+        self.calls.append(text)
+        if not any(ch.isalnum() for ch in text):
+            raise RuntimeError("No audio was received.")
+        return silence_wav(400)
+
+
+class _S:
+    tts_max_chars = 0
+    audio_normalize = True
+
+
+_tts = _EdgeLike()
+for txt in (")", "* * *", "…", " — ", "\n"):
+    wav = asyncio.run(chapter_mod._synthesise_text(_tts, txt, "narrator", None, None, _S()))
+    check(f"{txt!r} -> silence de 0 ms", wav_duration_ms(wav) == 0)
+check("le moteur n'a jamais été appelé pour ces textes", _tts.calls == [], str(_tts.calls))
+wav = asyncio.run(chapter_mod._synthesise_text(_tts, "Oui.", "narrator", None, None, _S()))
+check("un vrai texte est toujours synthétisé", _tts.calls == ["Oui."] and wav_duration_ms(wav) == 400)
+wav = asyncio.run(chapter_mod._synthesise_text(_tts, "Ω 42", "narrator", None, None, _S()))
+check("chiffres et autres écritures comptent comme prononçables", _tts.calls[-1] == "Ω 42")
 
 
 print()

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from typing import Callable
 
 from sqlmodel import Session, select
@@ -30,6 +31,9 @@ _TTS_RETRY_DELAY = 3  # secondes
 
 # Silence entre deux morceaux d'une même réplique découpée (TTS-5).
 _SPLIT_PAUSE_MS = 150
+
+# Au moins une lettre ou un chiffre (toutes écritures) : sinon rien à prononcer.
+_SPEAKABLE = re.compile(r"[^\W_]")
 
 # Ré-export (rétrocompatibilité des tests / imports existants).
 _wav_duration_ms = wav_duration_ms
@@ -78,7 +82,14 @@ async def _synthesise_with_retry(
     """Up to _TTS_MAX_RETRIES attempts, spaced by _TTS_RETRY_DELAY seconds — no
     delay after the last attempt, whether it succeeds or the exception is finally
     re-raised. La sortie est normalisée (WAV mono 16 bits 24 kHz) : un provider peut donc
-    renvoyer n'importe quel format audio décodable."""
+    renvoyer n'importe quel format audio décodable.
+
+    Un texte sans aucune lettre ni chiffre (« ) », « * * * », « … ») n'est pas envoyé au
+    moteur : il n'y a rien à prononcer, et EdgeTTS répond alors « No audio was received »,
+    ce qui faisait échouer le chapitre entier après trois essais (rapport de nuit
+    2026-09-27 : segment « ) » d'Alice, chapitre IV). Il devient un silence nul."""
+    if not _SPEAKABLE.search(text):
+        return silence_wav(0)
     last_exc: Exception | None = None
     for attempt in range(_TTS_MAX_RETRIES):
         try:
