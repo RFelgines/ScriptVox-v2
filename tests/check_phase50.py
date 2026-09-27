@@ -173,6 +173,69 @@ with patch("app.core.db.get_engine", return_value=eng):
     fastapi_app.dependency_overrides.clear()
 
 
+# ── 3. Reprise par segment ────────────────────────────────────────────────────
+import asyncio  # noqa: E402
+
+section("Reprise par segment : une nouvelle tentative ne resynthétise que ce qui manque")
+eng = _engine()
+book_id, chapter_id, alice_id = _book_with_dialogue(eng, n_segments=10, seg_len=50)
+cache = tasks.segment_cache_dir(book_id, chapter_id)
+failing = _Stub(fail_on="05 ")
+with patch.object(tasks, "_get_tts_provider", return_value=failing):
+    try:
+        asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+    except Exception:  # noqa: BLE001 — échec attendu du segment 05
+        pass
+with Session(eng) as s:
+    ch = s.get(Chapter, chapter_id)
+check("1re tentative : chapitre FAILED au segment 05", ch.status.value == "FAILED", str(ch.status))
+# Le moteur factice accepte plusieurs synthèses en parallèle : pendant les réessais de 05,
+# d'autres segments ont pu aboutir. Chaque segment réussi doit être en cache.
+reussis = {c[0][:2] for c in failing.calls if not c[0].startswith("05")}
+cached_before = sorted(cache.glob("*.wav"))
+check("chaque segment réussi est en cache", len(cached_before) == len(reussis) >= 5,
+      f"{len(cached_before)} fichiers pour {sorted(reussis)}")
+check("aucun fichier partiel laissé", not list(cache.glob("*.part")))
+
+ok = _Stub()
+with patch.object(tasks, "_get_tts_provider", return_value=ok):
+    done = asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+retried = sorted(c[0][:2] for c in ok.calls)
+attendus = sorted({f"{i:02d}" for i in range(10)} - reussis)
+check("2e tentative : seuls les segments non réussis sont synthétisés (05 compris)",
+      retried == attendus and "05" in retried, f"{retried} attendu {attendus}")
+with Session(eng) as s:
+    ch = s.get(Chapter, chapter_id)
+    segs = s.exec(select(Segment).where(Segment.chapter_id == chapter_id)).all()
+check("chapitre DONE, WAV complet (10 segments minutés)",
+      done is True and ch.status.value == "DONE" and all(g.duration_ms == 400 for g in segs),
+      f"{ch.status} {[g.duration_ms for g in segs]}")
+check("cache vidé une fois le chapitre terminé", not cache.exists())
+
+again = _Stub()
+with patch.object(tasks, "_get_tts_provider", return_value=again):
+    asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+check("régénération volontaire d'un chapitre DONE : tout est refait", len(again.calls) == 10,
+      str(len(again.calls)))
+
+section("Reprise par segment : la clé couvre voix et moteur")
+eng = _engine()
+book_id, chapter_id, alice_id = _book_with_dialogue(eng, n_segments=4, seg_len=50)
+with patch.object(tasks, "_get_tts_provider", return_value=_Stub(fail_on="03 ")):
+    try:
+        asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+    except Exception:  # noqa: BLE001
+        pass
+with Session(eng) as s:
+    a = s.get(Character, alice_id); a.voice_id = "female_2"; s.add(a); s.commit()
+st = _Stub()
+with patch.object(tasks, "_get_tts_provider", return_value=st):
+    asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+check("voix d'Alice changée : ses répliques (01, 03) sont refaites, pas la narration (00, 02)",
+      sorted(c[0][:2] for c in st.calls) == ["01", "03"] and st.calls[0][1] == "female_2",
+      str([(c[0][:2], c[1]) for c in st.calls]))
+
+
 print()
 if _errors:
     print(f"ÉCHEC : {len(_errors)} vérification(s)")

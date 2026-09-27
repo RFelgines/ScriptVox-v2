@@ -1,6 +1,10 @@
 import asyncio
+import hashlib
+import json
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Callable
 
 from sqlmodel import Session, select
@@ -157,6 +161,8 @@ async def _synthesise_segments(
     tts: BaseTTSProvider,
     should_abort: Callable[[], bool] | None = None,
     max_chars: int | None = None,
+    cache_dir: str | Path | None = None,
+    cache_salt: str = "",
 ) -> tuple[bytes, list[tuple[int, int, int]]] | None:
     """Synthesise all segments and compute per-segment timing.
 
@@ -164,11 +170,17 @@ async def _synthesise_segments(
     tient dans cette taille : c'est l'extrait écouté avant de lancer le rendu complet, avec
     exactement les mêmes voix, émotions, pauses et niveaux que le chapitre final.
 
+    `cache_dir` active la REPRISE PAR SEGMENT : chaque segment synthétisé y est écrit dès
+    qu'il est prêt, sous une clé qui couvre tout ce qui change son rendu (texte, voix,
+    émotion, référence de clonage, réglages d'assemblage, et `cache_salt` = moteur et
+    réglages à chaud). Une nouvelle tentative (après /stop, échec ou redémarrage du worker)
+    relit ces segments au lieu de les resynthétiser. L'appelant vide le cache une fois le
+    chapitre DONE.
+
     Returns (assembled_wav_bytes, [(seg_id, offset_ms, duration_ms), ...]), or None
     if should_abort() returned True before the last segment was synthesised —
-    callers must discard everything computed so far for this chapter (nothing here
-    is persisted; the whole chapter is meant to be redone from scratch on the next
-    attempt, see _generate_chapter_async). Passed by book-driven generation
+    callers must discard the chapter-level result (no WAV, no timing); only the
+    per-segment cache above survives, see _generate_chapter_async. Passed by book-driven generation
     (Lot C, audit 2026-07-02, polling Book.status) and by standalone chapter
     generation (polling Chapter.cancel_requested, see _make_chapter_stop_checker).
 
@@ -227,11 +239,24 @@ async def _synthesise_segments(
     chunks: dict[int, bytes] = {}
     aborted = False
 
+    def _cache_file(i: int) -> Path | None:
+        if cache_dir is None:
+            return None
+        key = json.dumps([
+            cache_salt, settings.audio_normalize, settings.tts_max_chars,
+            segments[i].text, voice_ids[i], segments[i].emotion, ref_path.get(voice_ids[i]),
+        ], ensure_ascii=False)
+        return Path(cache_dir) / f"{hashlib.sha1(key.encode('utf-8')).hexdigest()}.wav"
+
     async def _run(i: int) -> None:
         nonlocal aborted
         async with semaphore:
             if aborted or (should_abort is not None and should_abort()):
                 aborted = True
+                return
+            cached = _cache_file(i)
+            if cached is not None and cached.is_file():
+                chunks[i] = cached.read_bytes()
                 return
             chunks[i] = await _synthesise_text(
                 tts, segments[i].text, voice_ids[i],
@@ -239,6 +264,12 @@ async def _synthesise_segments(
                 reference_audio_path=ref_path.get(voice_ids[i]),
                 settings=settings,
             )
+            if cached is not None:
+                # Écriture atomique : un arrêt brutal ne laisse jamais un WAV tronqué en cache.
+                cached.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cached.with_suffix(".part")
+                tmp.write_bytes(chunks[i])
+                os.replace(tmp, cached)
 
     jobs = [asyncio.ensure_future(_run(i)) for i in non_cloned + cloned]
     try:

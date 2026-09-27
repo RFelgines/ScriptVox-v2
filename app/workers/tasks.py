@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -514,11 +515,11 @@ async def _generate_chapter_async(
     WAV on disk). Returns True if the chapter completed (status DONE), False if
     aborted via should_abort() before completion.
 
-    On abort, NOTHING is persisted (no WAV file, no timing) and the chapter is
-    reverted to PENDING so it gets fully redone on the next attempt -- chapters are
-    the retry/reprise unit (Lot C, audit 2026-07-02), so an interrupted chapter's
-    partial work is simply discarded rather than reconciled into a torn WAV file
-    with partial timing.
+    On abort, no chapter-level result is persisted (no WAV file, no timing) and the
+    chapter is reverted to PENDING -- never a torn WAV with partial timing. The
+    segments already synthesised DO survive, in the per-segment cache
+    (segment_cache_dir): the next attempt re-reads them instead of paying their TTS
+    again, and only the missing segments are synthesised (reprise par segment).
 
     On a genuine failure the chapter is marked FAILED with its error_message (same
     as before this refactor) and the exception is RE-RAISED so a book-driven caller
@@ -628,6 +629,9 @@ async def _generate_chapter_async(
                 session.add(take)
 
             session.commit()
+        # Chapitre complet : le cache de reprise par segment n'a plus d'usage, et une
+        # régénération volontaire doit repartir de zéro (nouvelle prise).
+        shutil.rmtree(segment_cache_dir(book_id, chapter_id), ignore_errors=True)
         _record_throughput(book_id, "generation", _chars_done, time.monotonic() - _t_started)
         return True
 
@@ -1228,12 +1232,28 @@ async def _synthesise_chapter_worker(
         chapter = session.get(Chapter, chapter_id)
         book = session.get(Book, chapter.book_id) if chapter else None
         provider = _get_tts_provider(settings, session, book)
+        name = _effective_tts_provider(session, book.tts_provider if book else None) \
+            or settings.tts_provider
+        # Le sel porte aussi l'IDENTITÉ du livre (fichier source, unique par import, et date
+        # de création) : SQLite peut réutiliser l'id d'un livre supprimé, et un cache d'un
+        # ancien livre ne doit jamais servir au nouveau.
+        salt = json.dumps([
+            name, _tts_options(session), book.language if book else None,
+            book.source_path if book else None, str(book.created_at) if book else None,
+        ], sort_keys=True)
         try:
             return await _synthesise_segments(
                 chapter_id, session, provider, should_abort=should_abort,
+                cache_dir=segment_cache_dir(chapter.book_id, chapter_id), cache_salt=salt,
             )
         finally:
             _after_tts_use(provider)
+
+
+def segment_cache_dir(book_id: int, chapter_id: int) -> Path:
+    """Segments déjà synthétisés d'un chapitre en cours (reprise par segment). Vidé quand le
+    chapitre passe DONE."""
+    return DATA_DIR / str(book_id) / "segcache" / str(chapter_id)
 
 
 def _generate_chapter_impl(chapter_id: int) -> None:
