@@ -933,13 +933,18 @@ def _assemble_book(engine, book_id: int, source_path: str) -> tuple[str | None, 
     mp3_file = _Path(audio_path).with_suffix(".mp3")
     wav_to_mp3_streaming(audio_path, mp3_file)
 
+    durations = [m4b_mod.wav_file_duration_ms(p) for p in paths]
+    titles = [c[1] or f"Chapitre {c[0]}" for c in chapters]
+    marks = m4b_mod.chapter_marks(durations, titles, gap)
+    # Horodatage des chapitres (.txt), écrit même sans ffmpeg.
+    m4b_mod.chapters_txt_path(audio_path).write_text(
+        m4b_mod.chapters_txt(marks), encoding="utf-8", newline="\n",
+    )
+
     m4b_path: str | None = None
     ffmpeg = m4b_mod.find_ffmpeg(getattr(settings, "ffmpeg_path", None)
                                  if isinstance(getattr(settings, "ffmpeg_path", None), str) else None)
     if ffmpeg:
-        durations = [m4b_mod.wav_file_duration_ms(p) for p in paths]
-        titles = [c[1] or f"Chapitre {c[0]}" for c in chapters]
-        marks = m4b_mod.chapter_marks(durations, titles, gap)
         built = m4b_mod.build_m4b(
             audio_path, _Path(audio_path).with_suffix(".m4b"), title=book_title,
             author=book_author, chapters=marks, cover_path=cover_path, ffmpeg=ffmpeg,

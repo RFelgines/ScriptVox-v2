@@ -115,6 +115,10 @@ check("livre DONE une fois tous les chapitres inclus faits", b.status == BookSta
 check("WAV, MP3 assemblés", b.audio_path and Path(b.audio_path).exists() and b.mp3_path and Path(b.mp3_path).exists())
 check("durée du livre = 2 x 1 s + 0,5 s de jonction (chapitre exclu absent)",
       abs(wav_duration_ms(Path(b.audio_path).read_bytes()) - 2500) < 20, str(wav_duration_ms(Path(b.audio_path).read_bytes())))
+_txt = Path(b.audio_path).with_suffix(".chapters.txt")
+check("horodatage des chapitres écrit (2e chapitre à 1 s + 0,5 s de jonction)",
+      _txt.exists() and _txt.read_text(encoding="utf-8").splitlines()[1].startswith("00:00:01 "),
+      _txt.read_text(encoding="utf-8") if _txt.exists() else "absent")
 import shutil  # noqa: E402
 if shutil.which("ffmpeg"):
     check("M4B produit", b.m4b_path and Path(b.m4b_path).exists(), str(b.m4b_path))
@@ -182,6 +186,15 @@ m4b_file = _TMP / "x.m4b"; m4b_file.write_bytes(b"fake")
 with Session(eng3) as s:
     bb = s.get(Book, bid4); bb.m4b_path = str(m4b_file); s.add(bb); s.commit()
 check("M4B servi quand présent", client.get(f"/books/{bid4}/audio/m4b").status_code == 200)
+check("horodatage absent (livre non assemblé) -> 404",
+      client.get(f"/books/{bid4}/audio/chapters.txt").status_code == 404)
+_wav4 = _TMP / "livre4.wav"; _wav4.write_bytes(b"x")
+_wav4.with_suffix(".chapters.txt").write_text("00:00:00 A\n", encoding="utf-8", newline="\n")
+with Session(eng3) as s:
+    bb = s.get(Book, bid4); bb.audio_path = str(_wav4); s.add(bb); s.commit()
+_r = client.get(f"/books/{bid4}/audio/chapters.txt")
+check("horodatage servi en texte", _r.status_code == 200 and _r.text == "00:00:00 A\n"
+      and _r.headers["content-type"].startswith("text/plain"), f"{_r.status_code} {_r.text!r}")
 check("BookResponse expose stage / eta / m4b_path", {"stage", "eta_seconds", "m4b_path"} <= set(client.get(f"/books/{bid4}").json()))
 
 print("\n[4b] chapitres exclus : jamais exigés, jamais mis en file")

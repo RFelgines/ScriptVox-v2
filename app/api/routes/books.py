@@ -281,6 +281,24 @@ def get_book_m4b(book_id: int, session: Session = Depends(get_session)) -> FileR
     return FileResponse(str(path), media_type="audio/mp4", filename=safe_name)
 
 
+@router.get("/{book_id}/audio/chapters.txt")
+def get_book_chapters_txt(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
+    """Horodatage des chapitres (« HH:MM:SS Titre » par ligne), écrit à côté du livre
+    assemblé : description YouTube, hébergeur de podcast, montage."""
+    from app.services.audio.m4b import chapters_txt_path
+
+    book = session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    if not book.audio_path:
+        raise HTTPException(status_code=404, detail="Chapter timestamps not ready — generate the book first.")
+    path = chapters_txt_path(book.audio_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Chapter timestamps file not found on disk.")
+    safe_name = f"{(book.title or 'audiobook').replace('/', '-').replace(chr(92), '-')} - chapitres.txt"
+    return FileResponse(str(path), media_type="text/plain; charset=utf-8", filename=safe_name)
+
+
 @router.get("/{book_id}/cover")
 def get_book_cover(book_id: int, session: Session = Depends(get_session)) -> FileResponse:
     book = session.get(Book, book_id)

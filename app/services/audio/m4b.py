@@ -59,6 +59,22 @@ def chapter_marks(durations_ms: list[int], titles: list[str], gap_ms: int) -> li
     return marks
 
 
+def _hms(ms: int) -> str:
+    s = max(0, ms) // 1000
+    return f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
+
+
+def chapters_txt(chapters: list[tuple[str, int, int]]) -> str:
+    """Horodatage des chapitres, une ligne « HH:MM:SS Titre » par chapitre : le format
+    que lisent les descriptions YouTube, la plupart des hébergeurs de podcasts et les
+    outils de montage. Complète le M4B, et reste disponible sans ffmpeg."""
+    return "".join(f"{_hms(start)} {' '.join(name.split())}\n" for name, start, _ in chapters)
+
+
+def chapters_txt_path(audio_path: str | Path) -> Path:
+    return Path(audio_path).with_suffix(".chapters.txt")
+
+
 def build_m4b(
     wav_path: str | Path, output_path: str | Path, *, title: str, author: str | None,
     chapters: list[tuple[str, int, int]], cover_path: str | Path | None = None,
