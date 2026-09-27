@@ -1449,6 +1449,67 @@ def generate_character_preview(character_id: int, voice_id: str) -> None:
     _generate_character_preview_impl(character_id, voice_id)
 
 
+# Extrait d'un chapitre avant rendu : ~900 caractères, soit environ une minute d'écoute.
+CHAPTER_EXCERPT_MAX_CHARS = 900
+
+
+def chapter_excerpt_path(session: Session, chapter) -> Path:
+    """Fichier de l'extrait d'un chapitre. Le nom inclut une empreinte de tout ce qui change
+    le rendu (moteur effectif et ses réglages, langue, voix attribuée à chaque personnage) :
+    réattribuer une voix ou changer de moteur invalide l'extrait."""
+    import hashlib
+
+    from app.models import Book, Character
+
+    book = session.get(Book, chapter.book_id)
+    provider = _effective_tts_provider(session, book.tts_provider if book else None) \
+        or get_settings().tts_provider
+    voices = sorted(
+        (c.id, c.voice_id or "") for c in session.exec(
+            select(Character).where(Character.book_id == chapter.book_id)
+        ).all()
+    )
+    fingerprint = json.dumps(
+        [provider, _tts_options(session), book.language if book else None, voices,
+         CHAPTER_EXCERPT_MAX_CHARS], sort_keys=True,
+    )
+    digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:8]
+    return DATA_DIR / str(chapter.book_id) / "previews" / f"chapter_{chapter.id}_{digest}.wav"
+
+
+def _generate_chapter_excerpt_impl(chapter_id: int) -> None:
+    from app.core.db import get_engine
+    from app.models import Book, Chapter
+    from app.services.audio.chapter import synthesise_chapter_excerpt
+
+    engine = get_engine()
+    settings = get_settings()
+    with Session(engine) as session:
+        chapter = session.get(Chapter, chapter_id)
+        if chapter is None:
+            logger.error("chapter excerpt: unknown chapter_id=%d", chapter_id)
+            return
+        book = session.get(Book, chapter.book_id)
+        out_path = chapter_excerpt_path(session, chapter)
+        provider = _get_tts_provider(settings, session, book)
+        try:
+            wav = asyncio.run(synthesise_chapter_excerpt(
+                chapter_id, session, provider, CHAPTER_EXCERPT_MAX_CHARS,
+            ))
+        except Exception:  # noqa: BLE001 — l'extrait ne doit jamais casser le worker
+            logger.exception("chapter excerpt failed (chapter=%d)", chapter_id)
+            return
+        finally:
+            _after_tts_use(provider)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(wav)
+
+
+@huey.task(priority=10)  # tâche courte : passe avant les chapitres en file
+def generate_chapter_excerpt(chapter_id: int) -> None:
+    _generate_chapter_excerpt_impl(chapter_id)
+
+
 @huey.on_startup()
 def _reconcile_zombie_state() -> None:
     """Runs once when the Huey consumer (re)starts. A Book left PROCESSING or

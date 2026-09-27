@@ -140,13 +140,29 @@ async def _synthesise_text(
     return audio
 
 
+def _prefix_within(segments: list, max_chars: int) -> list:
+    """Premiers segments dont le texte cumulé tient dans `max_chars` (toujours au moins un)."""
+    out, total = [], 0
+    for seg in segments:
+        total += len(seg.text or "")
+        if out and total > max_chars:
+            break
+        out.append(seg)
+    return out
+
+
 async def _synthesise_segments(
     chapter_id: int,
     session: Session,
     tts: BaseTTSProvider,
     should_abort: Callable[[], bool] | None = None,
+    max_chars: int | None = None,
 ) -> tuple[bytes, list[tuple[int, int, int]]] | None:
     """Synthesise all segments and compute per-segment timing.
+
+    `max_chars` limite la synthèse aux premiers segments (au moins un) dont le texte cumulé
+    tient dans cette taille : c'est l'extrait écouté avant de lancer le rendu complet, avec
+    exactement les mêmes voix, émotions, pauses et niveaux que le chapitre final.
 
     Returns (assembled_wav_bytes, [(seg_id, offset_ms, duration_ms), ...]), or None
     if should_abort() returned True before the last segment was synthesised —
@@ -166,6 +182,8 @@ async def _synthesise_segments(
 
     if not segments:
         raise ValueError(f"Chapter {chapter_id} has no segments to synthesise")
+    if max_chars is not None:
+        segments = _prefix_within(segments, max_chars)
 
     char_voice: dict[int, str] = {}
     for seg in segments:
@@ -262,4 +280,12 @@ async def synthesise_chapter(
     Raises ValueError if the chapter has no segments.
     """
     wav, _ = await _synthesise_segments(chapter_id, session, tts)
+    return wav
+
+
+async def synthesise_chapter_excerpt(
+    chapter_id: int, session: Session, tts: BaseTTSProvider, max_chars: int,
+) -> bytes:
+    """Extrait du début du chapitre, rendu comme le chapitre final (voir max_chars)."""
+    wav, _ = await _synthesise_segments(chapter_id, session, tts, max_chars=max_chars)
     return wav

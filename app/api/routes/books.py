@@ -33,8 +33,10 @@ from app.services.audio.assembler import assemble_wav_from_files
 from app.services.voice_assignment import NARRATOR_VOICE_ID
 from app.workers.tasks import (
     analyze_book,
+    chapter_excerpt_path,
     generate_book,
     generate_chapter,  # noqa: F401 — patchable par les tests
+    generate_chapter_excerpt,
     generate_chapter_queue_pump,
     generate_segment,
 )
@@ -403,6 +405,44 @@ def trigger_chapter_generate(
     session.refresh(chapter)
     generate_chapter_queue_pump()
     return ChapterResponse.model_validate(chapter)
+
+
+def _analyzed_chapter(book_id: int, position: int, session: Session) -> Chapter:
+    if session.get(Book, book_id) is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(status_code=404, detail=f"Chapter {position} not found for book {book_id}.")
+    has_segments = session.exec(
+        select(func.count()).select_from(Segment).where(Segment.chapter_id == chapter.id)
+    ).one()
+    if not has_segments:
+        raise HTTPException(status_code=409, detail=f"Chapter {position} is not analyzed yet.")
+    return chapter
+
+
+@router.post("/{book_id}/chapters/{position}/excerpt", status_code=202)
+def request_chapter_excerpt(book_id: int, position: int, session: Session = Depends(get_session)) -> dict:
+    """Lance (tâche courte, prioritaire) le rendu d'un extrait d'environ une minute du début
+    du chapitre, avec les voix, émotions et réglages du rendu final : on écoute avant de
+    lancer un rendu de plusieurs dizaines de minutes. Déjà en cache -> `ready: true`."""
+    chapter = _analyzed_chapter(book_id, position, session)
+    if chapter_excerpt_path(session, chapter).exists():
+        return {"ready": True}
+    generate_chapter_excerpt(chapter.id)
+    return {"ready": False}
+
+
+@router.get("/{book_id}/chapters/{position}/excerpt")
+def get_chapter_excerpt(book_id: int, position: int, session: Session = Depends(get_session)) -> FileResponse:
+    """Extrait déjà rendu (404 sinon : le lancer avec POST puis réinterroger)."""
+    chapter = _analyzed_chapter(book_id, position, session)
+    path = chapter_excerpt_path(session, chapter)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Excerpt not generated yet.")
+    return FileResponse(str(path), media_type="audio/wav", filename=path.name)
 
 
 @router.post("/{book_id}/chapters/{position}/stop", response_model=ChapterResponse)
