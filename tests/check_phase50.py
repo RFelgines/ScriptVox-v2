@@ -413,6 +413,96 @@ check("AUDIO_MASTERING=acx (défaut) : mastering appliqué ; =off : non appliqu�
       n_acx == 1 and n_off == 0, f"acx={n_acx} off={n_off}")
 
 
+# ── 6. Nettoyage EPUB : titres (nav > NCX > intertitres) et pages liminaires ──
+import zipfile  # noqa: E402
+
+from app.services.epub.parser import EpubParser  # noqa: E402
+
+_LONG = " ".join(["Il marchait longtemps sous la pluie sans rien dire à personne."] * 120)
+
+
+def _epub(path, *, nav_toc=None, nav_landmarks=None, ncx=None, guide=None, docs=None):
+    """EPUB minimal écrit à la main, pour contrôler exactement nav, NCX, guide et repères.
+    docs : [(fichier, h1, texte, epub_type_du_body)]"""
+    docs = docs or []
+    items = "".join(f'<item id="d{i}" href="{f}" media-type="application/xhtml+xml"/>'
+                    for i, (f, *_r) in enumerate(docs))
+    spine = "".join(f'<itemref idref="d{i}"/>' for i in range(len(docs)))
+    nav_item = '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' \
+        if nav_toc is not None or nav_landmarks else ""
+    ncx_item = '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>' if ncx else ""
+    guide_xml = "<guide>" + "".join(f'<reference type="{t}" href="{h}" title="{t}"/>' for t, h in guide) \
+        + "</guide>" if guide else ""
+    opf = f'''<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">x</dc:identifier>
+<dc:title>Test</dc:title><dc:language>fr</dc:language></metadata>
+<manifest>{items}{nav_item}{ncx_item}</manifest>
+<spine{' toc="ncx"' if ncx else ''}>{spine}</spine>{guide_xml}</package>'''
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml", '<?xml version="1.0"?><container version="1.0" '
+                   'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+                   '<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+                   '</rootfiles></container>')
+        z.writestr("OEBPS/content.opf", opf)
+        for f, h1, text, etype in docs:
+            body_attr = f' epub:type="{etype}"' if etype else ""
+            z.writestr(f"OEBPS/{f}", '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+                       f'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>t</title></head><body{body_attr}>'
+                       f'<h1>{h1}</h1><p>{text}</p></body></html>')
+        if nav_toc is not None or nav_landmarks:
+            toc_li = "".join(f'<li><a href="{h}">{t}</a></li>' for h, t in (nav_toc or []))
+            lm = "".join(f'<li><a epub:type="{t}" href="{h}">{t}</a></li>' for t, h in (nav_landmarks or []))
+            z.writestr("OEBPS/nav.xhtml", '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" '
+                       'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>nav</title></head><body>'
+                       f'<nav epub:type="toc"><ol>{toc_li}</ol></nav>'
+                       + (f'<nav epub:type="landmarks"><ol>{lm}</ol></nav>' if lm else "") + '</body></html>')
+        if ncx:
+            pts = "".join(f'<navPoint id="n{i}" playOrder="{i+1}"><navLabel><text>{t}</text></navLabel>'
+                          f'<content src="{h}"/></navPoint>' for i, (h, t) in enumerate(ncx))
+            z.writestr("OEBPS/toc.ncx", '<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+                       f'version="2005-1"><head/><docTitle><text>T</text></docTitle><navMap>{pts}</navMap></ncx>')
+    return str(path)
+
+
+def _titles(path):
+    return [(c.title, c.included) for c in EpubParser().parse(path).chapters]
+
+
+section("EPUB : titres de chapitres — nav EPUB3, puis NCX, puis intertitres")
+docs = [("c1.xhtml", "I", _LONG, None), ("c2.xhtml", "II", _LONG, None)]
+p = _epub(_TMP / "nav_ncx.epub", docs=docs,
+          nav_toc=[("c1.xhtml", "Le départ"), ("c2.xhtml", "L'arrivée")],
+          ncx=[("c1.xhtml", "Chapter 1"), ("c2.xhtml", "Chapter 2")])
+check("nav et NCX présents -> titres de la nav", [t for t, _ in _titles(p)] == ["Le départ", "L'arrivée"],
+      str(_titles(p)))
+p = _epub(_TMP / "nav_vide.epub", docs=docs, nav_toc=[],
+          ncx=[("c1.xhtml", "Chapter 1"), ("c2.xhtml", "Chapter 2")])
+check("nav vide (ebooklib n'y retombe pas) -> titres du NCX",
+      [t for t, _ in _titles(p)] == ["Chapter 1", "Chapter 2"], str(_titles(p)))
+p = _epub(_TMP / "nav_partielle.epub", docs=docs, nav_toc=[("c1.xhtml", "Le départ")],
+          ncx=[("c1.xhtml", "Chapter 1"), ("c2.xhtml", "Chapter 2")])
+check("nav partielle -> le NCX complète le fichier manquant",
+      [t for t, _ in _titles(p)] == ["Le départ", "Chapter 2"], str(_titles(p)))
+p = _epub(_TMP / "sans_sommaire.epub", docs=docs)
+check("ni nav ni NCX -> intertitres <h1>", [t for t, _ in _titles(p)] == ["I", "II"], str(_titles(p)))
+
+section("EPUB : pages liminaires déclarées par la sémantique EPUB")
+front = [("c0.xhtml", "Titre", "Un roman. Éditions Veltra.", None),
+         ("legal.xhtml", "Mentions", "Tous droits réservés.", None),
+         ("ded.xhtml", "À Marie", "À Marie, pour tout.", "frontmatter dedication"),
+         ("c1.xhtml", "I", "Court récit narratif.", None)]
+p = _epub(_TMP / "liminaires.epub", docs=front, nav_toc=[("c1.xhtml", "Chapitre un")],
+          nav_landmarks=[("titlepage", "c0.xhtml"), ("bodymatter", "c1.xhtml")],
+          guide=[("copyright-page", "legal.xhtml")])
+got = _titles(p)
+check("page de titre (repère nav) exclue, même dans un livre court", got[0][1] is False, str(got))
+check("mentions légales (<guide> OPF) exclues", got[1][1] is False, str(got))
+check("dédicace (epub:type du <body>) exclue", got[2][1] is False, str(got))
+check("le récit (bodymatter) reste inclus", got[3] == ("Chapitre un", True), str(got))
+
+
 print()
 if _errors:
     print(f"ÉCHEC : {len(_errors)} vérification(s)")

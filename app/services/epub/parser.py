@@ -1,8 +1,9 @@
 import re
+import warnings
 import zipfile
 
 import ebooklib
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from dataclasses import dataclass
 from ebooklib import epub
 
@@ -130,10 +131,62 @@ def _extract_cover(book) -> tuple[bytes | None, str | None]:
     return None, None
 
 
-def _toc_titles(book) -> dict[str, str]:
-    """Titres de la table des matières EPUB par nom de fichier : plus fiables que le premier
-    <h1> (souvent le titre du livre répété, ou absent)."""
-    titles: dict[str, str] = {}
+# Sémantique EPUB des pages non narratives : types des repères EPUB3 (nav landmarks,
+# epub:type) et du <guide> OPF d'EPUB2. « bodymatter », « text », « chapter »… restent inclus.
+_NON_NARRATIVE_TYPES = {
+    "cover", "titlepage", "title-page", "halftitlepage", "toc", "loi", "lot", "copyright-page",
+    "copyright", "colophon", "dedication", "acknowledgements", "acknowledgments", "imprint",
+    "imprimatur", "index", "bibliography", "glossary", "notice", "contributors", "errata",
+    "landmarks", "page-list",
+}
+
+
+def _file_key(href: str) -> str:
+    return href.split("#", 1)[0].rsplit("/", 1)[-1]
+
+
+def _nav_entries(book) -> tuple[list[tuple[str, str]], set[str]]:
+    """Nav EPUB3 lue directement : (entrées du sommaire [(href, titre)] dans l'ordre,
+    fichiers marqués non narratifs par les repères « landmarks »). Vide sans nav."""
+    entries: list[tuple[str, str]] = []
+    non_narrative: set[str] = set()
+    for item in book.get_items():
+        if not isinstance(item, epub.EpubNav):
+            continue
+        soup = BeautifulSoup(item.get_content(), "html.parser")
+        for nav in soup.find_all("nav"):
+            kind = (nav.get("epub:type") or nav.get("role") or "").lower()
+            for a in nav.find_all("a", href=True):
+                if "landmarks" in kind:
+                    if (a.get("epub:type") or "").lower() in _NON_NARRATIVE_TYPES:
+                        non_narrative.add(_file_key(a["href"]))
+                elif "toc" in kind:
+                    title = " ".join(a.get_text().split())
+                    if title:
+                        entries.append((a["href"], title))
+    return entries, non_narrative
+
+
+def _ncx_entries(book) -> list[tuple[str, str]]:
+    """NCX (EPUB2) lu directement, dans l'ordre des navPoint (imbrication comprise)."""
+    entries: list[tuple[str, str]] = []
+    for item in book.get_items():
+        if item.media_type != "application/x-dtbncx+xml" and not (item.get_name() or "").endswith(".ncx"):
+            continue
+        with warnings.catch_warnings():  # NCX = XML lu en HTML exprès (tolérant, sans lxml)
+            warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+        for point in soup.find_all("navpoint"):
+            label, content = point.find("navlabel"), point.find("content")
+            title = " ".join(label.get_text().split()) if label else ""
+            if content is not None and content.get("src") and title:
+                entries.append((content["src"], title))
+    return entries
+
+
+def _ebooklib_entries(book) -> list[tuple[str, str]]:
+    """book.toc d'ebooklib aplati (dernier recours)."""
+    entries: list[tuple[str, str]] = []
 
     def walk(nodes) -> None:
         for node in nodes:
@@ -146,42 +199,70 @@ def _toc_titles(book) -> dict[str, str]:
             href = getattr(node, "href", None)
             title = getattr(node, "title", None)
             if href and title:
-                key = href.split("#", 1)[0].rsplit("/", 1)[-1]
-                titles.setdefault(key, str(title).strip())
+                entries.append((href, str(title).strip()))
 
     try:
         walk(book.toc)
     except Exception:  # noqa: BLE001 — TOC malformée : on retombe sur les <h1>
-        return {}
+        return []
+    return entries
+
+
+def _toc_entries(book) -> list[tuple[str, str]]:
+    """Sommaire de référence [(href, titre)] : la nav EPUB3 d'abord ; le NCX complète les
+    fichiers que la nav ne couvre pas, ou la remplace si elle est vide ou cassée (ebooklib,
+    lui, ne retombe pas sur le NCX quand une nav existe) ; book.toc d'ebooklib en dernier
+    recours. Les titres par intertitre (<h1>…) restent le repli de l'appelant."""
+    nav, _ = _nav_entries(book)
+    merged = list(nav)
+    covered_files = {_file_key(h) for h, _ in nav}
+    for href, title in _ncx_entries(book):
+        if _file_key(href) not in covered_files:
+            merged.append((href, title))
+    return merged or _ebooklib_entries(book)
+
+
+def _non_narrative_files(book) -> set[str]:
+    """Fichiers déclarés couverture, page de titre, sommaire, mentions légales… par la
+    sémantique EPUB (repères de la nav EPUB3, <guide> OPF d'EPUB2)."""
+    _, landmarks = _nav_entries(book)
+    guide = {
+        _file_key(g.get("href") or "") for g in (getattr(book, "guide", None) or [])
+        if (g.get("type") or "").lower() in _NON_NARRATIVE_TYPES and g.get("href")
+    }
+    return landmarks | guide
+
+
+def _declared_non_narrative(soup: BeautifulSoup) -> bool:
+    """epub:type porté par le <body> ou par la première section du document."""
+    for tag in (soup.find("body"), soup.find(["section", "div"])):
+        types = set(((tag.get("epub:type") or "") if tag else "").lower().split())
+        if types & _NON_NARRATIVE_TYPES:
+            return True
+    return False
+
+
+def _toc_titles(book, entries: list[tuple[str, str]] | None = None) -> dict[str, str]:
+    """Titres du sommaire par nom de fichier (premier titre qui pointe vers le fichier) :
+    plus fiables que le premier <h1> (souvent le titre du livre répété, ou absent)."""
+    titles: dict[str, str] = {}
+    for href, title in (entries if entries is not None else _toc_entries(book)):
+        titles.setdefault(_file_key(href), title)
     return titles
 
 
-def _toc_anchors(book) -> dict[str, list[tuple[str, str]]]:
-    """Ancres de la table des matières par fichier, dans l'ordre du sommaire :
-    {fichier: [(id_ancre, titre), ...]}. Sert à découper un fichier qui contient PLUSIEURS
-    chapitres (cas des EPUB du Projet Gutenberg : tout le livre en 3-4 fichiers)."""
+def _toc_anchors(book, entries: list[tuple[str, str]] | None = None) -> dict[str, list[tuple[str, str]]]:
+    """Ancres du sommaire par fichier, dans l'ordre : {fichier: [(id_ancre, titre), ...]}.
+    Sert à découper un fichier qui contient PLUSIEURS chapitres (cas des EPUB du Projet
+    Gutenberg : tout le livre en 3-4 fichiers)."""
     anchors: dict[str, list[tuple[str, str]]] = {}
-
-    def walk(nodes) -> None:
-        for node in nodes:
-            if isinstance(node, (list, tuple)):
-                if node:
-                    walk([node[0]])
-                    if len(node) > 1 and isinstance(node[1], (list, tuple)):
-                        walk(node[1])
-                continue
-            href = getattr(node, "href", None)
-            title = getattr(node, "title", None)
-            if href and title and "#" in href:
-                file_part, anchor = href.split("#", 1)
-                key = file_part.rsplit("/", 1)[-1]
-                if anchor and all(a != anchor for a, _ in anchors.get(key, [])):
-                    anchors.setdefault(key, []).append((anchor, str(title).strip()))
-
-    try:
-        walk(book.toc)
-    except Exception:  # noqa: BLE001
-        return {}
+    for href, title in (entries if entries is not None else _toc_entries(book)):
+        if "#" not in href:
+            continue
+        anchor = href.split("#", 1)[1]
+        key = _file_key(href)
+        if anchor and all(a != anchor for a, _ in anchors.get(key, [])):
+            anchors.setdefault(key, []).append((anchor, title))
     return anchors
 
 
@@ -227,8 +308,11 @@ class EpubParser:
 
         chapters: list[ParsedChapter] = []
         position = 0
-        toc = _toc_titles(book)
-        anchors = _toc_anchors(book)
+        entries = _toc_entries(book)
+        toc = _toc_titles(book, entries)
+        anchors = _toc_anchors(book, entries)
+        declared_front = _non_narrative_files(book)
+        declared_by_body: set[int] = set()  # index des chapitres dont le <body> le déclare
         file_names: list[str] = []
 
         for spine_id, _ in book.spine:
@@ -241,10 +325,16 @@ class EpubParser:
                 tag.decompose()
 
             item_file = (item.get_name() or "").rsplit("/", 1)[-1]
+            # Contenu BRUT : get_content() d'ebooklib reconstruit le document et perd les
+            # attributs du <body>, dont epub:type.
+            declared = item_file in declared_front or _declared_non_narrative(
+                BeautifulSoup(getattr(item, "content", b"") or b"", "html.parser"))
             file_anchors = anchors.get(item_file, [])
             if len(file_anchors) >= 2:
                 # Plusieurs chapitres dans ce fichier : un chapitre par entrée du sommaire.
                 for section_title, section_text in _split_by_anchors(soup, file_anchors):
+                    if declared:
+                        declared_by_body.add(len(chapters))
                     position += 1
                     file_names.append(item.get_name() or "")
                     chapters.append(ParsedChapter(
@@ -264,11 +354,19 @@ class EpubParser:
                 elif soup.title:
                     chapter_title = soup.title.get_text(strip=True) or None
 
+            if declared:
+                declared_by_body.add(len(chapters))
             position += 1
             file_names.append(item.get_name() or "")
             chapters.append(
                 ParsedChapter(position=position, title=chapter_title, raw_text=raw_text)
             )
+
+        # Pages que l'EPUB DÉCLARE non narratives (repères EPUB3, <guide> OPF, epub:type) :
+        # couverture, page de titre, sommaire, mentions légales… Métadonnée explicite, pas
+        # une heuristique : appliquée même à un livre court. Réactivables dans l'UI.
+        for i in declared_by_body:
+            chapters[i].included = False
 
         # Pages non narratives (BE-6). Appliqué seulement si le livre contient au moins un vrai
         # chapitre : un livre entièrement court (jeu de test, recueil de poèmes) ne doit pas
