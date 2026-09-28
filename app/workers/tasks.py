@@ -1446,7 +1446,9 @@ def _generate_character_preview_impl(character_id: int, voice_id: str) -> None:
             logger.error("character preview: unknown character_id=%d", character_id)
             return
         book = session.get(Book, character.book_id)
-        text = _preview_text(session, character)
+        from app.services.audio import lexicon as _lexicon
+        text = _lexicon.apply(_preview_text(session, character),
+                              _lexicon.load_rules(session, character.book_id))
         voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
         ref_path = voice.reference_audio_path if voice else None
         out_path = character_preview_path(session, character, voice_id)
@@ -1628,7 +1630,8 @@ async def _generate_segment_async(take_id: int, engine) -> None:
 
         voice_id = take.voice_id
         emotion = take.emotion
-        seg_text = segment.text
+        from app.services.audio import lexicon as _lexicon
+        seg_text = _lexicon.apply(segment.text, _lexicon.load_rules(session, chapter.book_id))
         book_id = chapter.book_id
 
         v = session.exec(_select(Voice).where(Voice.voice_id == voice_id)).first()

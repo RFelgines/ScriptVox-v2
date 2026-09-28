@@ -10,7 +10,8 @@ from typing import Callable
 from sqlmodel import Session, select
 
 from app.core.enums import SegmentType
-from app.models.entities import Character, Segment, Voice
+from app.models.entities import Chapter, Character, Segment, Voice
+from app.services.audio import lexicon
 from app.services.audio.assembler import assemble_wav_bytes
 from app.services.audio.format import (
     adjust_level,
@@ -197,6 +198,11 @@ async def _synthesise_segments(
     if max_chars is not None:
         segments = _prefix_within(segments, max_chars)
 
+    # Texte réellement prononcé : celui du livre, passé au lexique de prononciation.
+    chapter = session.get(Chapter, chapter_id)
+    rules = lexicon.load_rules(session, chapter.book_id if chapter else None)
+    spoken = [lexicon.apply(seg.text, rules) for seg in segments]
+
     char_voice: dict[int, str] = {}
     for seg in segments:
         if seg.character_id and seg.character_id not in char_voice:
@@ -244,7 +250,7 @@ async def _synthesise_segments(
             return None
         key = json.dumps([
             cache_salt, settings.audio_normalize, settings.tts_max_chars,
-            segments[i].text, voice_ids[i], segments[i].emotion, ref_path.get(voice_ids[i]),
+            spoken[i], voice_ids[i], segments[i].emotion, ref_path.get(voice_ids[i]),
         ], ensure_ascii=False)
         return Path(cache_dir) / f"{hashlib.sha1(key.encode('utf-8')).hexdigest()}.wav"
 
@@ -259,7 +265,7 @@ async def _synthesise_segments(
                 chunks[i] = cached.read_bytes()
                 return
             chunks[i] = await _synthesise_text(
-                tts, segments[i].text, voice_ids[i],
+                tts, spoken[i], voice_ids[i],
                 emotion=segments[i].emotion,
                 reference_audio_path=ref_path.get(voice_ids[i]),
                 settings=settings,

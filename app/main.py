@@ -7,6 +7,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes.books import router as books_router
 from app.api.routes.characters import router as characters_router
+from app.api.routes.lexicon import router as lexicon_router
 from app.api.routes.merge_suggestions import router as merge_suggestions_router
 from app.api.routes.models import router as models_router
 from app.api.routes.queue import router as queue_router
@@ -68,3 +69,4 @@ app.include_router(voices_router, prefix="/voices", tags=["voices"])
 app.include_router(settings_router, prefix="/settings", tags=["settings"])
 app.include_router(queue_router, prefix="/chapters", tags=["queue"])
 app.include_router(models_router, prefix="/models", tags=["models"])
+app.include_router(lexicon_router, prefix="/lexicon", tags=["lexicon"])

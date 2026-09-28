@@ -212,3 +212,23 @@ class AppSetting(SQLModel, table=True):
     # qui permet de changer de modèle depuis Paramètres, y compris un modèle non listé.
     llm_options: Optional[str] = None
     tts_options: Optional[str] = None
+
+
+class LexiconEntry(SQLModel, table=True):
+    """Lexique de prononciation : `term` est remplacé par `replacement` dans le texte ENVOYÉ
+    AU TTS, jamais dans le texte affiché (Segment.text reste celui du livre). Sert aux noms
+    propres et mots étrangers mal prononcés (« Tolkien » -> « Tolkine »), aux sigles
+    (« SNCF » -> « S N C F »), aux abréviations (« M. » -> « Monsieur »).
+
+    book_id NULL = entrée globale (tous les livres) ; une entrée du livre prime sur une
+    entrée globale de même terme."""
+    __tablename__ = "lexicon_entry"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: Optional[int] = Field(default=None, foreign_key="book.id", index=True)
+    term: str
+    replacement: str
+    # Mot entier (par défaut) : « Paul » ne touche pas « Paulette ».
+    whole_word: bool = True
+    case_sensitive: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

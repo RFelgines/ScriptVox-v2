@@ -853,7 +853,14 @@ def delete_book(book_id: int, session: Session = Depends(get_session)) -> None:
     book = session.get(Book, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
-    paths = (book.source_path, book.audio_path, book.mp3_path, book.m4b_path)
+    from app.models import LexiconEntry
+    from app.services.audio.m4b import chapters_txt_path
+
+    paths = (book.source_path, book.audio_path, book.mp3_path, book.m4b_path,
+             str(chapters_txt_path(book.audio_path)) if book.audio_path else None)
+    # Entrées de lexique propres au livre (pas de relationship ORM : suppression explicite).
+    for entry in session.exec(select(LexiconEntry).where(LexiconEntry.book_id == book_id)).all():
+        session.delete(entry)
     session.delete(book)
     session.commit()
     for path in paths:

@@ -236,6 +236,85 @@ check("voix d'Alice changée : ses répliques (01, 03) sont refaites, pas la nar
       str([(c[0][:2], c[1]) for c in st.calls]))
 
 
+# ── 4. Lexique de prononciation ───────────────────────────────────────────────
+from app.services.audio import lexicon  # noqa: E402
+from app.services.audio.lexicon import Rule  # noqa: E402
+
+section("Lexique : substitutions")
+R = [Rule("M.", "Monsieur"), Rule("SNCF", "S N C F"), Rule("Paul", "Pôl"),
+     Rule("Mme de Rênal", "Madame de Rénal"), Rule("Mme", "Madame"),
+     Rule("Tolkien", "Tolkine", case_sensitive=True), Rule("ph", "f", whole_word=False)]
+R = sorted(R, key=lambda r: len(r.term), reverse=True)
+cas = {
+    "M. Dupont prend la SNCF.": "Monsieur Dupont prend la S N C F.",
+    "Paul et Paulette": "Pôl et Paulette",            # mot entier : Paulette intact
+    "paul": "Pôl",                                     # insensible à la casse par défaut
+    "Mme de Rênal et Mme Derville": "Madame de Rénal et Madame Derville",  # le plus long d'abord
+    "Tolkien, TOLKIEN": "Tolkine, TOLKIEN",            # sensible à la casse sur demande
+    "Le phare": "Le fare",                             # sous-chaîne sur demande
+    "Monsieur": "Monsieur",                            # pas de réapplication en cascade
+}
+for src, attendu in cas.items():
+    got = lexicon.apply(src, R)
+    check(f"{src!r} -> {attendu!r}", got == attendu, repr(got))
+check("aucune règle -> texte inchangé", lexicon.apply("M. X", []) == "M. X")
+
+section("Lexique : portée globale / livre, rendu, API")
+eng = _engine()
+book_id, chapter_id, _ = _book_with_dialogue(eng, n_segments=2, seg_len=40)
+with Session(eng) as s:
+    seg = s.exec(select(Segment).where(Segment.chapter_id == chapter_id)).first()
+    seg.text = "Tolkien écrit à M. Dupont."
+    s.add(seg); s.commit()
+    seg_id = seg.id
+
+with patch("app.core.db.get_engine", return_value=eng):
+    from app.core.db import get_session
+    from app.main import app as fastapi_app
+
+    def _sess2():
+        with Session(eng) as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_session] = _sess2
+    client = TestClient(fastapi_app)
+    r = client.post("/lexicon", json={"term": "Tolkien", "replacement": "Tolkène"})
+    check("POST entrée globale -> 201", r.status_code == 201 and r.json()["book_id"] is None, r.text)
+    gid = r.json()["id"]
+    r = client.post("/lexicon", json={"term": "tolkien", "replacement": "Tolkine", "book_id": book_id})
+    check("POST entrée du livre -> 201", r.status_code == 201, r.text)
+    client.post("/lexicon", json={"term": "M.", "replacement": "Monsieur"})
+    check("POST terme vide -> 422", client.post("/lexicon", json={"term": " ", "replacement": "x"}).status_code == 422)
+    check("POST livre inconnu -> 404",
+          client.post("/lexicon", json={"term": "a", "replacement": "b", "book_id": 999}).status_code == 404)
+    check("GET global : 2 entrées", len(client.get("/lexicon").json()) == 2)
+    check("GET du livre : globales + livre", len(client.get(f"/lexicon?book_id={book_id}").json()) == 3)
+    r = client.post("/lexicon/preview", json={"text": "Tolkien et M. Dupont", "book_id": book_id})
+    check("aperçu : l'entrée du livre prime sur la globale de même terme",
+          r.json()["text"] == "Tolkine et Monsieur Dupont", r.text)
+    r = client.post("/lexicon/preview", json={"text": "Tolkien"})
+    check("aperçu sans livre : entrée globale", r.json()["text"] == "Tolkène", r.text)
+    r = client.patch(f"/lexicon/{gid}", json={"replacement": "Tol-kiène"})
+    check("PATCH", r.status_code == 200 and r.json()["replacement"] == "Tol-kiène", r.text)
+
+    st = _Stub()
+    with patch.object(tasks, "_get_tts_provider", return_value=st):
+        asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+    check("rendu du chapitre : le TTS reçoit le texte prononcé",
+          st.calls[0][0] == "Tolkine écrit à Monsieur Dupont.", repr(st.calls[0][0]))
+    with Session(eng) as s:
+        seg = s.get(Segment, seg_id)
+    check("le texte affiché (transcription) reste celui du livre", seg.text == "Tolkien écrit à M. Dupont.")
+
+    check("DELETE -> 204", client.delete(f"/lexicon/{gid}").status_code == 204)
+    check("DELETE inconnu -> 404", client.delete(f"/lexicon/{gid}").status_code == 404)
+    r = client.delete(f"/books/{book_id}")
+    check("supprimer le livre supprime ses entrées de lexique (les globales restent)",
+          r.status_code == 204 and [e["term"] for e in client.get("/lexicon").json()] == ["M."],
+          f"{r.status_code} {client.get('/lexicon').text}")
+    fastapi_app.dependency_overrides.clear()
+
+
 print()
 if _errors:
     print(f"ÉCHEC : {len(_errors)} vérification(s)")
