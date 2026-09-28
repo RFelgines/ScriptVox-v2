@@ -3,6 +3,7 @@
 import type { BookSummary, ChapterSummary } from "@/lib/api";
 import { formatClock } from "@/lib/resume";
 import Button from "@/components/ui/Button";
+import { AcxBadge, ExcerptButton } from "@/components/book/ChapterTools";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { useT } from "@/lib/i18n/LanguageContext";
 
@@ -69,6 +70,9 @@ export default function ChapterList({
             ) : (
               <span className="text-xs text-muted">{t.flow.chapterExcluded}</span>
             )}
+            {ch.included && canGenerate && ch.status !== "DONE" && ch.status !== "GENERATING" && (
+              <ExcerptButton bookId={book.id} position={ch.position} />
+            )}
             {ch.included && canGenerate && ch.status !== "DONE" && (
               <Button
                 size="sm"
@@ -80,6 +84,7 @@ export default function ChapterList({
             )}
             {listenable && (
               <>
+                <AcxBadge bookId={book.id} position={ch.position} />
                 <Button
                   variant="primary"
                   size="sm"

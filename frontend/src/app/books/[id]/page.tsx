@@ -11,6 +11,7 @@ import {
   VoiceSummary,
   acceptMergeSuggestion,
   analyzeBook,
+  bookChaptersTxtUrl,
   bookM4bUrl,
   bookMp3Url,
   chapterAudioUrl,
@@ -47,6 +48,7 @@ import BookProgress from "@/components/book/BookProgress";
 import MoreMenu, { MenuItem } from "@/components/book/MoreMenu";
 import ChapterList from "@/components/book/ChapterList";
 import CharacterRow from "@/components/book/CharacterRow";
+import LexiconEditor from "@/components/LexiconEditor";
 import { buildHueMap } from "@/lib/voiceHues";
 import { formatClock, getResume, type ResumePoint } from "@/lib/resume";
 import { useT } from "@/lib/i18n/LanguageContext";
@@ -440,6 +442,17 @@ export default function BookDetailPage({
   // défaut plutôt que masqués, l'utilisateur peut vouloir leur assigner une voix.
   const secondaryCharacters = filtered.filter((c) => c.segment_count === 0);
 
+  // Après la conception d'une voix : le personnage a une nouvelle voix, et la bibliothèque une
+  // nouvelle voix clonée.
+  function reloadCasting() {
+    Promise.all([listCharacters(bookId), listVoices()])
+      .then(([chars, vs]) => {
+        setCharacters(chars);
+        setVoices(vs);
+      })
+      .catch((e) => setError(String(e)));
+  }
+
   function renderCharacterRow(c: CharacterSummary) {
     return (
       <CharacterRow
@@ -453,6 +466,7 @@ export default function BookDetailPage({
         previewing={previewingId === c.id}
         onVoiceChange={handleVoiceChange}
         onPreview={handlePreview}
+        onDesigned={reloadCasting}
       />
     );
   }
@@ -613,6 +627,9 @@ export default function BookDetailPage({
                     )}
                     {book.mp3_path && (
                       <MenuItem href={bookMp3Url(book.id)}>{t.flow.downloadMp3}</MenuItem>
+                    )}
+                    {book.audio_path && (
+                      <MenuItem href={bookChaptersTxtUrl(book.id)}>{t.production.downloadChaptersTxt}</MenuItem>
                     )}
                   </MoreMenu>
                 )}
@@ -826,6 +843,17 @@ export default function BookDetailPage({
                 </div>
               )}
             </section>
+          )}
+
+          {book.status !== "PENDING" && book.status !== "PROCESSING" && (
+            <details className="mt-10 rounded-2xl bg-surface-2/30 p-4">
+              <summary className="cursor-pointer font-display text-lg font-medium">
+                {t.production.lexiconTitle}
+              </summary>
+              <div className="mt-3">
+                <LexiconEditor bookId={book.id} />
+              </div>
+            </details>
           )}
 
           <section className="mt-10">

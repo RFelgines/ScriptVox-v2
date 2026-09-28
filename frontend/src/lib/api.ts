@@ -678,3 +678,113 @@ export async function selectTake(
   if (!res.ok) throw new Error(`POST select failed: ${res.status}`);
   return res.json();
 }
+
+// ── Production de livres audio ─────────────────────────────────────────────────
+
+// Horodatage des chapitres (« HH:MM:SS Titre » par ligne), écrit à l'assemblage du livre.
+export function bookChaptersTxtUrl(id: number): string {
+  return `${API_URL}/books/${id}/audio/chapters.txt`;
+}
+
+// Extrait (~1 min) du début d'un chapitre, rendu comme le chapitre final.
+export function chapterExcerptUrl(bookId: number, position: number): string {
+  return `${API_URL}/books/${bookId}/chapters/${position}/excerpt`;
+}
+
+export async function requestChapterExcerpt(bookId: number, position: number): Promise<{ ready: boolean }> {
+  const res = await fetch(chapterExcerptUrl(bookId, position), { method: "POST" });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+export async function chapterExcerptReady(bookId: number, position: number): Promise<boolean> {
+  const res = await fetch(chapterExcerptUrl(bookId, position));
+  return res.ok;
+}
+
+export interface LoudnessReport {
+  rms_dbfs: number | null;
+  peak_dbfs: number | null;
+  noise_floor_dbfs: number | null;
+  digital_silence: boolean;
+  duration_s: number;
+  checks: { rms: boolean; peak: boolean; noise_floor: boolean };
+  acx_compliant: boolean;
+}
+
+export async function getChapterLoudness(bookId: number, position: number): Promise<LoudnessReport> {
+  const res = await fetch(`${API_URL}/books/${bookId}/chapters/${position}/loudness`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+// Lexique de prononciation (book_id null = entrée globale).
+export interface LexiconEntry {
+  id: number;
+  book_id: number | null;
+  term: string;
+  replacement: string;
+  whole_word: boolean;
+  case_sensitive: boolean;
+}
+
+export async function listLexicon(bookId?: number): Promise<LexiconEntry[]> {
+  const q = bookId !== undefined ? `?book_id=${bookId}` : "";
+  const res = await fetch(`${API_URL}/lexicon${q}`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+export async function createLexiconEntry(
+  entry: Omit<LexiconEntry, "id">,
+): Promise<LexiconEntry> {
+  const res = await fetch(`${API_URL}/lexicon`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+export async function deleteLexiconEntry(id: number): Promise<void> {
+  const res = await fetch(`${API_URL}/lexicon/${id}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error(await detailOf(res));
+}
+
+export async function previewLexicon(text: string, bookId?: number): Promise<string> {
+  const res = await fetch(`${API_URL}/lexicon/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, book_id: bookId ?? null }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()).text;
+}
+
+// Voix conçue d'un personnage (OmniVoice) : description proposée, puis conception.
+export interface VoiceDesignInfo {
+  suggested_instruct: string;
+  designed_voice_id: string | null;
+  current_instruct: string | null;
+  assigned: boolean;
+}
+
+export async function getVoiceDesign(characterId: number): Promise<VoiceDesignInfo> {
+  const res = await fetch(`${API_URL}/characters/${characterId}/voice-design`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}
+
+export async function requestVoiceDesign(
+  characterId: number,
+  instruct: string,
+): Promise<{ voice_id: string; instruct: string }> {
+  const res = await fetch(`${API_URL}/characters/${characterId}/voice-design`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instruct }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return res.json();
+}

@@ -10,6 +10,7 @@ import {
   updateAppSettings,
 } from "@/lib/api";
 import EngineSettings from "@/components/EngineSettings";
+import LexiconEditor from "@/components/LexiconEditor";
 import { useFeedback } from "@/components/ui/Feedback";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
@@ -161,6 +162,13 @@ export default function ParametresPage() {
           <EngineSettings key={`llm-${engineKey}`} kind="llm" settings={settings} onChange={setSettings} />
           <EngineSettings key={`tts-${engineKey}`} kind="tts" settings={settings} onChange={setSettings} />
           <p className="px-1 text-xs text-muted">{t.settings.preferredHint}</p>
+
+          <details className="rounded-2xl bg-surface-2/30 p-4">
+            <summary className="cursor-pointer font-medium">{t.production.lexiconGlobalTitle}</summary>
+            <div className="mt-3">
+              <LexiconEditor />
+            </div>
+          </details>
 
           {settings.plugin_errors.length > 0 && (
             <Alert title={t.models.pluginErrorsTitle}>

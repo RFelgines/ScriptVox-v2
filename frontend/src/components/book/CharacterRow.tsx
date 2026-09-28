@@ -3,6 +3,7 @@
 import type { CharacterSummary, VoiceSummary } from "@/lib/api";
 import Select from "@/components/ui/Select";
 import VoiceOrb from "@/components/VoiceOrb";
+import VoiceDesign from "@/components/book/VoiceDesign";
 import { useT } from "@/lib/i18n/LanguageContext";
 
 // Ligne de casting : la voix choisie est ENREGISTRÉE immédiatement (avant : état « en attente »
@@ -17,6 +18,7 @@ export default function CharacterRow({
   previewing,
   onVoiceChange,
   onPreview,
+  onDesigned,
 }: {
   character: CharacterSummary;
   assignable: VoiceSummary[];
@@ -27,11 +29,13 @@ export default function CharacterRow({
   previewing: boolean;
   onVoiceChange: (characterId: number, voiceId: string) => void;
   onPreview: (character: CharacterSummary) => void;
+  onDesigned?: () => void;
 }) {
   const t = useT();
   const current = c.voice_id ? voiceMap.get(c.voice_id) : undefined;
   const incompatible =
-    current !== undefined && current.kind === "CLONED" && effectiveProvider !== "qwen";
+    current !== undefined && current.kind === "CLONED" &&
+    effectiveProvider !== "qwen" && effectiveProvider !== "omnivoice";
 
   return (
     <li className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface-2/60 p-3.5 transition-colors hover:bg-surface-2">
@@ -105,6 +109,7 @@ export default function CharacterRow({
         )}
         {saving && <span className="text-xs text-muted">…</span>}
       </div>
+      {onDesigned && <VoiceDesign characterId={c.id} onDesigned={onDesigned} />}
     </li>
   );
 }

@@ -356,6 +356,37 @@ export interface Dictionary {
     referenceTextPlaceholder: string;
     referenceTextHint: string;
   };
+  production: {
+    excerpt: string;
+    excerptTitle: string;
+    excerptLoading: string;
+    acxCheck: string;
+    acxTitle: (rms: string, peak: string) => string;
+    acxOk: string;
+    acxKo: string;
+    downloadChaptersTxt: string;
+    lexiconTitle: string;
+    lexiconGlobalTitle: string;
+    lexiconHint: string;
+    lexiconTerm: string;
+    lexiconReplacement: string;
+    lexiconWholeWord: string;
+    lexiconCaseSensitive: string;
+    lexiconAdd: string;
+    lexiconEmpty: string;
+    lexiconGlobalBadge: string;
+    lexiconTest: string;
+    lexiconTestPlaceholder: string;
+    lexiconSpoken: string;
+    designVoice: string;
+    designVoiceTitle: string;
+    designPromptLabel: string;
+    designPromptHint: string;
+    designLaunch: string;
+    designRunning: string;
+    designDone: string;
+    designNeedsServer: string;
+  };
 }
 
 const fr: Dictionary = {
@@ -577,7 +608,7 @@ const fr: Dictionary = {
     generateOnlyWhenAnalyzed: "Génération possible uniquement quand le livre est ANALYZED",
     segmentCount: (n) => `${n} réplique${n > 1 ? "s" : ""}`,
     clonedVoiceIncompatible: (provider) =>
-      `Voix clonée incompatible avec le provider "${provider}" — passer sur Qwen ou changer la voix.`,
+      `Le moteur "${provider}" ne clone pas : une voix du catalogue du même genre sera utilisée. Passer sur Qwen ou OmniVoice pour cette voix.`,
     clonedBadge: "Clone",
     chooseVoice: "Choisir…",
     clonedVoicesGroup: "— Voix clonées —",
@@ -743,6 +774,39 @@ const fr: Dictionary = {
     referenceTextPlaceholder: "Ce qui est dit dans l'enregistrement, mot pour mot",
     referenceTextHint:
       "Avec la transcription, le clonage reproduit aussi la manière de parler (Qwen3-TTS) ; sans, seul le timbre est copié.",
+  },
+  production: {
+    excerpt: "Extrait",
+    excerptTitle: "Écouter environ une minute du début, rendue comme le chapitre final, avant de lancer le rendu complet",
+    excerptLoading: "Rendu de l'extrait…",
+    acxCheck: "ACX",
+    acxTitle: (rms, peak) => `RMS ${rms} dBFS · crête ${peak} dBFS (ACX : RMS -23 à -18, crête ≤ -3)`,
+    acxOk: "Conforme ACX",
+    acxKo: "Non conforme ACX",
+    downloadChaptersTxt: "Horodatage des chapitres (.txt)",
+    lexiconTitle: "Lexique de prononciation",
+    lexiconGlobalTitle: "Lexique de prononciation (tous les livres)",
+    lexiconHint:
+      "Remplace un mot dans le texte envoyé à la voix de synthèse, jamais dans le texte affiché : noms propres, mots étrangers, sigles (« SNCF » → « S N C F »), abréviations (« M. » → « Monsieur »). Une entrée du livre prime sur l'entrée globale du même mot.",
+    lexiconTerm: "Mot ou expression",
+    lexiconReplacement: "Se prononce",
+    lexiconWholeWord: "Mot entier",
+    lexiconCaseSensitive: "Respecter la casse",
+    lexiconAdd: "Ajouter",
+    lexiconEmpty: "Aucune entrée.",
+    lexiconGlobalBadge: "global",
+    lexiconTest: "Tester",
+    lexiconTestPlaceholder: "Une phrase du livre…",
+    lexiconSpoken: "Prononcé :",
+    designVoice: "Voix conçue",
+    designVoiceTitle: "Concevoir une voix propre à ce personnage (OmniVoice), gardée tout le livre",
+    designPromptLabel: "Description de la voix",
+    designPromptHint:
+      "Déduite de la fiche du personnage. Une valeur par catégorie : genre (male, female), âge (child, teenager, young adult, middle-aged, elderly), hauteur (very low … very high pitch) ou whisper. La voix est conçue une fois puis clonée à chaque réplique : elle reste la même tout le livre. Moteur OmniVoice requis (poids CC-BY-NC : usage non commercial).",
+    designLaunch: "Concevoir",
+    designRunning: "Conception…",
+    designDone: "Voix conçue et attribuée",
+    designNeedsServer: "Le serveur OmniVoice ne répond pas (scripts/omnivoice_server.py).",
   },
 };
 
@@ -965,7 +1029,7 @@ const en: Dictionary = {
     generateOnlyWhenAnalyzed: "Generation only possible once the book is ANALYZED",
     segmentCount: (n) => `${n} line${n > 1 ? "s" : ""}`,
     clonedVoiceIncompatible: (provider) =>
-      `Cloned voice incompatible with provider "${provider}" — switch to Qwen or change the voice.`,
+      `Engine "${provider}" cannot clone: a catalogue voice of the same gender will be used. Switch to Qwen or OmniVoice for this voice.`,
     clonedBadge: "Clone",
     chooseVoice: "Choose…",
     clonedVoicesGroup: "— Cloned voices —",
@@ -1131,6 +1195,39 @@ const en: Dictionary = {
     referenceTextPlaceholder: "What is said in the recording, word for word",
     referenceTextHint:
       "With the transcript, cloning also reproduces the speaking style (Qwen3-TTS); without it, only the timbre is copied.",
+  },
+  production: {
+    excerpt: "Excerpt",
+    excerptTitle: "Listen to about one minute of the beginning, rendered like the final chapter, before the full render",
+    excerptLoading: "Rendering excerpt…",
+    acxCheck: "ACX",
+    acxTitle: (rms, peak) => `RMS ${rms} dBFS · peak ${peak} dBFS (ACX: RMS -23 to -18, peak ≤ -3)`,
+    acxOk: "ACX compliant",
+    acxKo: "Not ACX compliant",
+    downloadChaptersTxt: "Chapter timestamps (.txt)",
+    lexiconTitle: "Pronunciation lexicon",
+    lexiconGlobalTitle: "Pronunciation lexicon (all books)",
+    lexiconHint:
+      "Replaces a word in the text sent to the synthetic voice, never in the displayed text: proper names, foreign words, acronyms, abbreviations. A book entry overrides the global entry for the same word.",
+    lexiconTerm: "Word or phrase",
+    lexiconReplacement: "Pronounced",
+    lexiconWholeWord: "Whole word",
+    lexiconCaseSensitive: "Match case",
+    lexiconAdd: "Add",
+    lexiconEmpty: "No entries.",
+    lexiconGlobalBadge: "global",
+    lexiconTest: "Test",
+    lexiconTestPlaceholder: "A sentence from the book…",
+    lexiconSpoken: "Spoken:",
+    designVoice: "Designed voice",
+    designVoiceTitle: "Design a voice of its own for this character (OmniVoice), kept for the whole book",
+    designPromptLabel: "Voice description",
+    designPromptHint:
+      "Derived from the character sheet. One value per category: gender (male, female), age (child, teenager, young adult, middle-aged, elderly), pitch (very low … very high pitch) or whisper. The voice is designed once then cloned for every line, so it stays the same throughout the book. Requires the OmniVoice engine (CC-BY-NC weights: non-commercial use).",
+    designLaunch: "Design",
+    designRunning: "Designing…",
+    designDone: "Voice designed and assigned",
+    designNeedsServer: "The OmniVoice server is not responding (scripts/omnivoice_server.py).",
   },
 };
 
