@@ -315,6 +315,104 @@ with patch("app.core.db.get_engine", return_value=eng):
     fastapi_app.dependency_overrides.clear()
 
 
+# ── 5. Mastering ACX ──────────────────────────────────────────────────────────
+import numpy as np  # noqa: E402
+
+from app.services.audio import mastering  # noqa: E402
+from app.services.audio.format import pcm16_to_wav  # noqa: E402
+
+
+def _tone(seconds=0.4, amp=0.95, freq=220.0, rate=24000):
+    t = np.arange(int(seconds * rate)) / rate
+    # sinus + transitoires : crêtes proches de 0 dBFS, comme une plosive mal maîtrisée
+    x = amp * np.sin(2 * np.pi * freq * t) * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t))
+    x[:: rate // 20] = amp
+    return pcm16_to_wav((x * 32767).astype("<i2").tobytes(), rate)
+
+
+def _speech_like():
+    parts = []
+    for loud in (0.95, 0.3, 0.7, 0.15):
+        parts.append(np.frombuffer(_tone(0.8, loud)[44:], dtype="<i2"))
+        parts.append(np.zeros(int(24000 * 0.4), dtype="<i2"))  # pause
+    return pcm16_to_wav(np.concatenate(parts).tobytes(), 24000)
+
+
+section("Mastering ACX : mesures et conformité")
+raw = _speech_like()
+before = mastering.loudness_report(raw)
+check("signal brut : crête au-dessus de -3 dBFS (non conforme)",
+      before["peak_dbfs"] > -3 and not before["acx_compliant"], str(before))
+mastered = mastering.master(raw)
+after = mastering.loudness_report(mastered)
+check("après mastering : RMS dans [-23, -18]", -23 <= after["rms_dbfs"] <= -18, str(after))
+check("après mastering : crête <= -3 dBFS", after["peak_dbfs"] <= -3, str(after))
+check("après mastering : conforme ACX", after["acx_compliant"], str(after))
+check("durée inchangée (le minutage des segments reste valable)",
+      wav_duration_ms(mastered) == wav_duration_ms(raw))
+check("idempotent : remasteriser ne change presque rien",
+      abs(mastering.loudness_report(mastering.master(mastered))["rms_dbfs"] - after["rms_dbfs"]) < 0.3)
+quiet = pcm16_to_wav((np.frombuffer(_tone(2, 0.01)[44:], dtype="<i2")).tobytes(), 24000)
+_q = mastering.loudness_report(mastering.master(quiet))
+check("signal très faible remonté dans la plage (RMS et crête)",  # sinus continu : pas de bruit de fond mesurable
+      _q["checks"]["rms"] and _q["checks"]["peak"], str(_q))
+check("fichier muet rendu tel quel", mastering.master(silence_wav(500)) == silence_wav(500))
+check("silence numérique signalé", mastering.loudness_report(mastered)["digital_silence"] is True)
+
+
+class _ToneStub(BaseTTSProvider):
+    async def synthesise(self, text, voice_id, emotion=None, reference_audio_path=None):
+        return _tone(0.6, 0.98)
+
+
+section("Mastering ACX : rendu d'un chapitre et API")
+eng = _engine()
+book_id, chapter_id, _ = _book_with_dialogue(eng, n_segments=4, seg_len=40)
+with patch.object(tasks, "_get_tts_provider", return_value=_ToneStub()):
+    asyncio.run(tasks._generate_chapter_async(chapter_id, eng))
+with Session(eng) as s:
+    ch = s.get(Chapter, chapter_id)
+rep = mastering.loudness_report(Path(ch.audio_path).read_bytes())
+check("chapitre rendu : conforme ACX", rep["acx_compliant"], str(rep))
+with patch("app.core.db.get_engine", return_value=eng):
+    from app.core.db import get_session
+    from app.main import app as fastapi_app
+
+    def _sess3():
+        with Session(eng) as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_session] = _sess3
+    client = TestClient(fastapi_app)
+    r = client.get(f"/books/{book_id}/chapters/1/loudness")
+    check("GET loudness -> mesures + conformité", r.status_code == 200 and r.json()["acx_compliant"] is True, r.text)
+    with Session(eng) as s:
+        s.add(Chapter(book_id=book_id, position=2, title="Deux", raw_text="z")); s.commit()
+    check("chapitre pas encore rendu -> 409", client.get(f"/books/{book_id}/chapters/2/loudness").status_code == 409)
+    fastapi_app.dependency_overrides.clear()
+
+appels = []
+_vrai_master = mastering.master
+with patch("app.services.audio.mastering.master", side_effect=lambda b: appels.append(1) or _vrai_master(b)):
+    eng2 = _engine()
+    _, ch2, _ = _book_with_dialogue(eng2, n_segments=2, seg_len=40)
+    with patch.object(tasks, "_get_tts_provider", return_value=_ToneStub()):
+        asyncio.run(tasks._generate_chapter_async(ch2, eng2))
+    n_acx = len(appels)
+    os.environ["AUDIO_MASTERING"] = "off"
+    from app.config import get_settings as _gs
+    _gs.cache_clear() if hasattr(_gs, "cache_clear") else None
+    eng3 = _engine()
+    _, ch3, _ = _book_with_dialogue(eng3, n_segments=2, seg_len=40)
+    with patch.object(tasks, "_get_tts_provider", return_value=_ToneStub()):
+        asyncio.run(tasks._generate_chapter_async(ch3, eng3))
+    n_off = len(appels) - n_acx
+    os.environ.pop("AUDIO_MASTERING")
+    _gs.cache_clear() if hasattr(_gs, "cache_clear") else None
+check("AUDIO_MASTERING=acx (défaut) : mastering appliqué ; =off : non appliqué",
+      n_acx == 1 and n_off == 0, f"acx={n_acx} off={n_off}")
+
+
 print()
 if _errors:
     print(f"ÉCHEC : {len(_errors)} vérification(s)")

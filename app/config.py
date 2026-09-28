@@ -190,6 +190,9 @@ class Settings:
         self.pause_voice_change_ms: int = int(os.environ.get("AUDIO_PAUSE_VOICE_CHANGE_MS", "450") or "450")
         self.pause_chapter_ms: int = int(os.environ.get("AUDIO_PAUSE_CHAPTER_MS", "1500") or "1500")
         self.audio_normalize: bool = _bool_env("AUDIO_NORMALIZE", True)
+        # Mastering de chaque chapitre : « acx » (RMS -20 dBFS, crête <= -3,5 dBFS, conforme
+        # ACX/Audible) ou « off ». Voir app/services/audio/mastering.py.
+        self.audio_mastering: str = (os.environ.get("AUDIO_MASTERING", "acx").strip().lower() or "acx")
         # 0 = valeur propre au provider ; sinon force max_chars / concurrence pour tous.
         self.tts_max_chars: int = int(os.environ.get("TTS_MAX_CHARS", "0") or "0")
         self.tts_concurrency: int = int(os.environ.get("TTS_CONCURRENCY", "0") or "0")

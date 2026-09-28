@@ -572,6 +572,11 @@ async def _generate_chapter_async(
             return False
 
         wav_bytes, timing = result
+        # Mastering ACX du chapitre ENTIER (même durée : le minutage des segments reste
+        # valable) avant l'écriture et le découpage en prises.
+        if getattr(get_settings(), "audio_mastering", "acx") == "acx":
+            from app.services.audio.mastering import master
+            wav_bytes = master(wav_bytes)
 
         out_dir = DATA_DIR / str(book_id)
         out_dir.mkdir(parents=True, exist_ok=True)

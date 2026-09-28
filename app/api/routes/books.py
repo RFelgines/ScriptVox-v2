@@ -598,6 +598,23 @@ def get_chapter_audio(
     return FileResponse(str(path), media_type="audio/wav", filename=path.name)
 
 
+@router.get("/{book_id}/chapters/{position}/loudness")
+def get_chapter_loudness(book_id: int, position: int, session: Session = Depends(get_session)) -> dict:
+    """Mesures du fichier du chapitre (RMS, crête, bruit de fond) et conformité ACX."""
+    from app.services.audio.mastering import loudness_report
+
+    if session.get(Book, book_id) is None:
+        raise HTTPException(status_code=404, detail=f"Book {book_id} not found.")
+    chapter = session.exec(
+        select(Chapter).where(Chapter.book_id == book_id, Chapter.position == position)
+    ).first()
+    if chapter is None:
+        raise HTTPException(status_code=404, detail=f"Chapter {position} not found for book {book_id}.")
+    if chapter.status != ChapterStatus.DONE or not chapter.audio_path or not Path(chapter.audio_path).exists():
+        raise HTTPException(status_code=409, detail=f"Chapter {position} audio is not ready.")
+    return loudness_report(Path(chapter.audio_path).read_bytes())
+
+
 @router.get("/{book_id}/chapters/{position}/segments", response_model=list[SegmentResponse])
 def get_chapter_segments(
     book_id: int,
@@ -685,6 +702,10 @@ def _reassemble_chapter_if_possible(chapter: Chapter, session: Session) -> None:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     assemble_wav_from_files(take_paths, out_path)
+    if getattr(get_settings(), "audio_mastering", "acx") == "acx":
+        # Une prise régénérée n'a pas été masterisée avec le reste du chapitre.
+        from app.services.audio.mastering import master
+        out_path.write_bytes(master(out_path.read_bytes()))
 
     if not chapter.audio_path:
         chapter.audio_path = str(out_path)
