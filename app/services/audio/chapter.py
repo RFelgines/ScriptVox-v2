@@ -145,6 +145,11 @@ async def _synthesise_text(
     return audio
 
 
+def _catalogue_fallback(gender) -> str:
+    from app.core.enums import Gender
+    return {Gender.MALE: "male_0", Gender.FEMALE: "female_0"}.get(gender, "neutral_0")
+
+
 def _prefix_within(segments: list, max_chars: int) -> list:
     """Premiers segments dont le texte cumulé tient dans `max_chars` (toujours au moins un)."""
     out, total = [], 0
@@ -212,9 +217,18 @@ async def _synthesise_segments(
 
     all_voice_ids: set[str] = set(char_voice.values()) | {NARRATOR_VOICE_ID}
     ref_path: dict[str, str | None] = {}
+    clones = bool(getattr(tts, "supports_cloning", False))
     for vid in all_voice_ids:
         v = session.exec(select(Voice).where(Voice.voice_id == vid)).first()
         ref_path[vid] = v.reference_audio_path if v else None
+        if ref_path[vid] and not clones:
+            # Voix clonée ou conçue, mais moteur sans clonage (EdgeTTS, Piper…) : avant, le
+            # moteur ne connaissait pas cet identifiant et le chapitre échouait. On lui donne
+            # la première voix du catalogue du même genre.
+            fallback = _catalogue_fallback(v.gender if v else None)
+            char_voice = {cid: (fallback if cv == vid else cv) for cid, cv in char_voice.items()}
+            ref_path[vid] = None
+            ref_path.setdefault(fallback, None)
 
     voice_ids: list[str] = [
         NARRATOR_VOICE_ID

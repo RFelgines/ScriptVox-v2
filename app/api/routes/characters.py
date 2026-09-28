@@ -1,7 +1,9 @@
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.core.db import get_session
@@ -87,3 +89,52 @@ def request_character_preview(
         return {"ready": True}
     generate_character_preview(character_id, body.voice_id)
     return {"ready": False}
+
+
+class VoiceDesignRequest(BaseModel):
+    # Description OmniVoice (« female, elderly, low pitch »). Absente : déduite de la fiche.
+    instruct: Optional[str] = Field(default=None, max_length=300)
+
+
+@router.get("/{character_id}/voice-design")
+def get_voice_design(character_id: int, session: Session = Depends(get_session)) -> dict:
+    """Description de voix proposée pour le personnage (déduite de sa fiche : genre, âge,
+    qualité de voix) et voix conçue actuelle s'il en a une. Le client l'affiche comme un
+    « prompt de voix » modifiable avant de lancer la conception."""
+    import json
+
+    from app.services.tts.omnivoice import instruct_for_character
+    from app.workers.tasks import DATA_DIR, designed_voice_id
+
+    char = session.get(Character, character_id)
+    if char is None:
+        raise HTTPException(status_code=404, detail=f"Character {character_id} not found.")
+    voice_id = designed_voice_id(char)
+    meta = DATA_DIR / "voices" / voice_id / "design.json"
+    current = json.loads(meta.read_text(encoding="utf-8")) if meta.is_file() else None
+    return {
+        "suggested_instruct": instruct_for_character(
+            char.gender, char.age_category, char.voice_quality, char.voice_tone, char.description),
+        "designed_voice_id": voice_id if current else None,
+        "current_instruct": current["instruct"] if current else None,
+        "assigned": char.voice_id == voice_id,
+    }
+
+
+@router.post("/{character_id}/voice-design", status_code=202)
+def request_voice_design(
+    character_id: int, body: VoiceDesignRequest, session: Session = Depends(get_session),
+) -> dict:
+    """Lance (tâche courte, prioritaire, GPU) la conception de la voix du personnage par
+    OmniVoice, puis l'attribue au personnage. Réinterroger GET /characters/{id} : voice_id
+    passe à `designed_voice_id` quand c'est fait. Nécessite le serveur OmniVoice."""
+    from app.services.tts.omnivoice import instruct_for_character
+    from app.workers.tasks import design_character_voice, designed_voice_id
+
+    char = session.get(Character, character_id)
+    if char is None:
+        raise HTTPException(status_code=404, detail=f"Character {character_id} not found.")
+    instruct = (body.instruct or "").strip() or instruct_for_character(
+        char.gender, char.age_category, char.voice_quality, char.voice_tone, char.description)
+    design_character_voice(character_id, instruct)
+    return {"voice_id": designed_voice_id(char), "instruct": instruct}

@@ -10,6 +10,10 @@ class BaseTTSProvider(ABC):
     un plugin (voir docs/PLUGINS.md) n'a qu'à surcharger ceux dont il a besoin.
     """
 
+    #: Sait synthétiser à partir d'un échantillon (reference_audio_path) : voix clonées de la
+    #: bibliothèque et voix conçues par personnage. Un moteur sans clonage reçoit à la place
+    #: une voix du catalogue du même genre (app.services.audio.chapter).
+    supports_cloning: bool = False
     #: Nombre de synthèses simultanées tolérées (1 = séquentiel, ex. GPU local).
     supports_concurrency: int = 1
     #: Longueur max (caractères) d'un texte envoyé en un seul appel ; au-delà, le pipeline

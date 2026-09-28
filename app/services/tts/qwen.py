@@ -115,6 +115,7 @@ class QwenTTSProvider(BaseTTSProvider):
     """
 
     keep_loaded = True
+    supports_cloning = True  # checkpoint Base (generate_voice_clone)
     max_chars = 400  # au-delà, les TTS neuronaux dérivent ou tronquent (TTS-5)
 
     def __init__(self, settings: Settings, language: str | None = None,

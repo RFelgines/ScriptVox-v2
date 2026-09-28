@@ -1499,6 +1499,68 @@ def chapter_excerpt_path(session: Session, chapter) -> Path:
     return DATA_DIR / str(chapter.book_id) / "previews" / f"chapter_{chapter.id}_{digest}.wav"
 
 
+def designed_voice_id(character) -> str:
+    return f"design_b{character.book_id}_c{character.id}"
+
+
+def _design_character_voice_impl(character_id: int, instruct: str | None = None) -> str | None:
+    """Voix CONÇUE d'un personnage (OmniVoice) : une description tirée de sa fiche (ou
+    fournie) -> un échantillon de référence -> une voix clonée de la bibliothèque, attribuée
+    au personnage. Tout moteur qui clone (OmniVoice, Qwen3-TTS) le fera ensuite parler avec
+    CETTE voix d'un bout à l'autre du livre. Retourne le voice_id, ou None en cas d'échec
+    (consigné dans les logs : une tâche huey ne doit jamais lever)."""
+    from app.core.db import get_engine
+    from app.core.enums import VoiceKind
+    from app.models import Book, Character
+    from app.models.entities import Voice
+    from app.services.tts import omnivoice
+
+    engine = get_engine()
+    settings = get_settings()
+    with Session(engine) as session:
+        char = session.get(Character, character_id)
+        if char is None:
+            logger.error("design voice: unknown character_id=%d", character_id)
+            return None
+        book = session.get(Book, char.book_id)
+        instruct = (instruct or "").strip() or omnivoice.instruct_for_character(
+            char.gender, char.age_category, char.voice_quality, char.voice_tone, char.description,
+        )
+        voice_id = designed_voice_id(char)
+        ref = DATA_DIR / "voices" / voice_id / "ref.wav"
+        language = book.language if book else None
+        options = _tts_options(session) if _effective_tts_provider(
+            session, book.tts_provider if book else None) == "omnivoice" else None
+        name = f"{char.name} ({book.title if book else 'livre'})"
+        gender = char.gender
+    try:
+        ref_text = asyncio.run(omnivoice.design_voice(settings, instruct, language, ref, options))
+    except Exception:  # noqa: BLE001
+        logger.exception("design voice failed (character=%d, instruct=%r)", character_id, instruct)
+        return None
+    (ref.parent / "design.json").write_text(
+        json.dumps({"instruct": instruct, "language": language, "engine": "omnivoice"},
+                   ensure_ascii=False), encoding="utf-8")
+    with Session(engine) as session:
+        voice = session.exec(select(Voice).where(Voice.voice_id == voice_id)).first()
+        if voice is None:
+            voice = Voice(voice_id=voice_id, name=name, kind=VoiceKind.CLONED, gender=gender)
+        voice.reference_audio_path = str(ref)
+        voice.reference_text = ref_text
+        session.add(voice)
+        char = session.get(Character, character_id)
+        if char is not None:
+            char.voice_id = voice_id
+            session.add(char)
+        session.commit()
+    return voice_id
+
+
+@huey.task(priority=10)  # quelques secondes de GPU : passe avant les chapitres en file
+def design_character_voice(character_id: int, instruct: str | None = None) -> None:
+    _design_character_voice_impl(character_id, instruct)
+
+
 def _generate_chapter_excerpt_impl(chapter_id: int) -> None:
     from app.core.db import get_engine
     from app.models import Book, Chapter

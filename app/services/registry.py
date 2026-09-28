@@ -70,6 +70,11 @@ def _tts_openai(settings, options, language=None):
     return OpenAICompatibleTTSProvider(settings, options, language)
 
 
+def _tts_omnivoice(settings, options, language=None):
+    from app.services.tts.omnivoice import OmniVoiceTTSProvider
+    return OmniVoiceTTSProvider(settings, options, language)
+
+
 def _tts_command(settings, options, language=None):
     from app.services.tts.command import CommandTTSProvider
     return CommandTTSProvider(settings, options, language)
@@ -91,6 +96,11 @@ BUILTIN_TTS: dict[str, tuple[Callable, str]] = {
     "openai_tts": (
         _tts_openai,
         "Serveur TTS compatible OpenAI (/v1/audio/speech : Kokoro-FastAPI, openedai-speech…)",
+    ),
+    "omnivoice": (
+        _tts_omnivoice,
+        "OmniVoice (local, GPU) — voix conçues et clonées, 600+ langues ; "
+        "serveur scripts/omnivoice_server.py ; poids CC-BY-NC : usage non commercial",
     ),
     "command": (_tts_command, "Programme externe (commande définie dans .env)"),
 }

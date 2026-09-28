@@ -342,6 +342,10 @@ _s13_calls: list[dict] = []
 
 
 class _Cap13(BaseTTSProvider):
+    # Joue un moteur qui CLONE (comme Qwen3-TTS) : depuis l'ajout d'OmniVoice, un moteur doit
+    # le déclarer pour recevoir la référence ; sinon il reçoit une voix du catalogue.
+    supports_cloning = True
+
     async def synthesise(self, text, voice_id, emotion=None, reference_audio_path=None):
         _s13_calls.append({"vid": voice_id, "ref": reference_audio_path})
         return _silence_wav()

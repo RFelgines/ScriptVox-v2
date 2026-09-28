@@ -7,6 +7,11 @@ from app.models.entities import Character, Segment, Voice
 
 NARRATOR_VOICE_ID: str = "narrator"
 
+# Moteurs capables de cloner une voix à partir d'un échantillon (voix CLONED de la
+# bibliothèque, voix conçues par personnage). Miroir de BaseTTSProvider.supports_cloning,
+# résolu ici par NOM car l'attribution ne construit pas le moteur.
+CLONING_PROVIDERS: frozenset[str] = frozenset({"qwen", "omnivoice"})
+
 VOICE_CATALOGUE: dict[Gender, list[str]] = {
     Gender.MALE:    ["male_0", "male_1", "male_2"],
     Gender.FEMALE:  ["female_0", "female_1", "female_2"],
@@ -106,7 +111,7 @@ def assign_voices(
 ) -> None:
     """Populate Character.voice_id using trait-based scoring (idempotent).
 
-    When tts_provider="qwen", cloned voices (kind=CLONED) are tried first for
+    When tts_provider clones (CLONING_PROVIDERS), cloned voices (kind=CLONED) are tried first for
     each character's gender pool before falling back to the catalogue.
     Characters are processed by decreasing number of lines (then alphabetically) for determinism.
     """
@@ -125,9 +130,9 @@ def assign_voices(
     ).all()) if characters else {}
     characters = sorted(characters, key=lambda c: -line_counts.get(c.id, 0))
 
-    # Build cloned-voice pools per gender (qwen only).
+    # Build cloned-voice pools per gender (moteurs qui clonent seulement).
     cloned_by_gender: dict[Gender, list[str]] = {}
-    if tts_provider == "qwen":
+    if tts_provider in CLONING_PROVIDERS:
         cloned_voices = session.exec(
             select(Voice).where(Voice.kind == VoiceKind.CLONED)
         ).all()
@@ -147,8 +152,8 @@ def assign_voices(
 
         effective_gender = char.gender if char.gender != Gender.UNKNOWN else Gender.NEUTRAL
 
-        # ── Cloned voices (qwen only) — preferred over catalogue ──────────────
-        if tts_provider == "qwen":
+        # ── Cloned voices (moteurs qui clonent) — preferred over catalogue ────
+        if tts_provider in CLONING_PROVIDERS:
             clone_pool = cloned_by_gender.get(effective_gender, [])
             chosen = next((vid for vid in clone_pool if vid not in used), None)
             if chosen:

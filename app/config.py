@@ -163,6 +163,15 @@ class Settings:
             os.environ.get("TTS_HTTP_EMOTION_FIELD", "").strip() or None
         )
         self.tts_http_concurrency: int = int(os.environ.get("TTS_HTTP_CONCURRENCY", "1") or "1")
+        # ── TTS OmniVoice : serveur local scripts/omnivoice_server.py (venv séparé) ──
+        self.omnivoice_url: str = (
+            os.environ.get("OMNIVOICE_URL", "").strip() or "http://127.0.0.1:8770"
+        )
+        self.omnivoice_num_step: int | None = (
+            int(os.environ["OMNIVOICE_NUM_STEP"]) if os.environ.get("OMNIVOICE_NUM_STEP", "").strip() else None
+        )
+        self.omnivoice_timeout: float = float(os.environ.get("OMNIVOICE_TIMEOUT", "600") or "600")
+        self.omnivoice_voice_map: dict = _json_env("OMNIVOICE_VOICE_MAP")
         # ── TTS générique : programme externe. Défini UNIQUEMENT ici (jamais modifiable via
         # l'API : exécuter une commande choisie par une requête HTTP serait une faille).
         self.tts_command: str | None = os.environ.get("TTS_COMMAND", "").strip() or None
