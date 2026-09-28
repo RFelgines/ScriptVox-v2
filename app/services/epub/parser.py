@@ -233,6 +233,30 @@ def _non_narrative_files(book) -> set[str]:
     return landmarks | guide
 
 
+_BODY_TYPES = {"bodymatter", "chapter", "part", "division", "volume", "prologue", "epilogue"}
+_PAGENUM_CLASS = re.compile(r"(?i)\bpage-?num(ber)?\b|\bpagenum\b")
+
+
+def _strip_page_numbers(soup: BeautifulSoup) -> None:
+    """Numéros de page d'une édition imprimée : jamais lus. EPUB3 (epub:type="pagebreak",
+    role="doc-pagebreak", fréquents dans les éditions accessibles) et classe « pagenum » des
+    EPUB convertis. Le texte qui suit un saut de page est conservé."""
+    for tag in soup.find_all(True):
+        types = (tag.get("epub:type") or "").lower().split()
+        cls = " ".join(tag.get("class") or [])
+        if "pagebreak" in types or tag.get("role") == "doc-pagebreak" or _PAGENUM_CLASS.search(cls):
+            tag.decompose()
+
+
+def _declared_body(soup: BeautifulSoup) -> bool:
+    """Le document se déclare corps du texte (epub:type chapter, bodymatter…)."""
+    for tag in (soup.find("body"), soup.find(["section", "div"])):
+        types = set(((tag.get("epub:type") or "") if tag else "").lower().split())
+        if types & _BODY_TYPES:
+            return True
+    return False
+
+
 def _declared_non_narrative(soup: BeautifulSoup) -> bool:
     """epub:type porté par le <body> ou par la première section du document."""
     for tag in (soup.find("body"), soup.find(["section", "div"])):
@@ -313,6 +337,7 @@ class EpubParser:
         anchors = _toc_anchors(book, entries)
         declared_front = _non_narrative_files(book)
         declared_by_body: set[int] = set()  # index des chapitres dont le <body> le déclare
+        declared_body_files: set[str] = set()  # fichiers qui se déclarent corps du texte
         file_names: list[str] = []
 
         for spine_id, _ in book.spine:
@@ -323,12 +348,15 @@ class EpubParser:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             for tag in soup(["script", "style"]):
                 tag.decompose()
+            _strip_page_numbers(soup)
 
             item_file = (item.get_name() or "").rsplit("/", 1)[-1]
             # Contenu BRUT : get_content() d'ebooklib reconstruit le document et perd les
             # attributs du <body>, dont epub:type.
-            declared = item_file in declared_front or _declared_non_narrative(
-                BeautifulSoup(getattr(item, "content", b"") or b"", "html.parser"))
+            raw_soup = BeautifulSoup(getattr(item, "content", b"") or b"", "html.parser")
+            declared = item_file in declared_front or _declared_non_narrative(raw_soup)
+            if _declared_body(raw_soup) and not declared:
+                declared_body_files.add(item_file)
             file_anchors = anchors.get(item_file, [])
             if len(file_anchors) >= 2:
                 # Plusieurs chapitres dans ce fichier : un chapitre par entrée du sommaire.
@@ -374,6 +402,10 @@ class EpubParser:
         has_real_chapter = any(len(c.raw_text) >= _REAL_BOOK_CHARS for c in chapters)
         if has_real_chapter:
             for chapter, name in zip(chapters, file_names):
+                # Un chapitre DÉCLARÉ corps du texte n'est jamais exclu sur la foi de son titre
+                # ou de son nom de fichier (« Dédicace », « Contents » peuvent être un vrai récit).
+                if name.rsplit("/", 1)[-1] in declared_body_files:
+                    continue
                 label = f"{name} {chapter.title or ''}"
                 boilerplate = "project gutenberg" in chapter.raw_text[:400].lower()
                 if (_NON_NARRATIVE_RE.search(label) or boilerplate

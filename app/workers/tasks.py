@@ -932,6 +932,9 @@ def _assemble_book(engine, book_id: int, source_path: str) -> tuple[str | None, 
         book_title = book.title if book else "Livre"
         book_author = book.author if book else None
         cover_path = book.cover_path if book else None
+        book_year = book.published_at.year if book and book.published_at else None
+        book_genre = book.genre if book else None
+        engine_name = _effective_tts_provider(session, book.tts_provider if book else None)             or settings.tts_provider
     if not chapters:
         return None, None, None
 
@@ -957,6 +960,8 @@ def _assemble_book(engine, book_id: int, source_path: str) -> tuple[str | None, 
         built = m4b_mod.build_m4b(
             audio_path, _Path(audio_path).with_suffix(".m4b"), title=book_title,
             author=book_author, chapters=marks, cover_path=cover_path, ffmpeg=ffmpeg,
+            year=book_year, genre=book_genre, narrator=f"Voix de synthèse ({engine_name})",
+            comment="Livre audio produit avec ScriptVox",
         )
         m4b_path = str(built) if built else None
     return audio_path, str(mp3_file), m4b_path

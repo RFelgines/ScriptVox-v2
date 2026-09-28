@@ -503,6 +503,31 @@ check("dédicace (epub:type du <body>) exclue", got[2][1] is False, str(got))
 check("le récit (bodymatter) reste inclus", got[3] == ("Chapitre un", True), str(got))
 
 
+# ── 7. Idées reprises du comparatif VoiceStudio ───────────────────────────────
+section("EPUB : numéros de page jamais lus ; corps du texte déclaré jamais exclu")
+p = _epub(_TMP / "pagination.epub", docs=[
+    ("c1.xhtml", "I", _LONG[:400] + ' <span epub:type="pagebreak" id="p12" title="12">12</span> suite du récit '
+     '<span class="pagenum">[13]</span> fin.', None),
+    ("dedicace.xhtml", "Dédicace", _LONG, "chapter"),
+], nav_toc=[("c1.xhtml", "Un"), ("dedicace.xhtml", "Dédicace")])
+book = EpubParser().parse(p)
+txt = book.chapters[0].raw_text
+check("numéro de page EPUB3 (pagebreak) retiré", " 12 " not in txt and "suite du récit" in txt, txt[-80:])
+check("numéro de page par classe « pagenum » retiré", "[13]" not in txt and txt.endswith("fin."), txt[-40:])
+check("chapitre déclaré (epub:type chapter) inclus malgré un titre de page liminaire",
+      book.chapters[1].title == "Dédicace" and book.chapters[1].included is True,
+      str([(c.title, c.included) for c in book.chapters]))
+
+section("M4B : métadonnées globales (album, narrateur, année, genre, commentaire)")
+meta = m4b_mod.build_ffmetadata("Le Livre", "Moi", [("Un", 0, 1000)], year=1869, genre="Roman",
+                                narrator="Voix de synthèse (omnivoice)", comment="a=b;c")
+for ligne in ("title=Le Livre", "album=Le Livre", "artist=Moi", "genre=Roman",
+              "composer=Voix de synthèse (omnivoice)", "date=1869", "comment=a\\=b\\;c"):
+    check(f"FFMETADATA contient {ligne!r}", ligne in meta.splitlines(), meta)
+check("sans genre : « Audiobook » par défaut",
+      "genre=Audiobook" in m4b_mod.build_ffmetadata("T", None, []).splitlines())
+
+
 print()
 if _errors:
     print(f"ÉCHEC : {len(_errors)} vérification(s)")

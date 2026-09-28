@@ -37,12 +37,23 @@ def wav_file_duration_ms(path: str | Path) -> int:
         return int(w.getnframes() / w.getframerate() * 1000)
 
 
-def build_ffmetadata(title: str, author: str | None, chapters: list[tuple[str, int, int]]) -> str:
-    """Contenu du fichier FFMETADATA1. `chapters` = [(titre, début_ms, fin_ms)]."""
-    lines = [";FFMETADATA1", f"title={_escape(title)}", "genre=Audiobook"]
+def build_ffmetadata(title: str, author: str | None, chapters: list[tuple[str, int, int]],
+                     *, year: int | None = None, genre: str | None = None,
+                     narrator: str | None = None, comment: str | None = None) -> str:
+    """Contenu du fichier FFMETADATA1. `chapters` = [(titre, début_ms, fin_ms)].
+    Métadonnées globales lues par les lecteurs de livres audio : titre (et album), auteur,
+    narrateur (composer, convention Audible/Apple), année, genre, commentaire."""
+    lines = [";FFMETADATA1", f"title={_escape(title)}", f"album={_escape(title)}",
+             f"genre={_escape(genre) if genre else 'Audiobook'}"]
     if author:
         lines.append(f"artist={_escape(author)}")
         lines.append(f"album_artist={_escape(author)}")
+    if narrator:
+        lines.append(f"composer={_escape(narrator)}")
+    if year:
+        lines.append(f"date={int(year)}")
+    if comment:
+        lines.append(f"comment={_escape(comment)}")
     for name, start, end in chapters:
         lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={start}", f"END={max(end, start + 1)}",
                   f"title={_escape(name)}"]
@@ -79,6 +90,8 @@ def build_m4b(
     wav_path: str | Path, output_path: str | Path, *, title: str, author: str | None,
     chapters: list[tuple[str, int, int]], cover_path: str | Path | None = None,
     ffmpeg: str | None = None, bitrate: str = "64k", timeout: float = 7200.0,
+    year: int | None = None, genre: str | None = None, narrator: str | None = None,
+    comment: str | None = None,
 ) -> Path | None:
     """Encode le WAV en M4B chapitré. Retourne le chemin, ou None si ffmpeg est absent ou
     échoue (l'appelant garde alors le MP3 : jamais bloquant)."""
@@ -89,7 +102,8 @@ def build_m4b(
     output_path = Path(output_path)
     with tempfile.TemporaryDirectory(prefix="scriptvox_m4b_") as tmp:
         meta = Path(tmp) / "meta.txt"
-        meta.write_text(build_ffmetadata(title, author, chapters), encoding="utf-8")
+        meta.write_text(build_ffmetadata(title, author, chapters, year=year, genre=genre,
+                                         narrator=narrator, comment=comment), encoding="utf-8")
         use_cover = cover_path is not None and Path(cover_path).suffix.lower() in _COVER_SUFFIXES \
             and Path(cover_path).is_file()
         cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", str(wav_path), "-i", str(meta)]
