@@ -3,6 +3,23 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/). L'historique fin d'avant cette date
 est dans [docs/journal/2026.md](docs/journal/2026.md).
 
+## [Unreleased] — production d'audiolivre (2026-09-26 → 2026-09-28)
+
+### Ajouté
+- **Langues** : profils espagnol, allemand, italien (segmentation, voix EdgeTTS, Qwen) ; langues non prises
+  en charge signalées ; rapport multilingue `SCRIPTVOX-NIGHT-REPORT.md` (`night_langues.py`).
+- **Moteur OmniVoice** (serveur local ROCm) et **voix conçues par personnage** ; moteur `command` utilisable
+  sous Windows ; banc `qwen_bench.py`.
+- **Production** : mastering des chapitres aux exigences ACX + contrôle de conformité, extrait avant
+  rendu, reprise par segment d'un chapitre interrompu, horodatage des chapitres (.txt), lexique de
+  prononciation global et par livre, titres de navigation EPUB3 > NCX > intertitres, pages liminaires.
+- Idées du comparatif VoiceStudio (`docs/COMPARATIF-VOICESTUDIO.md`).
+- UI : refonte visuelle des orbes, pastille de langue sur les livres, contrôle ACX, lexique, voix conçue.
+- `start-tailscale.ps1` (ébauche).
+
+### Corrigé
+- Incise espagnole (séparateur = tiret) ; un segment sans rien à prononcer ne fait plus échouer le chapitre.
+
 ## [Unreleased] — audit du 2026-09-25
 
 ### Corrigé

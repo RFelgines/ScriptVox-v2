@@ -1,0 +1,579 @@
+[
+  {
+    "langue_attendue": "fr",
+    "livre": "Daudet — Lettres de mon moulin",
+    "fichier": "daudet-lettres-de-mon-moulin.epub",
+    "erreurs": [],
+    "book_id": 1,
+    "reutilise": true,
+    "analyse_etat": "ANALYZED",
+    "langue_detectee": "fr",
+    "langue_correcte": true,
+    "chapitres": 31,
+    "chapitres_inclus": 25,
+    "personnages": 39,
+    "personnages_sans_voix": 0,
+    "voix_distinctes": 8,
+    "exemples_personnages": [
+      {
+        "nom": "AVANT-PROPOS",
+        "voix": "neutral_0"
+      },
+      {
+        "nom": "Maitre Honorat Grapazi",
+        "voix": "male_2"
+      },
+      {
+        "nom": "Le sieur Gaspard Mitifio",
+        "voix": "male_0"
+      },
+      {
+        "nom": "Vivette Cornille",
+        "voix": "female_2"
+      },
+      {
+        "nom": "Alphonse Daudet",
+        "voix": "male_0"
+      },
+      {
+        "nom": "Le rémouleur",
+        "voix": "male_0"
+      }
+    ],
+    "chapitre_genere": {
+      "position": 15,
+      "titre": "L'AGONIE DE LA SEMILLANTE"
+    },
+    "generation_etat": "DONE",
+    "generation_duree_s": 25,
+    "takes": {
+      "nombre": 24,
+      "duree_totale_s": 702.8,
+      "silencieux": 0,
+      "illisibles": 0,
+      "vides_voulus": 0
+    },
+    "segments": {
+      "total": 24,
+      "dialogues": 15,
+      "sans_duree": 0,
+      "voix": [
+        "male_0",
+        "male_1",
+        "narrator"
+      ]
+    },
+    "audio": {
+      "duree_s": 711.3,
+      "hz": 24000,
+      "canaux": 1,
+      "pic": 29204,
+      "rms": 3254.6,
+      "silencieux": false,
+      "fichier": "C:\\Users\\romai\\Documents\\ScriptVox-nuit-audio\\fr-1-ch15.wav",
+      "ratio_temps_reel": 0.04
+    },
+    "duree_totale_s": 42
+  },
+  {
+    "langue_attendue": "en",
+    "livre": "Carroll — Alice in Wonderland",
+    "fichier": "carroll-alice-in-wonderland.epub",
+    "erreurs": [],
+    "book_id": 2,
+    "reutilise": true,
+    "analyse_etat": "ANALYZED",
+    "langue_detectee": "en",
+    "langue_correcte": true,
+    "chapitres": 17,
+    "chapitres_inclus": 12,
+    "personnages": 40,
+    "personnages_sans_voix": 0,
+    "voix_distinctes": 8,
+    "exemples_personnages": [
+      {
+        "nom": "Alice",
+        "voix": "female_0"
+      },
+      {
+        "nom": "White Rabbit",
+        "voix": "male_1"
+      },
+      {
+        "nom": "Lory",
+        "voix": "female_0"
+      },
+      {
+        "nom": "Mouse",
+        "voix": "female_0"
+      },
+      {
+        "nom": "Duck",
+        "voix": "female_1"
+      },
+      {
+        "nom": "Eaglet",
+        "voix": "female_0"
+      }
+    ],
+    "chapitre_genere": {
+      "position": 8,
+      "titre": "CHAPTER IV. The Rabbit Sends in a Little Bill"
+    },
+    "generation_etat": "DONE",
+    "generation_duree_s": 26,
+    "takes": {
+      "nombre": 118,
+      "duree_totale_s": 927.5,
+      "silencieux": 0,
+      "illisibles": 0,
+      "vides_voulus": 1
+    },
+    "segments": {
+      "total": 118,
+      "dialogues": 64,
+      "sans_duree": 1,
+      "voix": [
+        "female_0",
+        "male_1",
+        "narrator"
+      ]
+    },
+    "audio": {
+      "duree_s": 977.5,
+      "hz": 24000,
+      "canaux": 1,
+      "pic": 29204,
+      "rms": 3159.8,
+      "silencieux": false,
+      "fichier": "C:\\Users\\romai\\Documents\\ScriptVox-nuit-audio\\en-2-ch8.wav",
+      "ratio_temps_reel": 0.03
+    },
+    "duree_totale_s": 45
+  },
+  {
+    "langue_attendue": "es",
+    "livre": "Pardo Bazán — Cuentos de amor",
+    "fichier": "es-55514.epub",
+    "erreurs": [],
+    "book_id": 3,
+    "reutilise": true,
+    "analyse_etat": "ANALYZED",
+    "langue_detectee": "es",
+    "langue_correcte": true,
+    "chapitres": 47,
+    "chapitres_inclus": 44,
+    "personnages": 87,
+    "personnages_sans_voix": 0,
+    "voix_distinctes": 8,
+    "exemples_personnages": [
+      {
+        "nom": "Emilia Pardo Bazán",
+        "voix": "female_2"
+      },
+      {
+        "nom": "Marta",
+        "voix": "female_0"
+      },
+      {
+        "nom": "El viajero",
+        "voix": "male_0"
+      },
+      {
+        "nom": "Trifón Liliosa",
+        "voix": "male_0"
+      },
+      {
+        "nom": "Doña Leonor Cardona",
+        "voix": "female_2"
+      },
+      {
+        "nom": "Don Ramón Cardona",
+        "voix": "male_0"
+      }
+    ],
+    "chapitre_genere": {
+      "position": 17,
+      "titre": "Así y todo..."
+    },
+    "generation_etat": "DONE",
+    "generation_duree_s": 53,
+    "takes": {
+      "nombre": 8,
+      "duree_totale_s": 533.4,
+      "silencieux": 0,
+      "illisibles": 0,
+      "vides_voulus": 1
+    },
+    "segments": {
+      "total": 8,
+      "dialogues": 4,
+      "sans_duree": 1,
+      "voix": [
+        "male_0",
+        "narrator"
+      ]
+    },
+    "audio": {
+      "duree_s": 535.9,
+      "hz": 24000,
+      "canaux": 1,
+      "pic": 29204,
+      "rms": 3258.0,
+      "silencieux": false,
+      "fichier": "C:\\Users\\romai\\Documents\\ScriptVox-nuit-audio\\es-3-ch17.wav",
+      "ratio_temps_reel": 0.1
+    },
+    "duree_totale_s": 69
+  },
+  {
+    "langue_attendue": "de",
+    "livre": "Kafka — Die Verwandlung",
+    "fichier": "de-22367.epub",
+    "erreurs": [],
+    "book_id": 6,
+    "reutilise": true,
+    "analyse_etat": "ANALYZED",
+    "langue_detectee": "de",
+    "langue_correcte": true,
+    "chapitres": 6,
+    "chapitres_inclus": 3,
+    "personnages": 8,
+    "personnages_sans_voix": 0,
+    "voix_distinctes": 7,
+    "exemples_personnages": [
+      {
+        "nom": "Gregor Samsa",
+        "voix": "male_0"
+      },
+      {
+        "nom": "Mutter",
+        "voix": "female_2"
+      },
+      {
+        "nom": "Vater",
+        "voix": "male_2"
+      },
+      {
+        "nom": "Prokurist",
+        "voix": "male_1"
+      },
+      {
+        "nom": "Schwester",
+        "voix": "neutral_0"
+      },
+      {
+        "nom": "Bedienerin",
+        "voix": "female_0"
+      }
+    ],
+    "chapitre_genere": {
+      "position": 4,
+      "titre": "II."
+    },
+    "generation_etat": "DONE",
+    "generation_duree_s": 117,
+    "takes": {
+      "nombre": 40,
+      "duree_totale_s": 2431.5,
+      "silencieux": 0,
+      "illisibles": 0,
+      "vides_voulus": 0
+    },
+    "segments": {
+      "total": 40,
+      "dialogues": 20,
+      "sans_duree": 0,
+      "voix": [
+        "female_2",
+        "male_0",
+        "male_2",
+        "narrator",
+        "neutral_0"
+      ]
+    },
+    "audio": {
+      "duree_s": 2448.2,
+      "hz": 24000,
+      "canaux": 1,
+      "pic": 29204,
+      "rms": 3263.1,
+      "silencieux": false,
+      "fichier": "C:\\Users\\romai\\Documents\\ScriptVox-nuit-audio\\de-6-ch4.wav",
+      "ratio_temps_reel": 0.05
+    },
+    "duree_totale_s": 147
+  },
+  {
+    "langue_attendue": "it",
+    "livre": "Collodi — Pinocchio",
+    "fichier": "it-52484.epub",
+    "erreurs": [],
+    "book_id": 7,
+    "reutilise": false,
+    "analyse_etat": "ANALYZED",
+    "analyse_duree_s": 376,
+    "analyse_trace": [
+      {
+        "t": 2,
+        "progress": 0,
+        "stage": null,
+        "msg": null
+      },
+      {
+        "t": 9,
+        "progress": 10.0,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 16,
+        "progress": 11.389,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 23,
+        "progress": 14.167,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 30,
+        "progress": 18.333,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 37,
+        "progress": 21.111,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 44,
+        "progress": 22.5,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 51,
+        "progress": 23.889,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 58,
+        "progress": 25.278,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 73,
+        "progress": 26.667,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 80,
+        "progress": 28.056,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 87,
+        "progress": 30.833,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 94,
+        "progress": 32.222,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 108,
+        "progress": 33.611,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 115,
+        "progress": 35.0,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 122,
+        "progress": 37.778,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 129,
+        "progress": 39.167,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 136,
+        "progress": 40.556,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 143,
+        "progress": 41.944,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 150,
+        "progress": 43.333,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 164,
+        "progress": 46.111,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 185,
+        "progress": 47.5,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 192,
+        "progress": 48.889,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 214,
+        "progress": 50.278,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 242,
+        "progress": 51.667,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 249,
+        "progress": 53.056,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 270,
+        "progress": 54.444,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 291,
+        "progress": 55.833,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 319,
+        "progress": 57.222,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 333,
+        "progress": 58.611,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 369,
+        "progress": 60.0,
+        "stage": "analysis",
+        "msg": null
+      },
+      {
+        "t": 376,
+        "progress": 100.0,
+        "stage": null,
+        "msg": null
+      }
+    ],
+    "langue_detectee": "it",
+    "langue_correcte": true,
+    "chapitres": 39,
+    "chapitres_inclus": 36,
+    "personnages": 37,
+    "personnages_sans_voix": 0,
+    "voix_distinctes": 8,
+    "exemples_personnages": [
+      {
+        "nom": "maestro Ciliegia",
+        "voix": "male_2"
+      },
+      {
+        "nom": "piccoli lettori",
+        "voix": "neutral_0"
+      },
+      {
+        "nom": "Geppetto",
+        "voix": "female_1"
+      },
+      {
+        "nom": "mastro Antonio",
+        "voix": "male_0"
+      },
+      {
+        "nom": "Pinocchio",
+        "voix": "male_1"
+      },
+      {
+        "nom": "Grillo-parlante",
+        "voix": "neutral_0"
+      }
+    ],
+    "chapitre_genere": {
+      "position": 14,
+      "titre": "XIII. L'osteria del «Gambero Rosso.»"
+    },
+    "generation_etat": "DONE",
+    "generation_duree_s": 25,
+    "takes": {
+      "nombre": 42,
+      "duree_totale_s": 346.5,
+      "silencieux": 0,
+      "illisibles": 0,
+      "vides_voulus": 0
+    },
+    "segments": {
+      "total": 42,
+      "dialogues": 30,
+      "sans_duree": 0,
+      "voix": [
+        "male_1",
+        "male_2",
+        "narrator",
+        "neutral_0"
+      ]
+    },
+    "audio": {
+      "duree_s": 360.2,
+      "hz": 24000,
+      "canaux": 1,
+      "pic": 29204,
+      "rms": 3210.6,
+      "silencieux": false,
+      "fichier": "C:\\Users\\romai\\Documents\\ScriptVox-nuit-audio\\it-7-ch14.wav",
+      "ratio_temps_reel": 0.07
+    },
+    "duree_totale_s": 414
+  }
+]

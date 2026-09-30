@@ -5,6 +5,15 @@ dans [docs/journal/2026.md](docs/journal/2026.md) ; ce qui est livré est dans [
 
 ## Maintenant
 
+- **Écouter les sorties de la branche `feat/audiobook-production`** (jamais validées à l'oreille) : moteur
+  OmniVoice (serveur ROCm local) et voix conçues par personnage, mastering ACX + contrôle de conformité,
+  extrait avant rendu, reprise par segment, lexique de prononciation. Échantillons multilingues
+  (EdgeTTS) du 2026-09-28 : `C:\Users\romai\Documents\ScriptVox-nuit-audio\` (rapport :
+  `SCRIPTVOX-NIGHT-REPORT.md`). Consigner le verdict ici.
+- **Décider de la fusion** de `feat/audiobook-production` dans `main` (11 commits d'avance) ; `main`
+  porte 6 commits de langues (es / de / it) poussés le 2026-09-30.
+- **Accès Tailscale** : `start-tailscale.ps1` (API sur `0.0.0.0`) est une ébauche non finie ; il reste
+  `ALLOWED_HOSTS`, `FRONTEND_ORIGINS`, l'URL d'API du frontend (recompilation) et le pare-feu Windows.
 - **Valider à l'oreille les moteurs TTS** sur du français avec `python scripts/bench_tts.py` :
   Qwen3-TTS (référence actuelle), Chatterbox Multilingual (esquisse `plugins/tts/_example_chatterbox.py`),
   Fish Audio S2 Pro, Higgs Audio v3. Consigner le verdict ici.
@@ -46,6 +55,6 @@ dans [docs/journal/2026.md](docs/journal/2026.md) ; ce qui est livré est dans [
 
 ## Conventions
 
-- Numéros de suites : le prochain est `check_phase49.py`. Réserver le numéro ici avant de créer une suite
+- Numéros de suites : le prochain est `check_phase52.py`. Réserver le numéro ici avant de créer une suite
   (une branche a déjà produit un `check_phase39.py` différent de celui de `main`).
 - Toute variable d'environnement nouvelle est documentée dans `.env.example`.
