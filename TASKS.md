@@ -17,6 +17,14 @@ dans [docs/journal/2026.md](docs/journal/2026.md) ; ce qui est livré est dans [
 - **Valider à l'oreille les moteurs TTS** sur du français avec `python scripts/bench_tts.py` :
   Qwen3-TTS (référence actuelle), Chatterbox Multilingual (esquisse `plugins/tts/_example_chatterbox.py`),
   Fish Audio S2 Pro, Higgs Audio v3. Consigner le verdict ici.
+- **Bilan LLM du 2026-09-30** (`scripts/bench_llm_compare.py`, Harry Potter T1, 6 chapitres, 640 répliques,
+  RX 9070 XT, Ollama 0.17.1) : 1.7b et 4b inutilisables pour l'attribution (24 à 70 % de répliques sans
+  locuteur ; 19 à 42 % de bonnes réponses sur les 111 répliques dont l'incise nomme le locuteur, contre 91 %
+  pour 8b et 14b). Temps : 1.7b 155-307 s (deux passages identiques, x2 d'écart), 4b 240 s, 8b 597 s,
+  14b 627 s. `OLLAMA_NUM_PARALLEL=4` : débit total divisé par 4 (103 -> 24 tok/s) ; 2 à 3 instances Ollama
+  séparées du 1.7b : x1,1 à x1,4 seulement. 14b-Q6 non mesuré (22 % sur CPU avec 20 k de contexte).
+  Reste à faire : une vérité terrain étiquetée à la main sur les répliques sans incise (8b et 14b ne
+  s'accordent qu'à 55 % dessus, on ne sait pas lequel a raison) ; passages répétés pour la variabilité.
 - **Comparer des LLM** sur ses propres livres avec `python scripts/bench_llm.py` (taux d'attribution,
   temps, VRAM) : `qwen3:1.7b` (référence 79 % / ~9 min sur un Harry Potter complet), un Qwen 3.x plus
   gros quantifié, `gemini-3.1-flash-lite`.
